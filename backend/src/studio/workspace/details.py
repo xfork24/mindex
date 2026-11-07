@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import copy
 
-from mindex.shared.storage import Store
-from mindex.studio import studio
-from mindex.studio.material_digest import scope_parameters
-from mindex.studio.platforms import snapshot_publish
+from shared.storage import Store
+from studio import studio
+from studio.material_digest import scope_parameters
+from studio.platforms import snapshot_publish
 
 from . import signatures
 from .handlers.script import profile_changed, template_changed
@@ -19,8 +19,10 @@ from .versions import ordered_shots, plan, revision
 def compact_version(item):
     """Keep editor/preview fields; diagnostics remain available on the version API."""
     data = item.get("data", {})
+
     def candidate(value):
         return {k: v for k, v in value.items() if k not in {"annotation", "matches", "channel_metadata"}}
+
     if item["stage"] == "compose":
         data = {k: v for k, v in data.items() if k != "graph"}
     elif item["stage"] == "recall":
@@ -57,23 +59,33 @@ def retrieval_dependencies(config, w, p, *, context):
 
     def release(release_id):
         if release_id not in releases:
-            releases[release_id] = store.one(
-                "SELECT content_id, person_id FROM search_releases WHERE id=?", (release_id,)
-            ) if release_id else None
+            releases[release_id] = (
+                store.one("SELECT content_id, person_id FROM search_releases WHERE id=?", (release_id,))
+                if release_id
+                else None
+            )
         return releases[release_id]
 
     def describe(content_id, release_id):
         row = release(release_id)
-        return {"content_id": content_id, "release_id": release_id,
-                "person_id": row["person_id"] if row else None, "known": bool(row)}
+        return {
+            "content_id": content_id,
+            "release_id": release_id,
+            "person_id": row["person_id"] if row else None,
+            "known": bool(row),
+        }
 
     current = signatures.settings(config, p, "recall", context=context)
     active = describe(current["index_id"], current["person_release"]) if current["index_id"] else None
 
     def summarize(groups):
         result = [
-            {**describe(content_id, release_id), "shots": len(shots),
-             "current": bool(active) and (content_id, release_id) == (active["content_id"], active["release_id"])}
+            {
+                **describe(content_id, release_id),
+                "shots": len(shots),
+                "current": bool(active)
+                and (content_id, release_id) == (active["content_id"], active["release_id"]),
+            }
             for (content_id, release_id), shots in groups.items()
         ]
         result.sort(key=lambda item: (not item["current"], -item["shots"]))
@@ -91,7 +103,8 @@ def retrieval_dependencies(config, w, p, *, context):
         "used": summarize(selected),
         "compose": {
             vid: summarize(recall_closure(w, vid))
-            for vid, item in w["versions"].items() if item["stage"] == "compose"
+            for vid, item in w["versions"].items()
+            if item["stage"] == "compose"
         },
     }
 
@@ -126,23 +139,24 @@ def detail(config, job_id, w, *, store=None, compact=False):
                     results.append(candidate)
                     continue
                 if references is None:
-                    from mindex.persons.person_processing import EvidenceReferences
+                    from persons.person_processing import EvidenceReferences
+
                     references = EvidenceReferences(config, store or Store.open(config))
-                results.append({
-                    **candidate,
-                    "person_evidence": [
-                        {**evidence, "reference_url": references.url(evidence)}
-                        for evidence in evidence_list
-                    ],
-                })
+                results.append(
+                    {
+                        **candidate,
+                        "person_evidence": [
+                            {**evidence, "reference_url": references.url(evidence)}
+                            for evidence in evidence_list
+                        ],
+                    }
+                )
             copy_item = {**copy_item, "data": {**item["data"], "results": results}}
         return copy_item
 
-    versions = {
-        k: display_version(compact_version(v) if compact else v)
-        for k, v in w["versions"].items()
-    }
+    versions = {k: display_version(compact_version(v) if compact else v) for k, v in w["versions"].items()}
     result = {**w, "versions": versions}
+
     # Materialize legacy rules only in the response; revision and historical stage signatures stay unchanged.
     def display_plan(item):
         options = copy.deepcopy(item["options"])
@@ -152,6 +166,7 @@ def detail(config, job_id, w, *, store=None, compact=False):
         if delivery and delivery["config"].get("publish"):
             delivery["config"]["publish"] = snapshot_publish(delivery["config"]["publish"], legacy=True)
         return {**item, "options": options}
+
     result["plans"] = {key: display_plan(item) for key, item in w["plans"].items()}
     result["job"] = studio.load_job(config, job_id)
     result["material_scope"] = studio.scope_status(result["job"], context.database(config))
@@ -164,8 +179,10 @@ def detail(config, job_id, w, *, store=None, compact=False):
     result["script_profile_changed"] = profile_changed(w, p)
     script = w["versions"].get(p.get("script")) or {}
     current_scope = scope_parameters(config, job_id, context.database(config)).get("material_scope")
-    result["script_material_scope_changed"] = (script.get("data", {}).get("origin") == "generated"
-        and script.get("parameters", {}).get("material_scope") != current_scope)
+    result["script_material_scope_changed"] = (
+        script.get("data", {}).get("origin") == "generated"
+        and script.get("parameters", {}).get("material_scope") != current_scope
+    )
     result["tts_settings"] = {
         "backend": config.studio.tts.backend,
         "model": config.studio.tts.model,
@@ -180,7 +197,7 @@ def detail(config, job_id, w, *, store=None, compact=False):
     # 参考文稿总字数上限与各画幅分辨率：创作页展示用。
     result["reference_limit"] = config.studio.max_reference_chars
     result["canvases"] = {name: list(config.studio.render.size(name)) for name in ("16:9", "9:16", "1:1")}
-    from mindex.studio.studio_window import anchor_conflict
+    from studio.window import anchor_conflict
 
     # 每个分镜按画面来源实际包含的逐镜阶段（素材召回 = 全部四个；上传片段没有召回；图片只有配音与渲染）。
     result["shot_stages"] = {sid: list(plan_shot_stages(w, p, sid)) for sid in ordered_shots(w, p)}
@@ -189,12 +206,22 @@ def detail(config, job_id, w, *, store=None, compact=False):
 
     result["shot_music"] = shot_music(w, p)
     result["generators"] = {
-        "video": {"backend": config.studio.video_generator.backend, "enabled": config.studio.video_generator.enabled},
-        "image": {"backend": config.studio.image_generator.backend, "enabled": config.studio.image_generator.enabled},
-        "music": {"backend": config.studio.music_generator.backend, "enabled": config.studio.music_generator.enabled},
+        "video": {
+            "backend": config.studio.video_generator.backend,
+            "enabled": config.studio.video_generator.enabled,
+        },
+        "image": {
+            "backend": config.studio.image_generator.backend,
+            "enabled": config.studio.image_generator.enabled,
+        },
+        "music": {
+            "backend": config.studio.music_generator.backend,
+            "enabled": config.studio.music_generator.enabled,
+        },
     }
-    result["anchor_conflicts"] = {sid: error for sid in ordered_shots(w, p)
-                                  if (error := anchor_conflict(w, p, sid))}
+    result["anchor_conflicts"] = {
+        sid: error for sid in ordered_shots(w, p) if (error := anchor_conflict(w, p, sid))
+    }
     # Conflict detection reconstructs each shot's select-stage signature, which probes
     # the underlying shot media. On a cold probe cache this is the dominant cost of a
     # job's first open, so warm every referenced interval concurrently up front. The
@@ -216,6 +243,13 @@ def detail(config, job_id, w, *, store=None, compact=False):
             vid = p["shots"][sid].get(stage)
             if vid:
                 result["conflicts"][f"{stage}:{sid}"] = signatures.conflicts(
-                    config, job_id, w, p, stage, sid, vid, context=context,
+                    config,
+                    job_id,
+                    w,
+                    p,
+                    stage,
+                    sid,
+                    vid,
+                    context=context,
                 )
     return result

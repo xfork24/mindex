@@ -2,6 +2,7 @@
 
 专用连接保证异常/断连时锁被服务器释放，不把 session 锁遗留在连接池中。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -20,14 +21,13 @@ class MaintenanceBusy(RuntimeError):
 def _keys(library_id):
     # PG advisory 锁本身按 database 隔离；迁移更换 library.id 时仍必须持同一门闩。
     digest = hashlib.sha256(b"maintenance:mindex").digest()
-    return (int.from_bytes(digest[:4], "big", signed=True),
-            int.from_bytes(digest[4:8], "big", signed=True))
+    return (int.from_bytes(digest[:4], "big", signed=True), int.from_bytes(digest[4:8], "big", signed=True))
 
 
 def guard_write(connection, library_id, scope):
     if _ACTIVE.get() == scope:
         return
-    from mindex.shared.migration_state import guard
+    from shared.migration_state import guard
 
     guard(connection, scope)
     row = connection.execute("SELECT pg_try_advisory_xact_lock_shared(%s,%s)", _keys(library_id)).fetchone()
@@ -45,12 +45,13 @@ def maintenance_gate(store, *, name, wait=0):
     import psycopg
     from filelock import Timeout
 
-    from mindex.shared import lock_backend
+    from shared import lock_backend
 
     try:
         # 排空长任务与发布；同线程内后续维护事务豁免共享门闩。
-        with lock_backend.acquire_ordered(store, ["pipeline", "index-write", "library", "studio", "topics"],
-                                          exclusive=True, timeout=wait):
+        with lock_backend.acquire_ordered(
+            store, ["pipeline", "index-write", "library", "studio", "topics"], exclusive=True, timeout=wait
+        ):
             with psycopg.connect(store.backend.dsn, autocommit=True) as db:
                 got = db.execute("SELECT pg_try_advisory_lock(%s,%s)", _keys(store.library_id)).fetchone()[0]
                 if not got:

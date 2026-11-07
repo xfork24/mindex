@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from mindex.models.adapters import make_speaker
-from mindex.shared.media import audio_info
-from mindex.studio import studio
-from mindex.studio.studio_artifacts import sanitized
-
-from ..plans import effective_voice
-from ..stages import StageHandler, register, shot_content
-from ..versions import file_info, version
+from models.adapters import make_speaker
+from shared.media import audio_info
+from studio import studio
+from studio.artifacts import sanitized
+from studio.workspace.plans import effective_voice
+from studio.workspace.stages import StageHandler, register, shot_content
+from studio.workspace.versions import file_info, version
 
 
 class TtsHandler(StageHandler):

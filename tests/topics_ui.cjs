@@ -9,17 +9,29 @@ const scenarios = [];
 const scenario = (name, run) => scenarios.push({ name, run });
 
 async function createProfile(page, { name, domain, taboos = [] }) {
-  await page.waitForFunction(() => !document.querySelector("#topics-empty").hidden
-    || !document.querySelector("#topics-workspace").hidden);
+  await page.waitForFunction(
+    () =>
+      !document.querySelector("#topics-empty").hidden ||
+      !document.querySelector("#topics-workspace").hidden,
+  );
   // 初次加载完成后入口可能从顶部按钮切换到空态按钮；点击时重新匹配可见入口。
   await page.locator("#profile-new:visible, #profile-new-empty:visible").first().click();
-  assert.equal(await page.locator("#pf-language,#pf-region").count(), 0, "领域档案不提供语言地区限制");
+  assert.equal(
+    await page.locator("#pf-language,#pf-region").count(),
+    0,
+    "领域档案不提供语言地区限制",
+  );
   await page.fill("#pf-name", name);
   await page.fill("#pf-domain", domain);
   if (taboos.length) await page.fill("#pf-taboos", taboos.join("\n"));
   await page.click("#pf-save");
-  await page.waitForFunction((n) => [...document.querySelectorAll("#profile-select option")]
-    .some((o) => o.selected && o.textContent.startsWith(n)), name);
+  await page.waitForFunction(
+    (n) =>
+      [...document.querySelectorAll("#profile-select option")].some(
+        (o) => o.selected && o.textContent.startsWith(n),
+      ),
+    name,
+  );
 }
 
 scenario("material_scope", async (page) => {
@@ -27,58 +39,103 @@ scenario("material_scope", async (page) => {
   await createProfile(page, { name: "范围测试", domain: "科技" });
   const groupSelect = page.locator("#topic-material-scope .group-picker select");
   const sources = page.locator("#topic-material-sources");
-  await page.waitForFunction(() => document.querySelector("#topic-material-sources").options.length === 2);
+  await page.waitForFunction(
+    () => document.querySelector("#topic-material-sources").options.length === 2,
+  );
   const response = await page.request.get(`${base}/api/admin/groups?type=source`);
   const groups = (await response.json()).items;
   const chosen = groups.find((g) => g.name === "选题素材组").id;
   const empty = groups.find((g) => g.name === "空素材组").id;
   await groupSelect.selectOption(chosen);
-  await page.waitForFunction(() => document.querySelector("#topic-material-sources").options.length === 1);
-  assert.deepEqual(await sources.evaluate((node) => [...node.options].map((o) => o.value)), ["material-a"]);
+  await page.waitForFunction(
+    () => document.querySelector("#topic-material-sources").options.length === 1,
+  );
+  assert.deepEqual(await sources.evaluate((node) => [...node.options].map((o) => o.value)), [
+    "material-a",
+  ]);
   await page.click("#topic-material-save");
-  await page.waitForFunction(() => document.querySelector("#notice").textContent.includes("素材范围已保存"));
-  await page.locator("#topic-material-current-members summary").filter({hasText: "1"}).waitFor();
+  await page.waitForFunction(() =>
+    document.querySelector("#notice").textContent.includes("素材范围已保存"),
+  );
+  await page.locator("#topic-material-current-members summary").filter({ hasText: "1" }).waitFor();
   assert.match(await page.locator("#topic-material-current").textContent(), /选题素材组/);
   await page.locator("#topic-material-current-members summary").click();
-  assert.deepEqual(await page.locator("#topic-material-current li").allTextContents(), ["material-a"]);
+  assert.deepEqual(await page.locator("#topic-material-current li").allTextContents(), [
+    "material-a",
+  ]);
   await page.reload();
-  await page.waitForFunction((id) => document.querySelector("#topic-material-scope .group-picker select")?.selectedOptions[0]?.value === id, chosen);
+  await page.waitForFunction(
+    (id) =>
+      document.querySelector("#topic-material-scope .group-picker select")?.selectedOptions[0]
+        ?.value === id,
+    chosen,
+  );
   // 恢复流程先选中组、再异步 resolve 回填素材列表；等列表就绪后再断言，避免竞态。
-  await page.waitForFunction(() => document.querySelectorAll("#topic-material-sources option").length === 1);
-  assert.deepEqual(await sources.evaluate((node) => [...node.options].map((o) => o.value)), ["material-a"]);
-  await page.locator("#topic-material-current-members summary").filter({hasText: "1"}).waitFor();
+  await page.waitForFunction(
+    () => document.querySelectorAll("#topic-material-sources option").length === 1,
+  );
+  assert.deepEqual(await sources.evaluate((node) => [...node.options].map((o) => o.value)), [
+    "material-a",
+  ]);
+  await page.locator("#topic-material-current-members summary").filter({ hasText: "1" }).waitFor();
   assert.match(await page.locator("#topic-material-current").textContent(), /选题素材组/);
   await groupSelect.selectOption(empty);
-  await page.waitForFunction(() => document.querySelector("#topic-material-sources").disabled && document.querySelector("#topic-material-sources").options.length === 0);
+  await page.waitForFunction(
+    () =>
+      document.querySelector("#topic-material-sources").disabled &&
+      document.querySelector("#topic-material-sources").options.length === 0,
+  );
   assert.equal(await sources.locator("option").count(), 0);
   await page.click("#topic-material-save");
-  await page.waitForFunction(() => document.querySelector("#notice").textContent.includes("素材范围已保存"));
-  await page.locator("#topic-material-current-members summary").filter({hasText: "0"}).waitFor();
+  await page.waitForFunction(() =>
+    document.querySelector("#notice").textContent.includes("素材范围已保存"),
+  );
+  await page.locator("#topic-material-current-members summary").filter({ hasText: "0" }).waitFor();
   assert.match(await page.locator("#topic-material-current").textContent(), /空素材组/);
   // 已保存范围与筛选控件同一行，并靠行尾对齐。
   const scopeRow = await page.evaluate(() => {
     const scope = document.querySelector("#topic-material-scope").getBoundingClientRect();
     const current = document.querySelector("#topic-material-current").getBoundingClientRect();
     const reset = document.querySelector("#topic-material-reset").getBoundingClientRect();
-    return { sameRow: Math.abs(current.bottom - reset.bottom) < 2, atEnd: Math.abs(scope.right - current.right) < 2 && current.left > reset.right };
+    return {
+      sameRow: Math.abs(current.bottom - reset.bottom) < 2,
+      atEnd: Math.abs(scope.right - current.right) < 2 && current.left > reset.right,
+    };
   });
   assert(scopeRow.sameRow, "已保存的素材范围应与筛选控件在同一行");
   assert(scopeRow.atEnd, "已保存的素材范围应位于行尾");
   for (const width of [1280, 390, 320]) {
-    await page.setViewportSize({width, height: 900});
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
-    assert.doesNotMatch(await page.locator("#topic-material-scope").textContent(), /[\uE000\uE001]/);
+    await page.setViewportSize({ width, height: 900 });
+    assert.equal(
+      await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
+      false,
+    );
+    assert.doesNotMatch(
+      await page.locator("#topic-material-scope").textContent(),
+      /[\uE000\uE001]/,
+    );
   }
   await page.click("[data-language-toggle]");
   assert.match(await page.textContent("#topic-material-save"), /Save material scope/);
-  assert.match(await page.locator("#topic-material-current h3").textContent(), /Currently saved material scope/);
+  assert.match(
+    await page.locator("#topic-material-current h3").textContent(),
+    /Currently saved material scope/,
+  );
 });
 
 scenario("profiles", async (page) => {
   await page.goto(`${base}/studio/topics`);
   // 标签顺序：创作任务 → 选题挖掘 → 文案模板 → 风格模板 → 交付模板，当前页高亮
-  const tabs = await page.$$eval(".studio-tabs a", (links) => links.map((a) => [a.getAttribute("href"), a.getAttribute("aria-current")]));
-  assert.deepEqual(tabs, [["/", null], ["/studio/topics", "page"], ["/studio/templates", null], ["/studio/brands", null], ["/studio/delivery-templates", null]]);
+  const tabs = await page.$$eval(".studio-tabs a", (links) =>
+    links.map((a) => [a.getAttribute("href"), a.getAttribute("aria-current")]),
+  );
+  assert.deepEqual(tabs, [
+    ["/", null],
+    ["/studio/topics", "page"],
+    ["/studio/templates", null],
+    ["/studio/brands", null],
+    ["/studio/delivery-templates", null],
+  ]);
   await page.locator("#topics-empty").waitFor();
   assert.equal(await page.isVisible("#topics-bar"), false);
   await createProfile(page, { name: "财经号", domain: "金融", taboos: ["不荐股", "不预测涨跌"] });
@@ -87,7 +144,10 @@ scenario("profiles", async (page) => {
   // 编辑：权重和不为 1 时拒绝，改正后保存；定时摘要更新
   await page.click("#profile-edit");
   assert.equal(await page.inputValue("#pf-coverage-min_similarity"), "");
-  assert.equal(await page.locator("#pf-coverage-min_similarity").getAttribute("placeholder"), "0.3");
+  assert.equal(
+    await page.locator("#pf-coverage-min_similarity").getAttribute("placeholder"),
+    "0.3",
+  );
   await page.fill("#pf-coverage-min_similarity", "0.55");
   await page.fill("#pf-coverage-limit", "5");
   await page.fill("#pf-coverage-min_duration", "1.5");
@@ -100,14 +160,16 @@ scenario("profiles", async (page) => {
   await page.check("#pf-s-enabled");
   await page.fill("#pf-s-time", "07:30");
   await page.click("#pf-save");
-  await page.waitForFunction(() => /07:30/.test(document.querySelector("#profile-summary").textContent));
+  await page.waitForFunction(() =>
+    /07:30/.test(document.querySelector("#profile-summary").textContent),
+  );
   await page.click("#profile-edit");
   assert.equal(await page.inputValue("#pf-coverage-min_similarity"), "0.55");
   assert.equal(await page.inputValue("#pf-coverage-limit"), "5");
   assert.equal(await page.inputValue("#pf-coverage-min_duration"), "1.5");
   await page.click("#profile-close");
-  await page.locator("#schedule-status", { hasText: "没有运行定时调度" }).waitFor();  // 测试服务不启动调度器
-  assert.doesNotMatch(await page.textContent("#schedule-status"), /后台运行中/);  // Web 端没有 MindexDesktop
+  await page.locator("#schedule-status", { hasText: "没有运行定时调度" }).waitFor(); // 测试服务不启动调度器
+  assert.doesNotMatch(await page.textContent("#schedule-status"), /后台运行中/); // Web 端没有 MindexDesktop
   // 第二份档案，切换后刷新页面仍保持选择（localStorage 与地址栏）
   await createProfile(page, { name: "历史号", domain: "历史" });
   const options = await page.$$eval("#profile-select option", (o) => o.map((x) => x.textContent));
@@ -115,23 +177,35 @@ scenario("profiles", async (page) => {
   await page.selectOption("#profile-select", { label: "财经号 · 金融" });
   assert.match(page.url(), /profile=tp_/);
   await page.goto(`${base}/studio/topics`);
-  await page.waitForFunction(() => document.querySelector("#profile-select").selectedOptions[0]?.textContent === "财经号 · 金融");
+  await page.waitForFunction(
+    () =>
+      document.querySelector("#profile-select").selectedOptions[0]?.textContent === "财经号 · 金融",
+  );
   // 语言切换：静态文案切到英文，档案名（用户内容）不变
   await page.click("[data-language-toggle]");
-  assert.equal(await page.textContent("#studio-topics-tab, .studio-tab[aria-current=page]"), "Topic discovery");
-  assert.equal(await page.$eval("#profile-select", (s) => s.selectedOptions[0].textContent), "财经号 · 金融");
+  assert.equal(
+    await page.textContent("#studio-topics-tab, .studio-tab[aria-current=page]"),
+    "Topic discovery",
+  );
+  assert.equal(
+    await page.$eval("#profile-select", (s) => s.selectedOptions[0].textContent),
+    "财经号 · 金融",
+  );
   await page.click("[data-language-toggle]");
   // 删除当前档案后切到剩下的一份
   page.once("dialog", (dialog) => dialog.accept());
   await page.click("#profile-delete");
   await page.waitForFunction(() => document.querySelector("#profile-select").options.length === 1);
-  assert.equal(await page.$eval("#profile-select", (s) => s.selectedOptions[0].textContent), "历史号 · 历史");
+  assert.equal(
+    await page.$eval("#profile-select", (s) => s.selectedOptions[0].textContent),
+    "历史号 · 历史",
+  );
 });
 
 scenario("sources", async (page) => {
   await page.goto(`${base}/studio/topics`);
   await createProfile(page, { name: "财经号", domain: "金融" });
-  await page.locator("#sources-section[open]").waitFor();  // 新档案没有数据源时默认展开
+  await page.locator("#sources-section[open]").waitFor(); // 新档案没有数据源时默认展开
   assert.match(await page.textContent("#source-list"), /还没有数据源/);
   const kinds = await page.$$eval("#sf-kind option", (o) => o.map((x) => x.value));
   assert.equal(kinds[0], "rss");
@@ -154,7 +228,10 @@ scenario("sources", async (page) => {
   await page.locator(".source-row", { hasText: "本地素材库" }).waitFor();
   assert.match(await page.textContent("#sources-summary"), /3 个，3 个启用/);
   // 试抓：显示前几条，不入库
-  await page.locator(".source-row", { hasText: "财经要闻" }).getByRole("button", { name: "试抓" }).click();
+  await page
+    .locator(".source-row", { hasText: "财经要闻" })
+    .getByRole("button", { name: "试抓" })
+    .click();
   await page.locator("#source-test", { hasText: "试抓成功，共 2 条" }).waitFor();
   assert.match(await page.textContent("#source-test"), /央行宣布降息/);
   // 立即抓取：失败来源只记错误
@@ -196,10 +273,18 @@ scenario("sources", async (page) => {
   await page.click("#sf-cancel");
   page.once("dialog", (dialog) => dialog.accept());
   await brave.getByRole("button", { name: "删除" }).click();
-  await page.waitForFunction(() => ![...document.querySelectorAll(".source-row")].some((r) => r.textContent.includes("Brave")));
+  await page.waitForFunction(
+    () =>
+      ![...document.querySelectorAll(".source-row")].some((r) => r.textContent.includes("Brave")),
+  );
   page.once("dialog", (dialog) => dialog.accept());
   await hot.getByRole("button", { name: "删除" }).click();
-  await page.waitForFunction(() => ![...document.querySelectorAll(".source-row")].some((r) => r.textContent.includes("今日热榜")));
+  await page.waitForFunction(
+    () =>
+      ![...document.querySelectorAll(".source-row")].some((r) =>
+        r.textContent.includes("今日热榜"),
+      ),
+  );
   // 日历：导入内置样例后显示事件数
   assert.equal(await page.isVisible("#calendar-import"), false);
   await page.selectOption("#sf-kind", "calendar");
@@ -209,7 +294,9 @@ scenario("sources", async (page) => {
   await cal.waitFor();
   assert.match(await cal.textContent(), /已导入 0 个事件/);
   await page.locator("#calendar-import:not([hidden])").waitFor();
-  await page.waitForFunction(() => document.querySelectorAll("#calendar-sample option").length === 4);
+  await page.waitForFunction(
+    () => document.querySelectorAll("#calendar-sample option").length === 4,
+  );
   await page.click("#calendar-run");
   assert.match(await page.textContent("#calendar-status"), /请选择文件或样例/);
   await page.selectOption("#calendar-sample", "history");
@@ -217,20 +304,32 @@ scenario("sources", async (page) => {
   await page.locator("#calendar-status", { hasText: "已导入 12 个事件" }).waitFor();
   await page.locator(".source-row", { hasText: "已导入 12 个事件" }).waitFor();
   page.once("dialog", (dialog) => dialog.accept());
-  await page.locator(".source-row", { hasText: "纪念日" }).getByRole("button", { name: "删除" }).click();
+  await page
+    .locator(".source-row", { hasText: "纪念日" })
+    .getByRole("button", { name: "删除" })
+    .click();
   await page.locator("#calendar-import[hidden]").waitFor({ state: "attached" });
   await page.selectOption("#sf-kind", "rss");
   // 编辑、停用、删除
-  await page.locator(".source-row", { hasText: "坏地址" }).getByRole("button", { name: "编辑" }).click();
+  await page
+    .locator(".source-row", { hasText: "坏地址" })
+    .getByRole("button", { name: "编辑" })
+    .click();
   assert.ok(await page.isDisabled("#sf-kind"));
   assert.equal(await page.inputValue("#sf-field-url"), "https://down.example.com/");
   await page.fill("#sf-name", "备用地址");
   await page.click("#sf-save");
   await page.locator(".source-row", { hasText: "备用地址" }).waitFor();
-  await page.locator(".source-row", { hasText: "备用地址" }).getByRole("button", { name: "停用" }).click();
+  await page
+    .locator(".source-row", { hasText: "备用地址" })
+    .getByRole("button", { name: "停用" })
+    .click();
   await page.locator(".source-row.is-disabled", { hasText: "备用地址" }).waitFor();
   page.once("dialog", (dialog) => dialog.accept());
-  await page.locator(".source-row", { hasText: "备用地址" }).getByRole("button", { name: "删除" }).click();
+  await page
+    .locator(".source-row", { hasText: "备用地址" })
+    .getByRole("button", { name: "删除" })
+    .click();
   await page.waitForFunction(() => document.querySelectorAll(".source-row").length === 2);
 });
 
@@ -245,9 +344,16 @@ scenario("cards", async (page) => {
   await page.click("#run-start");
   await page.locator("#run-status", { hasText: "最近一次挖掘" }).waitFor({ timeout: 60000 });
   assert.match(await page.textContent("#run-status"), /产出 2 个选题，2 个已写大纲/);
-  await page.waitForFunction(() => document.querySelectorAll("#card-list .topic-item").length === 2);
-  const scores = await page.$$eval("#card-list .topic-score-badge", (nodes) => nodes.map((n) => Number(n.textContent)));
-  assert.deepEqual(scores, [...scores].sort((a, b) => b - a));
+  await page.waitForFunction(
+    () => document.querySelectorAll("#card-list .topic-item").length === 2,
+  );
+  const scores = await page.$$eval("#card-list .topic-score-badge", (nodes) =>
+    nodes.map((n) => Number(n.textContent)),
+  );
+  assert.deepEqual(
+    scores,
+    [...scores].sort((a, b) => b - a),
+  );
   await page.locator("#card-list .topic-item").first().click();
   await page.locator("#card-view:not([hidden])").waitFor();
   assert.match(page.url(), /card=tc_/);
@@ -260,7 +366,11 @@ scenario("cards", async (page) => {
   // 素材覆盖是折叠的分区，缩略图用 loading=lazy：先展开（等价用户查看覆盖详情），
   // 否则折叠状态下浏览器不会请求图片，naturalWidth 永远为 0。
   await page.locator("#card-coverage > summary").click();
-  await page.waitForFunction(() => [...document.querySelectorAll(".coverage-clip img")].every((img) => img.complete && img.naturalWidth > 0));
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll(".coverage-clip img")].every(
+      (img) => img.complete && img.naturalWidth > 0,
+    ),
+  );
   assert.match(await page.inputValue("#card-outline"), /^开场：/);
   assert.equal(await page.inputValue("#card-template"), "hot");
   // 素材采集清单：两张卡片都缺的画面合并计数；导出 CSV；标记已采集
@@ -290,18 +400,24 @@ scenario("cards", async (page) => {
   // 重新生成大纲（确认覆盖）、重新打分
   page.once("dialog", (dialog) => dialog.accept());
   await page.click("#card-outline-run");
-  await page.waitForFunction(() => document.querySelector("#card-outline").value.startsWith("开场：选题"));
+  await page.waitForFunction(() =>
+    document.querySelector("#card-outline").value.startsWith("开场：选题"),
+  );
   await page.click("#card-score");
   await page.locator("#notice", { hasText: "已重新打分" }).waitFor();
   // 忽略后从新选题列表消失，在已忽略里能恢复
   const title = await page.textContent("#card-title");
   await page.click("#card-dismiss");
-  await page.waitForFunction(() => document.querySelectorAll("#card-list .topic-item").length === 1);
+  await page.waitForFunction(
+    () => document.querySelectorAll("#card-list .topic-item").length === 1,
+  );
   await page.selectOption("#card-status", "dismissed");
   await page.locator("#card-list .topic-item", { hasText: title }).click();
   assert.equal(await page.textContent("#card-dismiss"), "恢复");
   await page.click("#card-dismiss");
-  await page.waitForFunction(() => document.querySelectorAll("#card-list .topic-item").length === 0);
+  await page.waitForFunction(
+    () => document.querySelectorAll("#card-list .topic-item").length === 0,
+  );
   // 再挖一次没有新条目：失败原因显示在任务条上
   await page.check("#run-skip-fetch");
   await page.click("#run-start");
@@ -346,7 +462,9 @@ scenario("job", async (page) => {
   await page.locator("#job-topic", { hasText: "档案已更新" }).waitFor();
   await page.locator("#job-topic").getByRole("button", { name: "同步" }).click();
   await page.locator("#notice", { hasText: "已同步账号档案" }).waitFor();
-  await page.waitForFunction(() => !/档案已更新/.test(document.querySelector("#job-topic").textContent));
+  await page.waitForFunction(
+    () => !/档案已更新/.test(document.querySelector("#job-topic").textContent),
+  );
 });
 
 (async () => {
@@ -361,7 +479,9 @@ scenario("job", async (page) => {
       try {
         await item.run(page);
       } catch (error) {
-        await page.screenshot({ path: `/tmp/mindex-topics-${item.name}.png`, fullPage: true }).catch(() => {});
+        await page
+          .screenshot({ path: `/tmp/mindex-topics-${item.name}.png`, fullPage: true })
+          .catch(() => {});
         throw error;
       }
       assert.deepEqual(errors, [], `${item.name}: 页面脚本错误`);
@@ -371,4 +491,7 @@ scenario("job", async (page) => {
   } finally {
     await browser.close();
   }
-})().catch((error) => { console.error(error); process.exit(1); });
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

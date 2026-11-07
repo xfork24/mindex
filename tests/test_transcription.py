@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from mindex.models.adapters import ModelError
-from mindex.processing.pipeline import Pipeline
-from mindex.shared.media import command
-from mindex.shared.types import Utterance
+from models.adapters import ModelError
+from processing.pipeline import Pipeline
+from shared.media import command
+from shared.types import Utterance
 
 
 def test_transcript_chunk_resume_and_source_time_mapping(config, tmp_path):

@@ -1,11 +1,12 @@
 """Task 2/3: task 配置写入相对、读取按当前 data_dir 还原为绝对。
 
 验证数据目录移动/改名后，冻结的任务配置仍能还原出当前有效的绝对路径。"""
+
 import json
 
-from mindex.admin.source_tasks import freeze_config, restore_config
-from mindex.settings.runtime_settings import RuntimeConfig
-from mindex.shared.storage import Store
+from admin.source_tasks import freeze_config, restore_config
+from settings.runtime_settings import RuntimeConfig
+from shared.storage import Store
 
 
 def test_freeze_stores_relative_data_dir_and_manifest(config):
@@ -14,7 +15,10 @@ def test_freeze_stores_relative_data_dir_and_manifest(config):
     frozen = json.loads(freeze_config(config, store))
     # data_dir 与内部清单以相对形式落库（相对 data_dir.parent）。
     assert frozen["data_dir"] == config.data_dir.name
-    assert frozen["analyzer"]["deployment_manifest"] == f"{config.data_dir.name}/config-dependencies/abc/analyzer.json"
+    assert (
+        frozen["analyzer"]["deployment_manifest"]
+        == f"{config.data_dir.name}/config-dependencies/abc/analyzer.json"
+    )
     assert "mindex" not in frozen["data_dir"]  # 不含任何绝对前缀
 
 

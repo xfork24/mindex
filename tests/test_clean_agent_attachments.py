@@ -12,9 +12,9 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from mindex.agent.attachments import AttachmentStore
-from mindex.cli import app
-from mindex.maintenance.backup_files import excluded
+from agent.attachments import AttachmentStore
+from cli import app
+from maintenance.backup_files import excluded
 
 runner = CliRunner()
 OLD = datetime(2026, 1, 1, tzinfo=UTC).timestamp()
@@ -46,8 +46,9 @@ def age(path: Path) -> Path:
 def put(store: AttachmentStore, tmp_path: Path, name: str) -> str:
     upload = tmp_path / f"upload-{name}"
     upload.write_bytes(b"payload-" + name.encode())
-    return store.put(upload, filename=name, content_type="text/plain", owner="mcp",
-                     session_id=None, ttl_hours=1)["id"]
+    return store.put(
+        upload, filename=name, content_type="text/plain", owner="mcp", session_id=None, ttl_hours=1
+    )["id"]
 
 
 def seed(tmp_path: Path) -> dict:
@@ -56,15 +57,25 @@ def seed(tmp_path: Path) -> dict:
     expired = put(store, tmp_path, "old.txt")
     fresh = put(store, tmp_path, "new.txt")
     with sqlite3.connect(data / "agent.sqlite3") as db:
-        db.execute("UPDATE agent_attachments SET expires_at=0 WHERE id=?", (expired.removeprefix(store.PREFIX),))
+        db.execute(
+            "UPDATE agent_attachments SET expires_at=0 WHERE id=?", (expired.removeprefix(store.PREFIX),)
+        )
     orphan_old = store.root / ("a" * 32)
     age(_write(orphan_old / "x.bin"))
     orphan_new = store.root / ("b" * 32)
     _write(orphan_new / "y.bin")
     staging_old = age(_write(store.root / ".uploads" / ("c" * 32)))
     staging_new = _write(store.root / ".uploads" / ("d" * 32))
-    return {"data": data, "store": store, "expired": expired, "fresh": fresh, "orphan_old": orphan_old,
-            "orphan_new": orphan_new, "staging_old": staging_old, "staging_new": staging_new}
+    return {
+        "data": data,
+        "store": store,
+        "expired": expired,
+        "fresh": fresh,
+        "orphan_old": orphan_old,
+        "orphan_new": orphan_new,
+        "staging_old": staging_old,
+        "staging_new": staging_new,
+    }
 
 
 def _write(path: Path) -> Path:

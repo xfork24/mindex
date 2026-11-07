@@ -6,18 +6,29 @@ const path = require("node:path");
 
 // keep_in_background：关闭窗口时缩到菜单栏/托盘继续运行（每日选题定时照常执行），缺省开启。
 // background_hint_shown：首次缩到后台时的系统通知只提示一次。
-const DEFAULTS = Object.freeze({ port: null, data_dir: null, sidecar: null, keep_in_background: true,
-  background_hint_shown: false });
+const DEFAULTS = Object.freeze({
+  port: null,
+  data_dir: null,
+  sidecar: null,
+  keep_in_background: true,
+  background_hint_shown: false,
+});
 
 function loadState(file) {
   try {
     const value = JSON.parse(fs.readFileSync(file, "utf8"));
     if (!value || typeof value !== "object" || Array.isArray(value)) return { ...DEFAULTS };
     return {
-      port: Number.isInteger(value.port) && value.port > 0 && value.port < 65536 ? value.port : null,
-      data_dir: typeof value.data_dir === "string" && path.isAbsolute(value.data_dir) ? value.data_dir : null,
-      sidecar: value.sidecar && Number.isInteger(value.sidecar.pid) ? { pid: value.sidecar.pid } : null,
-      keep_in_background: typeof value.keep_in_background === "boolean" ? value.keep_in_background : true,
+      port:
+        Number.isInteger(value.port) && value.port > 0 && value.port < 65536 ? value.port : null,
+      data_dir:
+        typeof value.data_dir === "string" && path.isAbsolute(value.data_dir)
+          ? value.data_dir
+          : null,
+      sidecar:
+        value.sidecar && Number.isInteger(value.sidecar.pid) ? { pid: value.sidecar.pid } : null,
+      keep_in_background:
+        typeof value.keep_in_background === "boolean" ? value.keep_in_background : true,
       background_hint_shown: value.background_hint_shown === true,
     };
   } catch {

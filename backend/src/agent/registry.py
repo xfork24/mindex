@@ -20,7 +20,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ValidationError
 
-from mindex.shared.agent_domains import AGENT_DOMAINS
+from shared.agent_domains import AGENT_DOMAINS
 
 Risk = Literal["read", "write", "danger"]
 DOMAINS = AGENT_DOMAINS
@@ -46,7 +46,8 @@ class ToolOutput:
     # 提交构建后由运行时跟踪：{"job_id", "build_id"}。
     watch_build: dict | None = None
     # 提交后台任务后由运行时跟踪，终态时发 followup：
-    # {"kind": "source"|"dialogue"|"person", "task_id", "source_id"?, "work"?}；kind="build" 等价于 watch_build。
+    # {"kind": "source"|"dialogue"|"person", "task_id", "source_id"?, "work"?}；
+    # kind="build" 等价于 watch_build。
     watch_task: dict | None = None
     # 页面定位描述：{page, job_id, plan_id, shots, stage, section, role, profile_id, query, ...}。
     focus: dict | None = None

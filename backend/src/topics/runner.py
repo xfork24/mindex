@@ -19,16 +19,16 @@ from fastapi import HTTPException
 from filelock import Timeout
 from pydantic import Field
 
-from mindex.models.adapters import ModelError
-from mindex.shared import lock_backend
-from mindex.shared.background_tasks import BackgroundTaskRunner, public_task
-from mindex.shared.config import StrictModel, fingerprint
-from mindex.shared.queue_dispatch import insert_ledger, ledger_transaction
-from mindex.topics import cards as topic_cards
-from mindex.topics import cluster, datasources, profiles
-from mindex.topics.common import RUN_ID_PATTERN, TopicConflict, now, parse_time
-from mindex.topics.llm import make_llm
-from mindex.topics.summarize import summarize
+from models.adapters import ModelError
+from shared import lock_backend
+from shared.background_tasks import BackgroundTaskRunner, public_task
+from shared.config import StrictModel, fingerprint
+from shared.queue_dispatch import insert_ledger, ledger_transaction
+from topics import cards as topic_cards
+from topics import cluster, datasources, profiles
+from topics.common import RUN_ID_PATTERN, TopicConflict, now, parse_time
+from topics.llm import make_llm
+from topics.summarize import summarize
 
 log = logging.getLogger(__name__)
 RECENT_DAYS = 7
@@ -39,7 +39,9 @@ TRIGGERS = ("manual", "schedule", "catchup")
 
 class RunOptions(StrictModel):
     skip_fetch: bool = Field(default=False, description="不重新抓取，只用已有的候选条目")
-    outline_count: int | None = Field(default=None, ge=0, le=50, description="为前 N 名写大纲；缺省取档案定时设置的条数")
+    outline_count: int | None = Field(
+        default=None, ge=0, le=50, description="为前 N 名写大纲；缺省取档案定时设置的条数"
+    )
 
 
 def candidate_items(store, profile_id: str, now: datetime | None = None) -> list[dict]:
@@ -66,13 +68,22 @@ def candidate_items(store, profile_id: str, now: datetime | None = None) -> list
     return found[:MAX_CANDIDATES]
 
 
-def discover(config, store, profile_id: str, *, llm=None, embedder=None, options: RunOptions | None = None,
-             run_id: str | None = None, progress=None) -> dict:
+def discover(
+    config,
+    store,
+    profile_id: str,
+    *,
+    llm=None,
+    embedder=None,
+    options: RunOptions | None = None,
+    run_id: str | None = None,
+    progress=None,
+) -> dict:
     options = options or RunOptions()
     progress = progress or (lambda value: None)
     llm = make_llm(config, llm)
     if embedder is None:
-        from mindex.models.adapters import make_embedder
+        from models.adapters import make_embedder
 
         embedder = make_embedder(config)
     profile = profiles.body_of(store, profile_id)
@@ -96,43 +107,99 @@ def discover(config, store, profile_id: str, *, llm=None, embedder=None, options
         groups = cluster.by_title([item["title"] for item in candidates])
     groups = cluster.rank(groups, candidates, config.topics.cluster.max_clusters)
     progress({"stage": "cluster", "message": f"{len(candidates)} 条候选条目归为 {len(groups)} 个候选簇"})
-    names = {r["id"]: r["name"] for r in store.rows("SELECT id,name FROM topic_sources WHERE profile_id=?",
-                                                     (profile_id,))}
-    drafts = summarize(llm, profile, [[candidates[i] for i in group] for group in groups], source_names=names,
-                       batch=config.topics.cluster.batch, retries=retries, progress=progress)
+    names = {
+        r["id"]: r["name"]
+        for r in store.rows("SELECT id,name FROM topic_sources WHERE profile_id=?", (profile_id,))
+    }
+    drafts = summarize(
+        llm,
+        profile,
+        [[candidates[i] for i in group] for group in groups],
+        source_names=names,
+        batch=config.topics.cluster.batch,
+        retries=retries,
+        progress=progress,
+    )
     card_ids = [topic_cards.create(store, profile_id, run_id, draft, members) for draft, members in drafts]
     try:
-        return _finish(config, store, profile_id, profile, card_ids, llm=llm, embedder=embedder, options=options,
-                       progress=progress, warnings=warnings, fetched=fetched, candidates=len(candidates),
-                       clusters=len(groups))
+        return _finish(
+            config,
+            store,
+            profile_id,
+            profile,
+            card_ids,
+            llm=llm,
+            embedder=embedder,
+            options=options,
+            progress=progress,
+            warnings=warnings,
+            fetched=fetched,
+            candidates=len(candidates),
+            clusters=len(groups),
+        )
     except BaseException:
         # 取消或失败时撤回本次产出的卡片，重试时这些候选条目仍可再用。
         topic_cards.discard(store, card_ids)
         raise
 
 
-def _finish(config, store, profile_id, profile, card_ids, *, llm, embedder, options, progress, warnings, fetched,
-            candidates, clusters) -> dict:
+def _finish(
+    config,
+    store,
+    profile_id,
+    profile,
+    card_ids,
+    *,
+    llm,
+    embedder,
+    options,
+    progress,
+    warnings,
+    fetched,
+    candidates,
+    clusters,
+) -> dict:
     if not card_ids:
         warnings.append("模型没有产出选题：候选资料可能与档案无关或触犯禁区")
-    progress({"stage": "score", "message": f"为 {len(card_ids)} 张选题卡片打分", "done": 0, "total": len(card_ids)})
-    warnings += topic_cards.evaluate(config, store, profile_id, card_ids, llm=llm, embedder=embedder,
-                                     progress=progress)
+    progress(
+        {"stage": "score", "message": f"为 {len(card_ids)} 张选题卡片打分", "done": 0, "total": len(card_ids)}
+    )
+    warnings += topic_cards.evaluate(
+        config, store, profile_id, card_ids, llm=llm, embedder=embedder, progress=progress
+    )
     count = profile.schedule.count if options.outline_count is None else options.outline_count
-    ranked = [card["id"] for card in sorted((topic_cards.get_card(store, cid) for cid in card_ids),
-                                            key=lambda card: -card["total"])][:count]
+    ranked = [
+        card["id"]
+        for card in sorted(
+            (topic_cards.get_card(store, cid) for cid in card_ids), key=lambda card: -card["total"]
+        )
+    ][:count]
     outlined = 0
     for index, card_id in enumerate(ranked):
-        progress({"stage": "outline", "message": f"为前 {len(ranked)} 名写大纲 {index + 1}/{len(ranked)}",
-                  "done": index, "total": len(ranked)})
+        progress(
+            {
+                "stage": "outline",
+                "message": f"为前 {len(ranked)} 名写大纲 {index + 1}/{len(ranked)}",
+                "done": index,
+                "total": len(ranked),
+            }
+        )
         try:
             topic_cards.write_outline(config, store, card_id, llm=llm)
             outlined += 1
         except ModelError as exc:
             warnings.append(f"选题 {card_id} 的大纲生成失败：{exc}")
     progress({"stage": "done", "message": f"产出 {len(card_ids)} 张选题卡片，{outlined} 张已写大纲"})
-    return {"profile_id": profile_id, "fetch": fetched, "candidates": candidates, "clusters": clusters,
-            "cards": len(card_ids), "card_ids": card_ids, "outlined": outlined, "warnings": warnings}
+    return {
+        "profile_id": profile_id,
+        "fetch": fetched,
+        "candidates": candidates,
+        "clusters": clusters,
+        "cards": len(card_ids),
+        "card_ids": card_ids,
+        "outlined": outlined,
+        "warnings": warnings,
+    }
 
 
 class TopicRuns(BackgroundTaskRunner):
@@ -162,8 +229,10 @@ class TopicRuns(BackgroundTaskRunner):
             return  # 另一进程正在挖掘，不改它的状态
         try:
             self.store.execute(
-                "UPDATE topic_runs SET status='interrupted',error='进程已中断；请重试',updated_at=CURRENT_TIMESTAMP "
-                "WHERE status IN ('queued','running')")
+                "UPDATE topic_runs SET "
+                "status='interrupted',error='进程已中断；请重试',updated_at=CURRENT_TIMESTAMP "
+                "WHERE status IN ('queued','running')"
+            )
         finally:
             lock.release()
 
@@ -172,8 +241,16 @@ class TopicRuns(BackgroundTaskRunner):
 
     def execute(self, task_id, row, config, save):
         options = RunOptions.model_validate(json.loads(row["options"] or "{}"))
-        result = discover(config, self.store, row["source_id"], llm=self.llm, embedder=self.embedder,
-                          options=options, run_id=task_id, progress=lambda value: save("progress", value))
+        result = discover(
+            config,
+            self.store,
+            row["source_id"],
+            llm=self.llm,
+            embedder=self.embedder,
+            options=options,
+            run_id=task_id,
+            progress=lambda value: save("progress", value),
+        )
         save("result", result)
 
     def start(self, profile_id: str, options: RunOptions | None = None, *, trigger: str = "manual") -> dict:
@@ -184,16 +261,21 @@ class TopicRuns(BackgroundTaskRunner):
         def create():
             profiles.get_profile(self.store, profile_id)
             task_id = uuid.uuid4().hex
-            insert_ledger(self.store, self.table, task_id,
-                "INSERT INTO topic_runs(id,source_id,trigger,status,config,options,created_at) VALUES(?,?,?,?,?,?,?)",
-                (task_id, profile_id, trigger, "queued", "{}", options.model_dump_json(), now()))
+            insert_ledger(
+                self.store,
+                self.table,
+                task_id,
+                "INSERT INTO topic_runs(id,source_id,trigger,status,config,options,created_at) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (task_id, profile_id, trigger, "queued", "{}", options.model_dump_json(), now()),
+            )
             return task_id, self.runtime.current()
 
         return self.submit(self.lock(), create)
 
     def start_scheduled(self, profile_id, *, period, ordinal, trigger, created_at):
         """周期占位、账本与入队同事务；leader 重放返回既有任务，不重新执行终态任务。"""
-        from mindex.topics.scheduler import AUTO_TRIGGERS, MAX_ATTEMPTS, library_timezone, runs_on
+        from topics.scheduler import AUTO_TRIGGERS, MAX_ATTEMPTS, library_timezone, runs_on
 
         if trigger not in AUTO_TRIGGERS or not 1 <= ordinal <= MAX_ATTEMPTS:
             raise ValueError("无效的定时触发或周期尝试编号")
@@ -211,14 +293,18 @@ class TopicRuns(BackgroundTaskRunner):
         self.acquire(lock, "调度")
         try:
             profiles.get_profile(self.store, profile_id)
-            existing = self.store.one("SELECT run_id FROM scheduled_runs WHERE profile_id=? AND period=? AND ordinal=?",
-                                      (profile_id, period, ordinal))
+            existing = self.store.one(
+                "SELECT run_id FROM scheduled_runs WHERE profile_id=? AND period=? AND ordinal=?",
+                (profile_id, period, ordinal),
+            )
             if existing:
                 lock.release()
                 return self.get(existing["run_id"])
             today = runs_on(self.store, profile_id, moment.date(), tz=moment.tzinfo)
             automatic = [row for row in today if row["trigger"] in AUTO_TRIGGERS]
-            active = next((row for row in automatic if row["status"] in {"queued", "running", "complete"}), None)
+            active = next(
+                (row for row in automatic if row["status"] in {"queued", "running", "complete"}), None
+            )
             if active:
                 lock.release()
                 return self.get(active["id"])
@@ -227,24 +313,32 @@ class TopicRuns(BackgroundTaskRunner):
             config = self.runtime.current()
             with ledger_transaction(self.store, self.table, task_id) as db:
                 db.execute("BEGIN IMMEDIATE")
-                db.execute("INSERT INTO topic_runs(id,source_id,trigger,status,config,options,created_at) "
-                           "VALUES(?,?,?,'queued','{}','{}',?)", (task_id, profile_id, trigger, created_at))
-                db.execute("INSERT INTO scheduled_runs(period_key,profile_id,period,ordinal,run_id) VALUES(?,?,?,?,?)",
-                           (key, profile_id, period, ordinal, task_id))
+                db.execute(
+                    "INSERT INTO topic_runs(id,source_id,trigger,status,config,options,created_at) "
+                    "VALUES(?,?,?,'queued','{}','{}',?)",
+                    (task_id, profile_id, trigger, created_at),
+                )
+                db.execute(
+                    "INSERT INTO scheduled_runs(period_key,profile_id,period,ordinal,run_id) "
+                    "VALUES(?,?,?,?,?)",
+                    (key, profile_id, period, ordinal, task_id),
+                )
             self.launch(task_id, config, lock)
             return self.get(task_id)
         except BaseException:
             lock.release()
             raise
 
-    def run_here(self, profile_id: str, options: RunOptions | None = None, *, trigger: str = "manual") -> dict:
+    def run_here(
+        self, profile_id: str, options: RunOptions | None = None, *, trigger: str = "manual"
+    ) -> dict:
         """在当前线程同步执行（CLI ``--wait``）；拿不到锁时抛 ``TopicConflict``。"""
         if getattr(self.store, "queue_backend", "inline") == "postgres":
             import time
 
             task = self.start(profile_id, options, trigger=trigger)
             while task["status"] in {"queued", "running"}:
-                time.sleep(.5)
+                time.sleep(0.5)
                 task = self.get(task["id"])
             return task
         lock = self.lock()
@@ -256,8 +350,18 @@ class TopicRuns(BackgroundTaskRunner):
             profiles.get_profile(self.store, profile_id)
             task_id = uuid.uuid4().hex
             self.store.execute(
-                "INSERT INTO topic_runs(id,source_id,trigger,status,config,options,created_at) VALUES(?,?,?,?,?,?,?)",
-                (task_id, profile_id, trigger, "queued", "{}", (options or RunOptions()).model_dump_json(), now()))
+                "INSERT INTO topic_runs(id,source_id,trigger,status,config,options,created_at) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (
+                    task_id,
+                    profile_id,
+                    trigger,
+                    "queued",
+                    "{}",
+                    (options or RunOptions()).model_dump_json(),
+                    now(),
+                ),
+            )
         except BaseException:
             lock.release()
             raise
@@ -274,8 +378,10 @@ def run_view(row: dict) -> dict:
 
 def list_runs(store, profile_id: str, limit: int = 20) -> list[dict]:
     profiles.get_profile(store, profile_id)
-    rows = store.rows("SELECT * FROM topic_runs WHERE source_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?",
-                      (profile_id, limit))
+    rows = store.rows(
+        "SELECT * FROM topic_runs WHERE source_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?",
+        (profile_id, limit),
+    )
     return [run_view(row) for row in rows]
 
 
@@ -286,4 +392,3 @@ def get_run(store, run_id: str) -> dict:
     if row is None:
         raise HTTPException(404, "找不到挖掘任务")
     return run_view(row)
-

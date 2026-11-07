@@ -12,9 +12,9 @@ pytest.importorskip("mcp")
 
 from mcp.shared.memory import create_connected_server_and_client_session
 
-from mindex.agent.mcp_server import build_server, exported
-from mindex.agent.tools import build_registry
-from mindex.shared.agent_domains import LOADABLE_DOMAINS
+from agent.mcp_server import build_server, exported
+from agent.tools import build_registry
+from shared.agent_domains import LOADABLE_DOMAINS
 
 REGISTRY = build_registry()
 NEVER_EXPORTED = {"load_tools", "navigate", "ask_user_question"}
@@ -27,8 +27,11 @@ domain_configs = st.one_of(
 
 
 def reference(domains) -> set[str]:
-    return {s.name for s in REGISTRY.all()
-            if s.mcp and (domains is None or s.domain in domains or s.name == "report_capability_gap")}
+    return {
+        s.name
+        for s in REGISTRY.all()
+        if s.mcp and (domains is None or s.domain in domains or s.name == "report_capability_gap")
+    }
 
 
 def test_registry_has_the_never_exported_tools():

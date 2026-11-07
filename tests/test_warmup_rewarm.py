@@ -6,11 +6,11 @@ import time
 
 import pytest
 
-from mindex.processing.indexing import VectorIndex
-from mindex.search import warmup
-from mindex.shared import storage
-from mindex.shared.config import Config
-from mindex.shared.storage import Store, bump_snapshot_revision
+from processing.indexing import VectorIndex
+from search import warmup
+from shared import storage
+from shared.config import Config
+from shared.storage import Store, bump_snapshot_revision
 
 SPEC = json.dumps({"format": 2, "mode": "auto", "space": {}, "preprocessing": {}})
 
@@ -18,11 +18,19 @@ SPEC = json.dumps({"format": 2, "mode": "auto", "space": {}, "preprocessing": {}
 def add_index(store, index_id, members=2, status="ready"):
     store.execute("INSERT INTO index_versions(id,spec,status) VALUES(?,?,?)", (index_id, SPEC, status))
     for number in range(members):
-        snapshot = {"id": f"{index_id}-seg{number}", "source_id": "src", "kind": "moment", "start": 0, "end": 1,
-                    "views": {"dialogue": f"对白{number}", "analysis": f"分析{number}"},
-                    "indexed_views": ["video", "dialogue"]}
-        store.execute("INSERT INTO index_members VALUES(?,?,?,1)",
-                      (index_id, snapshot["id"], json.dumps(snapshot, ensure_ascii=False)))
+        snapshot = {
+            "id": f"{index_id}-seg{number}",
+            "source_id": "src",
+            "kind": "moment",
+            "start": 0,
+            "end": 1,
+            "views": {"dialogue": f"对白{number}", "analysis": f"分析{number}"},
+            "indexed_views": ["video", "dialogue"],
+        }
+        store.execute(
+            "INSERT INTO index_members VALUES(?,?,?,1)",
+            (index_id, snapshot["id"], json.dumps(snapshot, ensure_ascii=False)),
+        )
     VectorIndex(store.root, index_id, create=True)
 
 
@@ -107,8 +115,11 @@ def run_watcher(config, index_id, calls, last, interval=0.03, debounce=0.01):
         calls.append((requested_index, startup))
 
     thread = threading.Thread(
-        target=warmup.watch_and_rewarm, args=(config, index_id, stop),
-        kwargs={"interval": interval, "debounce": debounce, "warm": fake_warm, "last": last}, daemon=True)
+        target=warmup.watch_and_rewarm,
+        args=(config, index_id, stop),
+        kwargs={"interval": interval, "debounce": debounce, "warm": fake_warm, "last": last},
+        daemon=True,
+    )
     thread.start()
     return stop, thread
 
@@ -146,9 +157,11 @@ def test_watcher_survives_warm_failures_and_retries_on_next_change(store):
             raise RuntimeError("嵌入服务暂时不可用")
 
     thread = threading.Thread(
-        target=warmup.watch_and_rewarm, args=(config, None, stop),
+        target=warmup.watch_and_rewarm,
+        args=(config, None, stop),
         kwargs={"interval": 0.03, "debounce": 0.01, "warm": flaky, "last": warmup.serving_signature(store)},
-        daemon=True)
+        daemon=True,
+    )
     thread.start()
     try:
         store.activate("B")
@@ -232,29 +245,36 @@ def test_retain_snapshots_only_touches_this_store_and_non_kept_versions(store, t
 
 
 def test_retain_representation_maps(tmp_path):
-    from mindex.processing import indexing
+    from processing import indexing
 
     store = Store(tmp_path / "data")
     for index_id in ("old", "new"):
         add_index(store, index_id)
-        store.execute("INSERT INTO representations(id,index_id,segment_id,view,document) VALUES(?,?,?,?,?)",
-                      (f"rep-{index_id}", index_id, f"{index_id}-seg0", "video", "doc"))
+        store.execute(
+            "INSERT INTO representations(id,index_id,segment_id,view,document) VALUES(?,?,?,?,?)",
+            (f"rep-{index_id}", index_id, f"{index_id}-seg0", "video", "doc"),
+        )
         VectorIndex(store.root, index_id)._representation_map()
     resolved = str(store.root.resolve())
     assert {(resolved, "old", ""), (resolved, "new", "")} <= set(indexing._REPRESENTATION_MAPS)
     assert indexing.retain_representation_maps(store.root, {"new"}) == 1
-    assert (resolved, "old", "") not in indexing._REPRESENTATION_MAPS and (resolved, "new", "") in indexing._REPRESENTATION_MAPS
+    assert (resolved, "old", "") not in indexing._REPRESENTATION_MAPS and (
+        resolved,
+        "new",
+        "",
+    ) in indexing._REPRESENTATION_MAPS
 
 
 def test_retain_published_person_versions(tmp_path):
+    from persons.persons import _ENTITY_CACHE, _EVIDENCE_CACHE, Persons
     from test_search_latency import put_person_release
-
-    from mindex.persons.persons import _ENTITY_CACHE, _EVIDENCE_CACHE, Persons
 
     store = Store(tmp_path / "data")
     catalogue = Persons(store)
     for number in (1, 2):
-        put_person_release(store, content_id=f"ix{number}", person_id=f"pv{number}", release_id=f"rel{number}")
+        put_person_release(
+            store, content_id=f"ix{number}", person_id=f"pv{number}", release_id=f"rel{number}"
+        )
         release = catalogue.release_for(f"ix{number}", pinned=True)
         catalogue.published_entities(release)
         catalogue.published_evidence(release)
@@ -284,7 +304,10 @@ def test_retire_superseded_keeps_pinned_target_and_active_pointer(store):
     store.snapshots_shared("A")
     store.snapshots_shared("C")
     warmup.retire_superseded(store, store.index_version("C"), "C")
-    assert {k[1] for k in storage._SNAPSHOT_CACHE if k[0] == path} == {"A", "C"}  # 固定的 C 与活动指针所指的 A 都保留
+    assert {k[1] for k in storage._SNAPSHOT_CACHE if k[0] == path} == {
+        "A",
+        "C",
+    }  # 固定的 C 与活动指针所指的 A 都保留
 
     store.snapshots_shared("B")  # 第三个版本进来时按容量挤掉最久未用的一个
     assert len({k for k in storage._SNAPSHOT_CACHE if k[0] == path}) == 2

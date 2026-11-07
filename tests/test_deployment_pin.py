@@ -9,19 +9,24 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext
-from mindex.agent.tools import build_registry
-from mindex.api import create_app
-from mindex.models import adapters
-from mindex.settings import deployment_pin
+from agent.loopback import MindexClient
+from agent.registry import ToolContext
+from agent.tools import build_registry
+from api import create_app
+from models import adapters
+from settings import deployment_pin
 
 WEMM = {
     "role": "embedding",
     "provider": "self",
     "name": "LocalMac-WeMM",
-    "config": {"backend": "llama_cpp", "base_url": "http://127.0.0.1:8888/v1", "model": "tencent/WeMM-Embedding-9B",
-               "quantization": "Q8_0", "dimensions": 8},
+    "config": {
+        "backend": "llama_cpp",
+        "base_url": "http://127.0.0.1:8888/v1",
+        "model": "tencent/WeMM-Embedding-9B",
+        "quantization": "Q8_0",
+        "dimensions": 8,
+    },
 }
 
 
@@ -32,8 +37,12 @@ def server(config, monkeypatch, tmp_path):
     weights, mmproj = models / "wemm.gguf", models / "mmproj.gguf"
     weights.write_bytes(b"weights")
     mmproj.write_bytes(b"mmproj")
-    props = {"build_info": "b-test", "model_path": str(weights), "chat_template": "t",
-             "modalities": {"vision": True, "video": True, "audio": False}}
+    props = {
+        "build_info": "b-test",
+        "model_path": str(weights),
+        "chat_template": "t",
+        "modalities": {"vision": True, "video": True, "audio": False},
+    }
 
     def wire(method, url, **kwargs):
         if url.endswith("/health"):
@@ -41,14 +50,42 @@ def server(config, monkeypatch, tmp_path):
         if url.endswith("/props"):
             return props
         if url.endswith("/v1/models"):
-            return {"data": [{"id": "wemm", "meta": {"vocab_type": 2, "n_vocab": 100, "n_ctx_train": 32768,
-                                                     "n_embd": 8, "n_params": 1000, "size": 2000, "ftype": "Q8_0"}}]}
+            return {
+                "data": [
+                    {
+                        "id": "wemm",
+                        "meta": {
+                            "vocab_type": 2,
+                            "n_vocab": 100,
+                            "n_ctx_train": 32768,
+                            "n_embd": 8,
+                            "n_params": 1000,
+                            "size": 2000,
+                            "ftype": "Q8_0",
+                        },
+                    }
+                ]
+            }
         raise AssertionError(f"不应发起推理请求：{url}")
 
     monkeypatch.setattr(adapters, "request", wire)
-    monkeypatch.setattr(deployment_pin, "listening_process", lambda port: {
-        "pid": 1, "cwd": str(tmp_path),
-        "argv": ["llama-server", "-m", str(weights), "--mmproj", "models/mmproj.gguf", "--port", str(port)]})
+    monkeypatch.setattr(
+        deployment_pin,
+        "listening_process",
+        lambda port: {
+            "pid": 1,
+            "cwd": str(tmp_path),
+            "argv": [
+                "llama-server",
+                "-m",
+                str(weights),
+                "--mmproj",
+                "models/mmproj.gguf",
+                "--port",
+                str(port),
+            ],
+        },
+    )
     return config, weights, mmproj
 
 
@@ -74,7 +111,9 @@ def test_probe_pin_reuse_and_profile_link(server):
     stored = json.loads((config.data_dir / result["manifest"]).read_text(encoding="utf-8"))
     assert stored["schema"] == 2 and stored["server_cwd"]
 
-    roles = {r["role"]: r for r in client.get("/api/settings", params={"probe_embedding": "false"}).json()["roles"]}
+    roles = {
+        r["role"]: r for r in client.get("/api/settings", params={"probe_embedding": "false"}).json()["roles"]
+    }
     linked = next(p for p in roles["embedding"]["profiles"] if p["id"] == profile["id"])
     assert linked["config"]["deployment_manifest"] == result["manifest"]
 
@@ -83,7 +122,9 @@ def test_probe_pin_reuse_and_profile_link(server):
     assert again["current_manifest_valid"] is True and again["reusable_manifests"] == [result["manifest"]]
     reused = client.post(f"/api/settings/profiles/{profile['id']}/deployment/pin", json={}).json()
     assert reused["created"] is False and reused["manifest"] == result["manifest"]
-    forced = client.post(f"/api/settings/profiles/{profile['id']}/deployment/pin", json={"force_new": True}).json()
+    forced = client.post(
+        f"/api/settings/profiles/{profile['id']}/deployment/pin", json={"force_new": True}
+    ).json()
     assert forced["created"] is True and forced["manifest"] != result["manifest"]
     assert (config.data_dir / result["manifest"]).is_file()  # 旧清单保留
 
@@ -95,14 +136,18 @@ def test_probe_pin_reuse_and_profile_link(server):
 def test_pin_rejects_non_llama_and_mixed_modes(server):
     config, weights, _ = server
     client = TestClient(create_app(config))
-    tokenhub = client.post("/api/settings/profiles", json={
-        **WEMM, "name": "云端", "config": {**WEMM["config"], "backend": "tokenhub"}}).json()
+    tokenhub = client.post(
+        "/api/settings/profiles",
+        json={**WEMM, "name": "云端", "config": {**WEMM["config"], "backend": "tokenhub"}},
+    ).json()
     response = client.post(f"/api/settings/profiles/{tokenhub['id']}/deployment/probe")
     assert response.status_code == 422 and "llama_cpp" in response.json()["detail"]
 
     profile = client.post("/api/settings/profiles", json=WEMM).json()
-    mixed = client.post(f"/api/settings/profiles/{profile['id']}/deployment/pin",
-                        json={"weights_file": str(weights), "weights_sha256": "a" * 64, "mmproj_sha256": "b" * 64})
+    mixed = client.post(
+        f"/api/settings/profiles/{profile['id']}/deployment/pin",
+        json={"weights_file": str(weights), "weights_sha256": "a" * 64, "mmproj_sha256": "b" * 64},
+    )
     assert mixed.status_code == 422 and "互斥" in mixed.json()["detail"]
 
 
@@ -139,7 +184,10 @@ def test_agent_tools_probe_and_pin(server):
         client = MindexClient(app)
         try:
             ctx = ToolContext(client=client)
-            probe_spec, pin_spec = registry.get("probe_model_deployment"), registry.get("pin_model_deployment")
+            probe_spec, pin_spec = (
+                registry.get("probe_model_deployment"),
+                registry.get("pin_model_deployment"),
+            )
             assert probe_spec.risk == "read" and pin_spec.risk == "write"
             probe = await probe_spec.execute(probe_spec.parse({"profile_id": profile["id"]}), ctx)
             args = pin_spec.parse({"profile_id": profile["id"]})
@@ -152,4 +200,8 @@ def test_agent_tools_probe_and_pin(server):
     probe, preview, pinned = asyncio.run(go())
     assert "自动定位" in probe.text and "wemm.gguf" in probe.text
     assert "e2e pin" in preview.summary
-    assert pinned.value["created"] is True and "已生成新清单" in pinned.text and pinned.mutation == {"domain": "settings"}
+    assert (
+        pinned.value["created"] is True
+        and "已生成新清单" in pinned.text
+        and pinned.mutation == {"domain": "settings"}
+    )

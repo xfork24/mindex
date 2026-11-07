@@ -10,14 +10,14 @@ from pathlib import Path
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from mindex.agent.domains import DOMAIN_INFO, PAGE_DOMAIN, touch
-from mindex.agent.llm.scripted import ScriptedLlm, call, say
-from mindex.agent.registry import ToolOutput, ToolRegistry, ToolSpec
-from mindex.agent.runtime import BuiltinRuntime
-from mindex.agent.session_store import SessionStore
-from mindex.agent.tools import meta
-from mindex.shared.agent_domains import LOADABLE_DOMAINS
-from mindex.shared.config import AgentConfig, StrictModel
+from agent.domains import DOMAIN_INFO, PAGE_DOMAIN, touch
+from agent.llm.scripted import ScriptedLlm, call, say
+from agent.registry import ToolOutput, ToolRegistry, ToolSpec
+from agent.runtime import BuiltinRuntime
+from agent.session_store import SessionStore
+from agent.tools import meta
+from shared.agent_domains import LOADABLE_DOMAINS
+from shared.config import AgentConfig, StrictModel
 
 # 合法领域 + meta + 未知名称，覆盖需要忽略的输入。
 DOMAIN_NAMES = st.one_of(
@@ -85,6 +85,7 @@ def synthetic_registry(counter: Counter) -> ToolRegistry:
         async def execute(args, ctx) -> ToolOutput:
             counter[name] += 1
             return ToolOutput({"tool": name}, text=f"{name} ok")
+
         return execute
 
     specs = list(meta.specs())
@@ -95,22 +96,30 @@ def synthetic_registry(counter: Counter) -> ToolRegistry:
     return ToolRegistry(specs)
 
 
-def run_turn(script: list, page: str | None, preloaded: list[str] = ()) -> tuple[ScriptedLlm, Counter, list, list]:
+def run_turn(
+    script: list, page: str | None, preloaded: list[str] = ()
+) -> tuple[ScriptedLlm, Counter, list, list]:
     """跑一轮脚本化对话，返回 (llm, 处理函数调用计数, 事件日志, 结束时的已加载领域)。"""
     counter: Counter = Counter()
     registry = synthetic_registry(counter)
     llm = ScriptedLlm(script)
     with tempfile.TemporaryDirectory() as tmp:
         store = SessionStore(Path(tmp))
-        runtime = BuiltinRuntime(store, registry=registry, llm_factory=lambda: llm,
-                                 client_factory=lambda resolve: None, settings=AgentConfig)
+        runtime = BuiltinRuntime(
+            store,
+            registry=registry,
+            llm_factory=lambda: llm,
+            client_factory=lambda resolve: None,
+            settings=AgentConfig,
+        )
 
         async def main():
             sid = store.create("性质测试")["id"]
             if preloaded:
                 store.update(sid, loaded_domains=list(preloaded))
-            await runtime.prompt(sid, [{"type": "text", "text": "开始"}],
-                                 context={"page": page} if page else None)
+            await runtime.prompt(
+                sid, [{"type": "text", "text": "开始"}], context={"page": page} if page else None
+            )
             await runtime.wait_idle(sid)
             return store.events(sid), runtime.loaded_domains(sid)
 
@@ -211,10 +220,17 @@ def test_unloaded_domain_tool_is_not_executed(case: tuple) -> None:
 # ---------------------------------------------------------------- 示例：非法参数、跨轮/重启保持、领域目录
 
 
-def make_runtime(data_dir: Path, llm: ScriptedLlm, counter: Counter | None = None) -> tuple[SessionStore, BuiltinRuntime]:
+def make_runtime(
+    data_dir: Path, llm: ScriptedLlm, counter: Counter | None = None
+) -> tuple[SessionStore, BuiltinRuntime]:
     store = SessionStore(data_dir)
-    runtime = BuiltinRuntime(store, registry=synthetic_registry(counter if counter is not None else Counter()),
-                             llm_factory=lambda: llm, client_factory=lambda resolve: None, settings=AgentConfig)
+    runtime = BuiltinRuntime(
+        store,
+        registry=synthetic_registry(counter if counter is not None else Counter()),
+        llm_factory=lambda: llm,
+        client_factory=lambda resolve: None,
+        settings=AgentConfig,
+    )
     return store, runtime
 
 
@@ -246,7 +262,9 @@ def test_loaded_domains_persist_across_turns_and_restart() -> None:
     """**Validates: Requirements 1.6**"""
     with tempfile.TemporaryDirectory() as tmp:
         data_dir = Path(tmp)
-        first_llm = ScriptedLlm([[call("load_tools", domains=["search", "persons"])], [say("已加载")], [say("第二轮")]])
+        first_llm = ScriptedLlm(
+            [[call("load_tools", domains=["search", "persons"])], [say("已加载")], [say("第二轮")]]
+        )
         store, runtime = make_runtime(data_dir, first_llm)
 
         async def first() -> str:
@@ -260,7 +278,9 @@ def test_loaded_domains_persist_across_turns_and_restart() -> None:
         assert runtime.loaded_domains(sid) == ["search", "persons", "studio"]
         # 第二轮的首个请求仍带着上一轮加载的领域
         assert len(first_llm.requests) == 3
-        assert {t["name"] for t in first_llm.requests[2].tools} == expected_tools(["studio", "search", "persons"])
+        assert {t["name"] for t in first_llm.requests[2].tools} == expected_tools(
+            ["studio", "search", "persons"]
+        )
 
         # 模拟服务重启：同一数据目录上新建存储与运行时
         restart_llm = ScriptedLlm([[call("persons_a")], [say("重启后")]])
@@ -269,7 +289,9 @@ def test_loaded_domains_persist_across_turns_and_restart() -> None:
         assert store2.get(sid)["loaded_domains"] == ["search", "persons", "studio"]
         asyncio.run(prompt_turn(runtime2, sid))
 
-        assert {t["name"] for t in restart_llm.requests[0].tools} == expected_tools(["studio", "search", "persons"])
+        assert {t["name"] for t in restart_llm.requests[0].tools} == expected_tools(
+            ["studio", "search", "persons"]
+        )
         assert counter["persons_a"] == 1  # 重启后已加载领域的工具直接可用
         assert runtime2.loaded_domains(sid) == ["search", "studio", "persons"]
 

@@ -11,13 +11,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from mindex.api import create_app
-from mindex.settings.local_services import LocalServiceManager, _alive
-from mindex.shared.config import LocalServicesConfig, load_config
-from mindex.shared.storage import Store
+from api import create_app
+from settings.local_services import LocalServiceManager, _alive
+from shared.config import LocalServicesConfig, load_config
+from shared.storage import Store
 
 # 测试服务：/health 返回 200；--crash 立即退出；同时拉起一个孙进程，验证停止时整个进程组都被结束。
-SERVER = r'''
+SERVER = r"""
 import http.server, os, socketserver, subprocess, sys
 if "--crash" in sys.argv:
     print("boom", flush=True)
@@ -40,7 +40,7 @@ class LoopbackServer(http.server.HTTPServer):
 with LoopbackServer(("127.0.0.1", port), Handler) as server:
     print("listening", port, flush=True)
     server.serve_forever()
-'''
+"""
 
 
 def free_port() -> int:
@@ -63,12 +63,22 @@ def services(config, tmp_path):
     script = tmp_path / "fake_service.py"
     script.write_text(SERVER, encoding="utf-8")
     port = free_port()
-    config.local_services = LocalServicesConfig.model_validate({"enabled": True, "services": [
-        {"name": "fake", "label": "测试服务", "role": "embedding", "port": port,
-         "argv": [sys.executable, str(script), str(port), str(tmp_path / "grandchild.pid")]},
-        {"name": "crash", "port": free_port(), "argv": [sys.executable, str(script), "--crash"]},
-        {"name": "missing", "port": free_port(), "argv": ["/nonexistent/bin/server"]},
-    ]})
+    config.local_services = LocalServicesConfig.model_validate(
+        {
+            "enabled": True,
+            "services": [
+                {
+                    "name": "fake",
+                    "label": "测试服务",
+                    "role": "embedding",
+                    "port": port,
+                    "argv": [sys.executable, str(script), str(port), str(tmp_path / "grandchild.pid")],
+                },
+                {"name": "crash", "port": free_port(), "argv": [sys.executable, str(script), "--crash"]},
+                {"name": "missing", "port": free_port(), "argv": ["/nonexistent/bin/server"]},
+            ],
+        }
+    )
     client = TestClient(create_app(config))
     yield client, config, tmp_path
     client.post("/api/settings/local-services/fake/stop")
@@ -80,7 +90,12 @@ def test_start_health_logs_and_stop_kills_process_group(services):
     assert listed["enabled"] is True
     fake = next(item for item in listed["items"] if item["name"] == "fake")
     assert (fake["running"], fake["healthy"], fake["label"], fake["autostart"], fake["stop_on_exit"]) == (
-        False, False, "测试服务", False, True)
+        False,
+        False,
+        "测试服务",
+        False,
+        True,
+    )
 
     started = client.post("/api/settings/local-services/fake/start")
     assert started.status_code == 200, started.text
@@ -105,7 +120,9 @@ def test_start_health_logs_and_stop_kills_process_group(services):
 def test_crash_and_missing_executable_are_reported(services):
     client, _config, _tmp = services
     crash = client.post("/api/settings/local-services/crash/start")
-    assert crash.status_code == 422 and "立即退出" in crash.json()["detail"] and "boom" in crash.json()["detail"]
+    assert (
+        crash.status_code == 422 and "立即退出" in crash.json()["detail"] and "boom" in crash.json()["detail"]
+    )
     missing = client.post("/api/settings/local-services/missing/start")
     assert missing.status_code == 422 and "找不到可执行文件" in missing.json()["detail"]
     assert client.post("/api/settings/local-services/nope/start").status_code == 404
@@ -155,8 +172,13 @@ def test_local_health_ignores_proxies(services, monkeypatch, proxy_source):
 
 def test_flags_persist_and_command_cannot_be_changed(services):
     client, config, _tmp = services
-    patched = client.patch("/api/settings/local-services/fake", json={"autostart": True, "stop_on_exit": False})
-    assert patched.status_code == 200 and (patched.json()["autostart"], patched.json()["stop_on_exit"]) == (True, False)
+    patched = client.patch(
+        "/api/settings/local-services/fake", json={"autostart": True, "stop_on_exit": False}
+    )
+    assert patched.status_code == 200 and (patched.json()["autostart"], patched.json()["stop_on_exit"]) == (
+        True,
+        False,
+    )
     # 只允许两个开关：命令、工作目录、环境变量都不能经接口修改。
     for body in ({"argv": ["/bin/sh"]}, {"cwd": "/"}, {"env": {"X": "1"}}, {"autostart": "yes"}):
         assert client.patch("/api/settings/local-services/fake", json=body).status_code == 422
@@ -167,11 +189,17 @@ def test_flags_persist_and_command_cannot_be_changed(services):
 
 
 def test_disabled_rejects_operations(config):
-    config.local_services = LocalServicesConfig.model_validate({"services": [
-        {"name": "fake", "port": free_port(), "argv": [sys.executable, "-V"]}]})
+    config.local_services = LocalServicesConfig.model_validate(
+        {"services": [{"name": "fake", "port": free_port(), "argv": [sys.executable, "-V"]}]}
+    )
     client = TestClient(create_app(config))
     assert client.get("/api/settings/local-services").json() == {"enabled": False, "items": []}
-    for method, path in (("post", "fake/start"), ("post", "fake/stop"), ("get", "fake/logs"), ("post", "stop-on-exit")):
+    for method, path in (
+        ("post", "fake/start"),
+        ("post", "fake/stop"),
+        ("get", "fake/logs"),
+        ("post", "stop-on-exit"),
+    ):
         assert getattr(client, method)(f"/api/settings/local-services/{path}").status_code == 403
     assert client.patch("/api/settings/local-services/fake", json={"autostart": True}).status_code == 403
 
@@ -202,7 +230,9 @@ def test_restart_adopts_running_service_and_stop_on_exit(services):
     record = config.data_dir / "locks" / "services" / "fake.json"
     saved = json.loads(record.read_text())
     record.write_text(json.dumps({**saved, "started": "Mon Jan  1 00:00:00 2001"}))
-    assert LocalServiceManager(Store(config.data_dir)).status(config.local_services.get("fake"))["pid"] is None
+    assert (
+        LocalServiceManager(Store(config.data_dir)).status(config.local_services.get("fake"))["pid"] is None
+    )
     record.write_text(json.dumps(saved))
     assert client.post("/api/settings/local-services/stop-on-exit").json() == {"stopped": ["fake"]}
     assert wait(lambda: not _alive(pid))
@@ -221,17 +251,20 @@ def test_autostart_skips_failures(services):
 
 def test_config_rules_and_paths(tmp_path):
     with pytest.raises(ValueError, match="name 不能重复"):
-        LocalServicesConfig.model_validate({"services": [{"name": "a", "port": 1, "argv": ["x"]},
-                                                         {"name": "a", "port": 2, "argv": ["x"]}]})
+        LocalServicesConfig.model_validate(
+            {"services": [{"name": "a", "port": 1, "argv": ["x"]}, {"name": "a", "port": 2, "argv": ["x"]}]}
+        )
     with pytest.raises(ValueError, match="port 不能重复"):
-        LocalServicesConfig.model_validate({"services": [{"name": "a", "port": 1, "argv": ["x"]},
-                                                         {"name": "b", "port": 1, "argv": ["x"]}]})
+        LocalServicesConfig.model_validate(
+            {"services": [{"name": "a", "port": 1, "argv": ["x"]}, {"name": "b", "port": 1, "argv": ["x"]}]}
+        )
     with pytest.raises(ValueError):
         LocalServicesConfig.model_validate({"services": [{"name": "Bad Name", "port": 1, "argv": ["x"]}]})
     (tmp_path / "config.yaml").write_text(
         "local_services:\n  enabled: true\n  services:\n"
         "    - {name: wemm, port: 8888, cwd: models, argv: ['~/bin/llama-server', '--port', '8888']}\n",
-        encoding="utf-8")
+        encoding="utf-8",
+    )
     config = load_config(tmp_path / "config.yaml")
     service = config.local_services.get("wemm")
     assert service.cwd == str((tmp_path / "models").resolve())

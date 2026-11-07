@@ -1,3 +1,5 @@
+"""跨模块共享的字面量类型与公共数据结构定义。"""
+
 from __future__ import annotations
 
 from typing import Literal
@@ -114,7 +116,7 @@ class Filters(BaseModel):
 
     def effective_sources(self, store) -> set[str] | None:
         """共享范围：多组取并集，与手动素材限制取交集；保留空集合语义。"""
-        from mindex.shared.media_groups import Groups
+        from shared.media_groups import Groups
 
         manual = self.selected_sources()
         members = Groups(store).resolve("source", self.source_group_ids)

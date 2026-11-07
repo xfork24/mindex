@@ -18,24 +18,24 @@ import re
 
 import httpx
 import pytest
-from agent_helpers import new_session, result_text, results, wait_idle
-from conftest import FixtureEmbedder
 from fastapi.testclient import TestClient
 from PIL import Image
+
+from agent.attachments import AttachmentStore
+from agent.llm.anthropic import AnthropicClient
+from agent.llm.openai_compat import OpenAICompatClient
+from agent.llm.scripted import ScriptedLlm, call, say
+from agent.registry import ToolOutput, ToolRegistry, ToolSpec
+from agent.runtime import NO_VISION_PROMPT, NO_VISION_TOOL_NOTE
+from agent.vision import OMITTED, TOOL_IMAGES_HEADER
+from agent_helpers import new_session, result_text, results, wait_idle
+from api import create_app
+from conftest import FixtureEmbedder
+from processing.indexing import IndexBuilder
+from processing.pipeline import Pipeline
+from shared.config import AgentLlmConfig, StrictModel
 from test_channel_recall import add_analysis, add_dialogue
 from test_person_identify import StubPersonClient, face, photo, seed_library
-
-from mindex.agent.attachments import AttachmentStore
-from mindex.agent.llm.anthropic import AnthropicClient
-from mindex.agent.llm.openai_compat import OpenAICompatClient
-from mindex.agent.llm.scripted import ScriptedLlm, call, say
-from mindex.agent.registry import ToolOutput, ToolRegistry, ToolSpec
-from mindex.agent.runtime import NO_VISION_PROMPT, NO_VISION_TOOL_NOTE
-from mindex.agent.vision import OMITTED, TOOL_IMAGES_HEADER
-from mindex.api import create_app
-from mindex.processing.indexing import IndexBuilder
-from mindex.processing.pipeline import Pipeline
-from mindex.shared.config import AgentLlmConfig, StrictModel
 
 BASE64_RUN = re.compile(r"[A-Za-z0-9+/=]{1000,}")
 FAILED = "（图片无法读取："
@@ -55,14 +55,15 @@ def png(size=(32, 20), color=(200, 30, 30)) -> bytes:
 
 
 def upload(client, sid: str, data: bytes, name="p.png", ctype="image/png") -> str:
-    response = client.post("/api/agent/attachments", files={"file": (name, data, ctype)},
-                           data={"session_id": sid})
+    response = client.post(
+        "/api/agent/attachments", files={"file": (name, data, ctype)}, data={"session_id": sid}
+    )
     assert response.status_code == 201, response.text
     return response.json()["id"]
 
 
 def content_url(ref: str) -> str:
-    return f"/api/agent/attachments/{ref[len('attachment://'):]}/content"
+    return f"/api/agent/attachments/{ref[len('attachment://') :]}/content"
 
 
 def decode_jpeg(data_b64: str) -> Image.Image:
@@ -74,8 +75,10 @@ def decode_jpeg(data_b64: str) -> Image.Image:
 
 
 def send(client, sid, text, *, attachments=(), context=None) -> list[dict]:
-    response = client.post(f"/api/agent/sessions/{sid}/messages",
-                           json={"content": text, "attachments": list(attachments), "context": context})
+    response = client.post(
+        f"/api/agent/sessions/{sid}/messages",
+        json={"content": text, "attachments": list(attachments), "context": context},
+    )
     assert response.status_code == 202, response.text
     return wait_idle(client, sid)
 
@@ -119,25 +122,60 @@ def sse(events: list[dict], done: bool) -> bytes:
 
 
 OPENAI_REPLIES = [
-    sse([{"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call_1", "function": {
-        "name": "show_frames", "arguments": "{}"}}]}}]},
-         {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]}], done=True),
+    sse(
+        [
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_1",
+                                    "function": {"name": "show_frames", "arguments": "{}"},
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+            {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+        ],
+        done=True,
+    ),
     sse([{"choices": [{"delta": {"content": "看到了"}, "finish_reason": "stop"}]}], done=True),
 ]
 ANTHROPIC_REPLIES = [
-    sse([{"type": "message_start", "message": {"usage": {"input_tokens": 1, "output_tokens": 1}}},
-         {"type": "content_block_start", "index": 0,
-          "content_block": {"type": "tool_use", "id": "toolu_1", "name": "show_frames", "input": {}}},
-         {"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "{}"}},
-         {"type": "content_block_stop", "index": 0},
-         {"type": "message_delta", "delta": {"stop_reason": "tool_use"}},
-         {"type": "message_stop"}], done=False),
-    sse([{"type": "message_start", "message": {"usage": {"input_tokens": 1, "output_tokens": 1}}},
-         {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
-         {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "看到了"}},
-         {"type": "content_block_stop", "index": 0},
-         {"type": "message_delta", "delta": {"stop_reason": "end_turn"}},
-         {"type": "message_stop"}], done=False),
+    sse(
+        [
+            {"type": "message_start", "message": {"usage": {"input_tokens": 1, "output_tokens": 1}}},
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "tool_use", "id": "toolu_1", "name": "show_frames", "input": {}},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "input_json_delta", "partial_json": "{}"},
+            },
+            {"type": "content_block_stop", "index": 0},
+            {"type": "message_delta", "delta": {"stop_reason": "tool_use"}},
+            {"type": "message_stop"},
+        ],
+        done=False,
+    ),
+    sse(
+        [
+            {"type": "message_start", "message": {"usage": {"input_tokens": 1, "output_tokens": 1}}},
+            {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+            {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "看到了"}},
+            {"type": "content_block_stop", "index": 0},
+            {"type": "message_delta", "delta": {"stop_reason": "end_turn"}},
+            {"type": "message_stop"},
+        ],
+        done=False,
+    ),
 ]
 
 
@@ -154,15 +192,18 @@ def http_llm(protocol: str, replies: list[bytes]):
     if protocol == "openai":
         profile = AgentLlmConfig(base_url="https://llm.test/v1", model="vl", api_key="sk-test-123456789")
         return OpenAICompatClient(profile, transport=transport, retries=0), bodies
-    profile = AgentLlmConfig(backend="anthropic", base_url="https://api.anthropic.test", model="claude",
-                             api_key="sk-ant-123456789")
+    profile = AgentLlmConfig(
+        backend="anthropic", base_url="https://api.anthropic.test", model="claude", api_key="sk-ant-123456789"
+    )
     return AnthropicClient(profile, transport=transport, retries=0), bodies
 
 
 def http_app(config, protocol: str, *, vision: bool, replies=None):
     config.agent.llm.vision = vision
     config.agent.max_images = 8
-    llm, bodies = http_llm(protocol, replies or (OPENAI_REPLIES if protocol == "openai" else ANTHROPIC_REPLIES))
+    llm, bodies = http_llm(
+        protocol, replies or (OPENAI_REPLIES if protocol == "openai" else ANTHROPIC_REPLIES)
+    )
     return TestClient(create_app(config, agent_llm=llm)), bodies
 
 
@@ -205,8 +246,9 @@ def test_openai_payload_user_and_tool_images(config):
     assert match and max(decode_jpeg(match.group(1)).size) == 1024
     # 用户附件图片在第二步仍保留（未超过上限）；请求体里没有任何引用形式的图片或 images 字段。
     assert len(openai_user_parts(second)) == 2
-    assert "attachment://" not in json.dumps([p for ps in openai_user_parts(second) for p in ps
-                                              if p["type"] == "image_url"])
+    assert "attachment://" not in json.dumps(
+        [p for ps in openai_user_parts(second) for p in ps if p["type"] == "image_url"]
+    )
     assert all("images" not in m for m in second["messages"])
 
 
@@ -264,12 +306,17 @@ def test_payload_without_vision_has_no_image_data(config, protocol):
         assert "data:image/" not in raw and not BASE64_RUN.search(raw)
         assert '"image"' not in raw and "image_url" not in raw
         if protocol == "openai":
-            assert body["messages"][0]["role"] == "system" and NO_VISION_PROMPT in body["messages"][0]["content"]
+            assert (
+                body["messages"][0]["role"] == "system" and NO_VISION_PROMPT in body["messages"][0]["content"]
+            )
             assert all(isinstance(m["content"], str) for m in body["messages"] if m["role"] == "user")
         else:
             assert NO_VISION_PROMPT in body["system"]
-            assert all(b["type"] in ("text", "tool_use", "tool_result")
-                       for m in body["messages"] for b in m["content"])
+            assert all(
+                b["type"] in ("text", "tool_use", "tool_result")
+                for m in body["messages"]
+                for b in m["content"]
+            )
     if protocol == "openai":
         tool = next(m for m in bodies[1]["messages"] if m["role"] == "tool")
         assert tool["content"].endswith(NO_VISION_TOOL_NOTE)
@@ -332,15 +379,19 @@ def test_sample_frames_and_search_by_media_images_reach_model(indexed):
     client, llm, source_id = indexed
     sid = new_session(client)
     query = upload(client, sid, png((1400, 900), (120, 120, 200)), name="query.png")
-    llm.extend([call("sample_frames", call_id="c1", source_id=source_id, count=2, width=1024)],
-               [call("search_by_media", call_id="c2", attachment=query, kind="image", limit=3)],
-               [say("找到了")])
+    llm.extend(
+        [call("sample_frames", call_id="c1", source_id=source_id, count=2, width=1024)],
+        [call("search_by_media", call_id="c2", attachment=query, kind="image", limit=3)],
+        [say("找到了")],
+    )
     events = send(client, sid, "看看这段画面再按图找", attachments=[query], context={"page": "search"})
     assert turn_ends(events) == [{"kind": "completed"}]
     frames, search = results(events)
     assert "error" not in frames and "error" not in search, (frames, search)
     frame_urls = frames["message"]["images"]
-    assert len(frame_urls) == 2 and all(u.startswith(f"/api/admin/sources/{source_id}/frame?") for u in frame_urls)
+    assert len(frame_urls) == 2 and all(
+        u.startswith(f"/api/admin/sources/{source_id}/frame?") for u in frame_urls
+    )
     search_images = search["message"]["images"]
     assert search_images[0] == query and len(search_images) >= 2  # 查询图 + 结果缩略图
 
@@ -410,12 +461,14 @@ def test_unreadable_tool_images_are_replaced_and_turn_completes(scripted):
     sid = new_session(client)
     good = upload(client, sid, png((48, 36)))
     text_file = upload(client, sid, b"just some text", name="note.txt", ctype="text/plain")
-    client.app.state.agent_runtime.registry = image_tool([
-        "/api/admin/sources/nope/frame?t=1",
-        content_url(text_file),
-        foreign,
-        content_url(good),
-    ])
+    client.app.state.agent_runtime.registry = image_tool(
+        [
+            "/api/admin/sources/nope/frame?t=1",
+            content_url(text_file),
+            foreign,
+            content_url(good),
+        ]
+    )
     llm.extend([call("show_frames", call_id="c1")], [say("部分图片无法读取")])
     events = send(client, sid, "看图")
     assert turn_ends(events) == [{"kind": "completed"}]
@@ -445,7 +498,9 @@ def test_user_attachment_deleted_or_expired_later_is_replaced(scripted):
 
     assert client.delete(content_url(deleted).removesuffix("/content")).status_code in (200, 204)
     store = AttachmentStore(config.data_dir)
-    store.store.execute("UPDATE agent_attachments SET expires_at=0 WHERE id=?", (expired[len("attachment://"):],))
+    store.store.execute(
+        "UPDATE agent_attachments SET expires_at=0 WHERE id=?", (expired[len("attachment://") :],)
+    )
 
     events = send(client, sid, "继续")
     assert turn_ends(events)[-1] == {"kind": "completed"}
@@ -475,8 +530,12 @@ def test_vision_profile_toggle_takes_effect_next_turn(scripted):
     send(client, sid, "第一轮", attachments=[ref])
     assert NO_VISION_PROMPT in llm.requests[0].system and image_blocks(llm.requests[0].messages) == []
 
-    body = {"role": "agent", "name": "视觉助手", "provider": "custom",
-            "config": {"backend": "openai", "base_url": "https://llm.test/v1", "model": "vl", "vision": True}}
+    body = {
+        "role": "agent",
+        "name": "视觉助手",
+        "provider": "custom",
+        "config": {"backend": "openai", "base_url": "https://llm.test/v1", "model": "vl", "vision": True},
+    }
     created = client.post("/api/settings/profiles", json=body)
     assert created.status_code == 201, created.text
     pid = created.json()["id"]
@@ -496,7 +555,9 @@ def test_vision_profile_toggle_takes_effect_next_turn(scripted):
     assert OMITTED in texts(llm.requests[2].messages)
     config.agent.max_images = 8
 
-    off = client.put(f"/api/settings/profiles/{pid}", json={**body, "config": {**body["config"], "vision": False}})
+    off = client.put(
+        f"/api/settings/profiles/{pid}", json={**body, "config": {**body["config"], "vision": False}}
+    )
     assert off.status_code == 200, off.text
     assert agent_role()["effective"]["vision"] is False
     send(client, sid, "第四轮")

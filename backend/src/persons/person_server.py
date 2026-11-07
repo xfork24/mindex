@@ -21,13 +21,15 @@ from filelock import FileLock
 from PIL import Image
 from starlette.concurrency import run_in_threadpool
 
-from mindex.shared.config import load_config
+from shared.config import load_config
 
 
 def execution_providers() -> list[str]:
     backend = os.environ.get("MINDEX_PERSON_BACKEND")
     if not backend:
-        return [p.strip() for p in os.environ.get("MINDEX_PERSON_PROVIDERS", "CPUExecutionProvider").split(",")]
+        return [
+            p.strip() for p in os.environ.get("MINDEX_PERSON_PROVIDERS", "CPUExecutionProvider").split(",")
+        ]
     if backend == "metal":
         raise RuntimeError(
             "当前固定版本的 InsightFace PersonAnalysis 仅支持 CPU/CUDA，暂不支持 Metal/CoreML；"
@@ -49,7 +51,9 @@ class PersonEngine:
         providers = execution_providers()
         from insightface.app import PersonAnalysis
 
-        root = Path(os.environ.get("MINDEX_PERSON_MODEL_ROOT", config.person.model_root)).expanduser().resolve()
+        root = (
+            Path(os.environ.get("MINDEX_PERSON_MODEL_ROOT", config.person.model_root)).expanduser().resolve()
+        )
         package = root / "models" / config.person.model
         manifests = list(package.glob("*manifest*.json"))
         if len(manifests) != 1:
@@ -196,7 +200,7 @@ def create_person_app(config, engine_factory=None):
 
     @app.post("/extract/image")
     async def image(file: Annotated[UploadFile, File()]):
-        from mindex.shared.uploads import save_upload
+        from shared.uploads import save_upload
 
         with tempfile.TemporaryDirectory(prefix="person-image-") as directory:
             path = Path(directory) / "image"
@@ -205,7 +209,7 @@ def create_person_app(config, engine_factory=None):
 
     @app.post("/extract/frames")
     async def batch_frames(files: Annotated[list[UploadFile], File()]):
-        from mindex.shared.uploads import save_upload
+        from shared.uploads import save_upload
 
         if not 1 <= len(files) <= 16:
             raise ValueError("帧批次大小必须为 1–16")
@@ -225,7 +229,7 @@ def create_person_app(config, engine_factory=None):
         end: Annotated[float, Form(gt=0)],
         fps: Annotated[float, Form(gt=0, le=5)] = 5,
     ):
-        from mindex.shared.uploads import save_upload
+        from shared.uploads import save_upload
 
         if end <= start:
             raise ValueError("结束时间必须大于开始时间")

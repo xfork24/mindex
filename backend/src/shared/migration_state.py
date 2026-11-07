@@ -1,4 +1,5 @@
 """持久迁移状态门闩；业务写入与领取必须等待完整验证和激活。"""
+
 from __future__ import annotations
 
 import re
@@ -6,9 +7,9 @@ import sqlite3
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-from mindex.shared.db.maintenance_gate import MaintenanceBusy
+from shared.db.maintenance_gate import MaintenanceBusy
 
-_ACCESS: ContextVar[frozenset[str]] = ContextVar('migration_access', default=frozenset())
+_ACCESS: ContextVar[frozenset[str]] = ContextVar("migration_access", default=frozenset())
 
 
 def backend_scope(store):
@@ -26,37 +27,43 @@ def access(store):
 
 def pending(db):
     try:
-        row = db.execute("SELECT migration_id,status FROM migration_runs ORDER BY updated_at DESC LIMIT 1").fetchone()
+        row = db.execute(
+            "SELECT migration_id,status FROM migration_runs ORDER BY updated_at DESC LIMIT 1"
+        ).fetchone()
     except sqlite3.OperationalError as exc:
-        if 'no such table' in str(exc):
+        if "no such table" in str(exc):
             return None  # 仅本地首次建库；PG schema 校验仍在连接入口强制执行。
         raise
     if row is None:
         return None
     # 原生 psycopg 与统一 Row/SQLite Row 都支持位置访问。
-    return {'migration_id': row[0], 'status': row[1]} if row[1] != 'activated' else None
+    return {"migration_id": row[0], "status": row[1]} if row[1] != "activated" else None
 
 
 def guard(db, scope):
-    from mindex.shared.db.maintenance_gate import _ACTIVE
+    from shared.db.maintenance_gate import _ACTIVE
 
     if scope in _ACCESS.get() or _ACTIVE.get() == scope:
         return
     row = pending(db)
     if row:
-        raise MaintenanceBusy(f"素材库迁移 {row['migration_id']} 尚未激活，拒绝业务写入或领取任务；请继续 migration load/verify/activate")
+        raise MaintenanceBusy(
+            f"素材库迁移 {row['migration_id']} 尚未激活，拒绝业务写入或领取任务；请继续 migration "
+            f"load/verify/activate"
+        )
 
 
 class LocalConnection:
     """本地恢复目标同样有写准入；不改变 SQLite 行、游标及事务语义。"""
+
     def __init__(self, db, scope):
         self.db, self.scope = db, scope
 
     def _guard(self, sql):
-        from mindex.shared.db.dialect import _segments
+        from shared.db.dialect import _segments
 
-        code = ' '.join(text for is_code, text in _segments(str(sql)) if is_code)
-        if re.search(r'\b(INSERT|UPDATE|DELETE|REPLACE|ALTER|DROP|CREATE)\b', code, re.I):
+        code = " ".join(text for is_code, text in _segments(str(sql)) if is_code)
+        if re.search(r"\b(INSERT|UPDATE|DELETE|REPLACE|ALTER|DROP|CREATE)\b", code, re.I):
             guard(self.db, self.scope)
 
     def execute(self, sql, args=()):
@@ -106,9 +113,9 @@ def writable(store):
 
 def writable_config(config):
     # 没有元数据库的旧本地文件工作流不存在迁移状态，不为检查创建一个新库。
-    if config.database.backend == 'sqlite' and not (config.data_dir / 'metadata.sqlite3').is_file():
+    if config.database.backend == "sqlite" and not (config.data_dir / "metadata.sqlite3").is_file():
         return
-    from mindex.shared.storage import Store
+    from shared.storage import Store
 
     with Store.open(config) as store:
         writable(store)

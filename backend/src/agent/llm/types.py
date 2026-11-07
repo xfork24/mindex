@@ -83,7 +83,9 @@ def tool_message(call_id: str, text: str, *, is_error: bool = False, images: lis
 
 
 def message_text(message: dict, kinds: tuple[str, ...] = ("text",)) -> str:
-    return "".join(block.get("text", "") for block in message.get("content", []) if block.get("type") in kinds)
+    return "".join(
+        block.get("text", "") for block in message.get("content", []) if block.get("type") in kinds
+    )
 
 
 def tool_calls(message: dict) -> list[dict]:
@@ -194,7 +196,12 @@ class StreamEmitter:
         if name and not block["name"]:
             block["name"] = name
         block["arguments"] += delta
-        chunk = {"type": "tool-call-delta", "index": entry["index"], "id": block["id"], "argumentsDelta": delta}
+        chunk = {
+            "type": "tool-call-delta",
+            "index": entry["index"],
+            "id": block["id"],
+            "argumentsDelta": delta,
+        }
         if name:
             chunk["name"] = name
         chunks.append(chunk)

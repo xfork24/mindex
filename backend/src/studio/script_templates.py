@@ -17,9 +17,9 @@ from uuid import uuid4
 import yaml
 from pydantic import Field, ValidationError
 
-from mindex.admin.curation import EntityNotFound
-from mindex.shared.config import StrictModel, fingerprint
-from mindex.shared.types import ScriptTemplate, ScriptTemplateConstraints, ScriptTemplateKind
+from admin.curation import EntityNotFound
+from shared.config import StrictModel, fingerprint
+from shared.types import ScriptTemplate, ScriptTemplateConstraints, ScriptTemplateKind
 
 BUILTIN_DIR = Path(__file__).resolve().parent / "templates"
 BUILTIN_ORDER = ("base", "history", "hot", "film", "science", "interview")
@@ -70,11 +70,13 @@ def builtins() -> dict[str, ScriptTemplate]:
 
 def content_hash(template: ScriptTemplate) -> str:
     """影响生成结果的模板内容指纹（进入 script 阶段签名）。"""
-    return fingerprint({
-        "kind": template.kind,
-        "instructions": template.instructions,
-        "constraints": template.constraints.model_dump(),
-    })
+    return fingerprint(
+        {
+            "kind": template.kind,
+            "instructions": template.instructions,
+            "constraints": template.constraints.model_dump(),
+        }
+    )
 
 
 def reference(template: ScriptTemplate) -> dict:
@@ -84,9 +86,15 @@ def reference(template: ScriptTemplate) -> dict:
 
 def _row_template(row: dict) -> ScriptTemplate:
     body = json.loads(row["body"])
-    return ScriptTemplate.model_validate({
-        "id": row["id"], "name": row["name"], "category": row["category"], "kind": row["kind"], **body,
-    })
+    return ScriptTemplate.model_validate(
+        {
+            "id": row["id"],
+            "name": row["name"],
+            "category": row["category"],
+            "kind": row["kind"],
+            **body,
+        }
+    )
 
 
 def _view(template: ScriptTemplate, row: dict | None = None) -> dict:
@@ -137,12 +145,15 @@ def list_templates(store) -> list[dict]:
 
 
 def _body(template: ScriptTemplate) -> str:
-    return json.dumps({
-        "version": template.version,
-        "description": template.description,
-        "instructions": template.instructions,
-        "constraints": template.constraints.model_dump(),
-    }, ensure_ascii=False)
+    return json.dumps(
+        {
+            "version": template.version,
+            "description": template.description,
+            "instructions": template.instructions,
+            "constraints": template.constraints.model_dump(),
+        },
+        ensure_ascii=False,
+    )
 
 
 def copy_template(store, from_id: str, name: str, *, now: str) -> dict:
@@ -192,7 +203,7 @@ def update_template(store, template_id: str, changes: TemplateChanges, *, now: s
 
 def references(config, template_id: str) -> list[dict]:
     """引用某模板的方案（扫描全部创作任务的 workspace.json，只读，不触发迁移）。"""
-    from mindex.studio import studio
+    from studio import studio
 
     root = studio.studio_root(config)
     found = []
@@ -205,7 +216,9 @@ def references(config, template_id: str) -> list[dict]:
             continue
         for plan in (w.get("plans") or {}).values():
             if (plan.get("options") or {}).get("template_id", DEFAULT_TEMPLATE) == template_id:
-                found.append({"job_id": path.parent.name, "plan_id": plan.get("id"), "plan_name": plan.get("name")})
+                found.append(
+                    {"job_id": path.parent.name, "plan_id": plan.get("id"), "plan_name": plan.get("name")}
+                )
     return found
 
 
@@ -216,7 +229,8 @@ def delete_template(config, store, template_id: str) -> None:
     if used:
         first = used[0]
         raise TemplateInUse(
-            f"文案模板正被 {len(used)} 个方案引用（如任务 {first['job_id']} 的方案「{first['plan_name']}」），"
+            f"文案模板正被 {len(used)} 个方案引用（如任务 {first['job_id']} "
+            f"的方案「{first['plan_name']}」），"
             "请先为这些方案换用其他模板"
         )
     store.execute("DELETE FROM script_templates WHERE id=?", (template_id,))

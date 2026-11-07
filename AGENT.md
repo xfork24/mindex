@@ -14,7 +14,7 @@
 - 后端直接位于 `backend/src/`，由 Setuptools 映射为 `mindex`；例如 `from mindex.search.search import SearchEngine`。使用当前分包路径，不增加旧模块转发层。
 - 前端位于 `frontend/src/`，采用原生 HTML/JS/CSS，无打包步骤。两侧按 search/admin/persons/studio/settings 功能组织，共享资源位于各自的 shared/。请求统一经 `shared/api.js`（`window.MindexApi`），各页面 `api()` 只是薄封装。创作页由 `studio/studio-*.js` 多个经典脚本按 `studio.html` 中的顺序加载，顶层声明共享全局作用域；加载期执行的代码只放在最后的 `studio-main.js`。
 - 改动任何被页面引用的 JS/CSS 后运行 `python scripts/build-assets.py`，把 HTML 中 `/assets/` 地址的 `?v=` 更新为内容哈希（`--check` 仅校验；文案改动先运行 build-messages.py）。
-- API 装配在 `backend/src/api.py`；CLI 入口在 `backend/src/cli.py`（全局选项、核心命令与 `indexes`），`e2e`、`persons`、`clips`、`topics`、`agent` 命令组在 `cli_e2e.py`、`cli_persons.py`、`cli_clips.py`、`cli_topics.py`、`cli_agent.py`（顶层 `mcp` 也在后者），`backup` 在 `maintenance/backup_cli.py`；重依赖保留在命令函数内延迟导入。
+- API 装配在 `backend/src/api.py`；CLI 入口在 `backend/src/cli/__init__.py`（全局选项、核心命令与 `indexes`），`e2e`、`persons`、`clips`、`topics`、`agent`、`studio`、`uploads` 命令组在 `cli/` 包（`cli/e2e.py`、`cli/persons.py` 等，顶层 `mcp` 在 `cli/agent.py`），`backup` 在 `maintenance/backup_cli.py`；import 一律置于文件顶部（Google 风格），仅两类例外可保留函数内延迟导入：try/except 探测的可选依赖、经启动耗时评估确属重载的依赖（须加注释说明）。
 - 静态资源统一通过 `shared/web_assets.py` 定位；同时考虑源码目录与 wheel 中的 `mindex.web`，打包规则在 `pyproject.toml`、`MANIFEST.in`。
 - 后端抽象位于 `shared/backends/`（`BackendContext` 与 db/media/locks/vectors/queue 协议，本地实现即现有 SQLite/chroma 本地/文件锁/进程内执行）；PG 适配与受控方言翻译在 `shared/db/`（REPLACE/rowid/json_extract/CURRENT_TIMESTAMP 等语义改写，复杂语句用 `DualSQL`/方言函数显式登记）。API 装配经 `open_context` 构造，集群调用链用 `Store.open(config)` 取统一 Store，不得绕过上下文直构远端连接。SQL 语义基线在 `tests/test_sql_characteristics.py` 与 `tests/test_pg_backend.py`（`MINDEX_TEST_POSTGRES_DSN` 门控；水平扩展分阶段改造见 plans/horizontal-scaling-plan.md 与盘点文档）。
 - 水平扩展范围见 `plans/horizontal-scaling-enhancement-plan.md` 与 `plans/horizontal-scaling-completion-plan.md`，当前状态与证据见 `docs/scaling-completion-verification.md` 与 `plans/horizontal-scaling-delivery-matrix.md`（更早的分阶段记录在 `docs/scaling-enhancement-verification.md`）；历史阶段自评不能当作当前验收。`scripts/check-scaling-boundaries.py` 检查数据库构造边界，`scripts/verify-scaling.py`（`--suite integration|cpu|faults`）自动创建隔离真实后端并拒绝测试跳过，`scripts/verify-scaling-recovery.py` 演练 PG/WAL 与对象保护恢复，`scripts/verify-local.py` 在冻结源码上完整分组回归。PG 升级只能追加迁移；账本创建/重试经 `ledger_transaction` 原子入队；长媒体处理与响应使用 `materialize_media`/`ShotMedia.materialized` 持有 pin。集群形态的 `/api/live` 只表示进程存活、`/api/ready` 逐项探测依赖；设置页「部署设置」只读写当前节点配置文件，凭据仅接受环境变量引用。
@@ -39,7 +39,10 @@
 
 ```bash
 uv sync --extra dev
-uv run ruff check backend/src tests                 # 代码规范（规则集见 pyproject.toml）
+uv run ruff check backend/src tests scripts eval    # 代码规范（规则集见 pyproject.toml）
+uv run ruff format --check backend/src tests scripts eval   # Python 格式（行宽 110、双引号）
+npx --yes prettier@3.9.10 --check "frontend/src/**/*.js" "frontend/src/**/*.html" \
+  "frontend/src/**/*.css" "desktop/**/*.js" "tests/*.cjs" "scripts/*.cjs"   # 前端格式（生成/第三方见 .prettierignore）
 python scripts/check-doc-links.py                   # Markdown 相对链接与锚点
 python scripts/build-messages.py --check            # messages.js 与 messages.json 一致
 python scripts/build-assets.py --check              # 页面资源 ?v= 与文件内容哈希一致

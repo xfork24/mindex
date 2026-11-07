@@ -1,4 +1,5 @@
 """迁移崩溃窗口与激活准入：元数据和恢复日志必须原子提交。"""
+
 from __future__ import annotations
 
 import subprocess
@@ -6,9 +7,9 @@ import sys
 
 import pytest
 
-from mindex.maintenance.migration import activate_bundle, export_bundle, load_bundle
-from mindex.shared.backends import open_context
-from mindex.shared.config import Config
+from maintenance.migration import activate_bundle, export_bundle, load_bundle
+from shared.backends import open_context
+from shared.config import Config
 
 
 def seed(tmp_path):
@@ -28,9 +29,10 @@ def test_process_death_before_metadata_commit_keeps_prewrite_binding(tmp_path):
     script = """
 import os, sys
 from pathlib import Path
-from mindex.shared.config import Config
-from mindex.shared.db import transfer
-from mindex.maintenance.migration import load_bundle
+import mindex  # 自举:包目录加入 sys.path,后续短名导入与被测代码同身份
+from shared.config import Config
+from shared.db import transfer
+from maintenance.migration import load_bundle
 original = transfer.copy_sqlite_to_sqlite
 def crash(*args, **kwargs):
     original(*args, **kwargs)
@@ -38,8 +40,13 @@ def crash(*args, **kwargs):
 transfer.copy_sqlite_to_sqlite = crash
 load_bundle(Config(data_dir=Path(sys.argv[1])), Path(sys.argv[2]))
 """
-    result = subprocess.run([sys.executable, "-c", script, str(target.data_dir), str(bundle)],
-                            capture_output=True, text=True, check=False, timeout=15)
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(target.data_dir), str(bundle)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
     assert result.returncode == 23, result.stderr
     store = open_context(target).store
     assert store.one("SELECT 1 FROM runs") is None
@@ -50,12 +57,14 @@ load_bundle(Config(data_dir=Path(sys.argv[1])), Path(sys.argv[2]))
 
 
 def test_failure_after_metadata_commit_keeps_resumable_journal(tmp_path, monkeypatch):
-    from mindex.maintenance import migration
+    from maintenance import migration
 
     bundle, target = seed(tmp_path)
     original = migration.verify_bundle
+
     def fail(*args, **kwargs):
         raise RuntimeError("模拟数据提交后校验进程退出")
+
     monkeypatch.setattr(migration, "verify_bundle", fail)
     with pytest.raises(RuntimeError):
         load_bundle(target, bundle)
@@ -69,7 +78,9 @@ def test_failure_after_metadata_commit_keeps_resumable_journal(tmp_path, monkeyp
 def test_metadata_only_bundle_with_sources_cannot_activate(tmp_path):
     origin = Config(data_dir=tmp_path / "origin")
     open_context(origin).store.execute(
-        "INSERT INTO sources(id,name,path,media,layout_key) VALUES('s','素材','sources/s/a.mp4','{}','layout')")
+        "INSERT INTO sources(id,name,path,media,layout_key) "
+        "VALUES('s','素材','sources/s/a.mp4','{}','layout')"
+    )
     bundle = tmp_path / "bundle"
     export_bundle(origin, bundle)
     target = Config(data_dir=tmp_path / "target")
@@ -82,7 +93,9 @@ def test_resume_rejects_changed_database_before_recopying_media(tmp_path):
     origin = Config(data_dir=tmp_path / "origin")
     store = open_context(origin).store
     key = "sources/s/a.mp4"
-    store.execute("INSERT INTO sources(id,name,path,media,layout_key) VALUES('s','素材',?,'{}','layout')", (key,))
+    store.execute(
+        "INSERT INTO sources(id,name,path,media,layout_key) VALUES('s','素材',?,'{}','layout')", (key,)
+    )
     file = origin.data_dir / key
     file.parent.mkdir(parents=True)
     file.write_bytes(b"restore-source")
@@ -90,8 +103,8 @@ def test_resume_rejects_changed_database_before_recopying_media(tmp_path):
     export_bundle(origin, bundle, with_media=True)
     target = Config(data_dir=tmp_path / "target")
     assert load_bundle(target, bundle)["consistent"]
-    from mindex.shared.db.maintenance_gate import MaintenanceBusy
-    from mindex.shared.migration_state import access
+    from shared.db.maintenance_gate import MaintenanceBusy
+    from shared.migration_state import access
 
     target_store = open_context(target).store
     with pytest.raises(MaintenanceBusy):

@@ -66,7 +66,7 @@ class Routes:
 
 
 def install(monkeypatch, routes: dict | None = None) -> Routes:
-    from mindex.topics.sources import base
+    from topics.sources import base
 
     handler = Routes(routes)
     monkeypatch.setattr(base, "TRANSPORT", httpx.MockTransport(handler))
@@ -97,30 +97,44 @@ class ScriptedTopicLlm:
                 evidence = candidate["evidence"]
                 color = next((c for c in ("红", "蓝", "绿", "紫") if c in candidate["visual"]), None)
                 matched = color is None or color in evidence
-                decisions.append({"candidate": candidate["candidate"],
-                                  "verdict": "matched" if matched else "rejected",
-                                  "reason": "画面主体相符" if matched else "画面颜色不符",
-                                  "quote": json.loads(evidence)["description"] if matched else ""})
+                decisions.append(
+                    {
+                        "candidate": candidate["candidate"],
+                        "verdict": "matched" if matched else "rejected",
+                        "reason": "画面主体相符" if matched else "画面颜色不符",
+                        "quote": json.loads(evidence)["description"] if matched else "",
+                    }
+                )
             return json.dumps({"decisions": decisions}, ensure_ascii=False)
         if "归纳为选题卡片" in system:
             clusters = re.findall(r"【候选簇 (\d+)】\n- (?:\[[^\]]*\] )?([^\n（]+)", text)
             cards = []
             for index, title in clusters:
                 color = next((c for c in ("红", "蓝", "绿") if c in title), "绿")
-                cards.append({"cluster": int(index), "title": f"选题：{title.strip()[:30]}",
-                              "angle": "解释事件背后的逻辑", "reason": "近期热议，受众关心",
-                              "visuals": [f"{color}色画面", f"{color}色特写", "紫色天空"]})
+                cards.append(
+                    {
+                        "cluster": int(index),
+                        "title": f"选题：{title.strip()[:30]}",
+                        "angle": "解释事件背后的逻辑",
+                        "reason": "近期热议，受众关心",
+                        "visuals": [f"{color}色画面", f"{color}色特写", "紫色天空"],
+                    }
+                )
             return json.dumps({"cards": cards}, ensure_ascii=False)
         if "受众匹配" in system:
             ids = re.findall(r"【卡片 (\d+)】([^\n]*)", text)
-            return json.dumps({"scores": [{"card": int(i), "score": 0.9 if "红" in title else 0.6}
-                                          for i, title in ids]}, ensure_ascii=False)
+            return json.dumps(
+                {"scores": [{"card": int(i), "score": 0.9 if "红" in title else 0.6} for i, title in ids]},
+                ensure_ascii=False,
+            )
         if "视频大纲" in system:
             title = re.search(r"选题：([^\n]*)", text)
             title = title.group(1) if title else "选题"
             template = "nope-template" if "不存在" in title else "history" if "考古" in title else "hot"
-            return json.dumps({"outline": f"开场：{title}。\n中段：讲清事件。\n结尾：总结观点。",
-                               "template_id": template}, ensure_ascii=False)
+            return json.dumps(
+                {"outline": f"开场：{title}。\n中段：讲清事件。\n结尾：总结观点。", "template_id": template},
+                ensure_ascii=False,
+            )
         raise AssertionError(f"未预期的选题模型请求：{system[:80]}")
 
 
@@ -132,6 +146,7 @@ def topic_embedder(config):
     import hashlib
 
     import numpy as np
+
     from conftest import FixtureEmbedder
 
     class TopicEmbedder(FixtureEmbedder):
@@ -153,9 +168,8 @@ def topic_embedder(config):
 def analyzed_library(config, video_file):
     """已分析并发布 shot 索引的颜色素材库（红、蓝、绿三镜），返回选题测试用的 fixture 嵌入。"""
     from conftest import FixtureAnalyzer
-
-    from mindex.processing.indexing import IndexBuilder
-    from mindex.processing.pipeline import Pipeline
+    from processing.indexing import IndexBuilder
+    from processing.pipeline import Pipeline
 
     config.studio.recall.granularity = "shot"
     embedder = topic_embedder(config)

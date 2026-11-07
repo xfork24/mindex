@@ -14,17 +14,23 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, Protocol
 
-from mindex.shared import locks
+from shared import locks
 
 __all__ = ["FileLockProvider", "LockProvider"]
 
 
 class LockProvider(Protocol):
-    def acquire(self, name: str, *, exclusive: bool | None = None,
-                timeout: float | None = 0) -> ContextManager[Any]: ...
+    def acquire(
+        self, name: str, *, exclusive: bool | None = None, timeout: float | None = 0
+    ) -> ContextManager[Any]: ...
 
-    def acquire_ordered(self, names: Sequence[str], *, exclusive: bool | dict[str, bool] | None = None,
-                        timeout: float | dict[str, float | None] | None = 0) -> ContextManager[ExitStack]: ...
+    def acquire_ordered(
+        self,
+        names: Sequence[str],
+        *,
+        exclusive: bool | dict[str, bool] | None = None,
+        timeout: float | dict[str, float | None] | None = 0,
+    ) -> ContextManager[ExitStack]: ...
 
 
 class FileLockProvider:
@@ -39,13 +45,19 @@ class FileLockProvider:
     def __init__(self, root: Path):
         self.root = Path(root)
 
-    def acquire(self, name: str, *, exclusive: bool | None = None,
-                timeout: float | None = 0) -> ContextManager[Any]:
+    def acquire(
+        self, name: str, *, exclusive: bool | None = None, timeout: float | None = 0
+    ) -> ContextManager[Any]:
         return locks.named(self.root, name, exclusive=exclusive, timeout=timeout)
 
     @contextmanager
-    def acquire_ordered(self, names: Sequence[str], *, exclusive: bool | dict[str, bool] | None = None,
-                        timeout: float | dict[str, float | None] | None = 0) -> Iterator[ExitStack]:
+    def acquire_ordered(
+        self,
+        names: Sequence[str],
+        *,
+        exclusive: bool | dict[str, bool] | None = None,
+        timeout: float | dict[str, float | None] | None = 0,
+    ) -> Iterator[ExitStack]:
         stack = locks.acquire_ordered(self.root, names, exclusive=exclusive, timeout=timeout)
         try:
             yield stack

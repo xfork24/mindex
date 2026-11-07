@@ -6,7 +6,7 @@ const TEMPLATE_CATEGORY = {
   commentary: "ui.template_category_commentary",
   film: "ui.template_category_film",
   science: "ui.template_category_science",
-  interview: "ui.template_category_interview"
+  interview: "ui.template_category_interview",
 };
 const TEMPLATE_KIND = { outline: "ui.template_kind_outline", rewrite: "ui.template_kind_rewrite" };
 const BUILTIN_TEMPLATE_TEXT = {
@@ -15,7 +15,7 @@ const BUILTIN_TEMPLATE_TEXT = {
   hot: ["ui.template_name_hot", "ui.template_desc_hot"],
   film: ["ui.template_name_film", "ui.template_desc_film"],
   science: ["ui.template_name_science", "ui.template_desc_science"],
-  interview: ["ui.template_name_interview", "ui.template_desc_interview"]
+  interview: ["ui.template_name_interview", "ui.template_desc_interview"],
 };
 // 内置模板的名称与说明走文案目录（中英双语）；用户模板的名称、分类是用户内容，原样显示。
 function templateName(item) {
@@ -27,18 +27,23 @@ function templateDescription(item) {
   return text ? MindexI18n.msg(text[1]) : item.description || "";
 }
 function templateCategory(item) {
-  return TEMPLATE_CATEGORY[item.category] ? MindexI18n.msg(TEMPLATE_CATEGORY[item.category]) : item.category;
+  return TEMPLATE_CATEGORY[item.category]
+    ? MindexI18n.msg(TEMPLATE_CATEGORY[item.category])
+    : item.category;
 }
 function templateKind(kind) {
   return MindexI18n.msg(TEMPLATE_KIND[kind] || TEMPLATE_KIND.outline);
 }
 function templateLabel(item) {
-  return MindexI18n.msg("ui.script_template_option", { p0: templateCategory(item), p1: templateName(item) });
+  return MindexI18n.msg("ui.script_template_option", {
+    p0: templateCategory(item),
+    p1: templateName(item),
+  });
 }
 const BUILTIN_BRAND_TEXT = {
   plain: ["ui.brands_name_plain", "ui.brands_desc_plain"],
   news: ["ui.brands_name_news", "ui.brands_desc_news"],
-  tech: ["ui.brands_name_tech", "ui.brands_desc_tech"]
+  tech: ["ui.brands_name_tech", "ui.brands_desc_tech"],
 };
 // 内置风格模板的名称与说明同样走文案目录（中英双语）；用户模板的名称、说明是用户内容，原样显示。
 function brandName(item) {

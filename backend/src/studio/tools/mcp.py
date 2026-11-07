@@ -13,7 +13,7 @@ import contextlib
 import re
 from datetime import timedelta
 
-from mindex.studio import studio
+from studio import studio
 
 from .artifacts import Artifact
 
@@ -40,8 +40,12 @@ class McpAdapter:
             from mcp import StdioServerParameters
             from mcp.client.stdio import stdio_client
 
-            params = StdioServerParameters(command=self.cfg["command"], args=list(self.cfg.get("args") or []),
-                                           env=dict(self.cfg.get("env") or {}) or None, cwd=self.cfg.get("cwd"))
+            params = StdioServerParameters(
+                command=self.cfg["command"],
+                args=list(self.cfg.get("args") or []),
+                env=dict(self.cfg.get("env") or {}) or None,
+                cwd=self.cfg.get("cwd"),
+            )
             return stdio_client(params)
         return self._http()
 
@@ -83,8 +87,16 @@ class McpAdapter:
 
         return self._run(work, timeout)
 
-    def call(self, tool: str, arguments: dict, uploads: list[dict], *, timeout: float,
-             cancelled=lambda: False, notify=lambda status: None) -> tuple[list[Artifact], dict]:
+    def call(
+        self,
+        tool: str,
+        arguments: dict,
+        uploads: list[dict],
+        *,
+        timeout: float,
+        cancelled=lambda: False,
+        notify=lambda status: None,
+    ) -> tuple[list[Artifact], dict]:
         payload = {**arguments, **({"uploads": uploads} if uploads else {})}
 
         async def work(session):
@@ -97,8 +109,10 @@ class McpAdapter:
         found = artifacts(result)
         if not found:
             raise studio.StudioError("MCP 工具结果中没有图片、视频或产物地址")
-        return found, {"content": [getattr(item, "type", "?") for item in result.content],
-                       "text": " ".join(texts)[:500] or None}
+        return found, {
+            "content": [getattr(item, "type", "?") for item in result.content],
+            "text": " ".join(texts)[:500] or None,
+        }
 
 
 def _message(exc: BaseException) -> str:

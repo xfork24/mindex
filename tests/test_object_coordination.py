@@ -1,13 +1,14 @@
 """GC 重新取当前引用、持久删除意图、pin 及未知输出预算。"""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 
 import pytest
 
-from mindex.shared.backends import open_context
-from mindex.shared.config import Config
-from mindex.shared.object_coordination import ObjectCoordinator, ObjectDeleting
+from shared.backends import open_context
+from shared.config import Config
+from shared.object_coordination import ObjectCoordinator, ObjectDeleting
 
 
 class Media:
@@ -34,8 +35,10 @@ def test_gc_rereads_reference_after_candidate_mark(tmp_path):
     with open_context(Config(data_dir=tmp_path)) as context:
         coordinator, media = ObjectCoordinator(context.store), Media()
         assert not coordinator.collect(media, "objects/key", grace=10, now=100)
-        context.store.execute("INSERT INTO shared_files(path,object_key,sha256,size,revision) VALUES(?,?,?,?,?)",
-                              ("studio/a/input", "objects/key", "0" * 64, 3, "r"))
+        context.store.execute(
+            "INSERT INTO shared_files(path,object_key,sha256,size,revision) VALUES(?,?,?,?,?)",
+            ("studio/a/input", "objects/key", "0" * 64, 3, "r"),
+        )
         assert not coordinator.collect(media, "objects/key", grace=10, now=120)
         assert media.objects["objects/key"] == b"old"
 
@@ -64,9 +67,9 @@ def test_changed_object_identity_cancels_gc(tmp_path):
 
 
 def test_growing_reservation_refuses_before_writing(tmp_path):
-    from mindex.shared.backends.staging import StagingFull
-    from mindex.shared.jsonio import save_bytes
-    from mindex.shared.work_budget import scope
+    from shared.backends.staging import StagingFull
+    from shared.jsonio import save_bytes
+    from shared.work_budget import scope
 
     config = Config(data_dir=tmp_path, storage={"staging_quota_gb": 100 / 1024**3})
     with open_context(config) as context:
@@ -79,16 +82,17 @@ def test_growing_reservation_refuses_before_writing(tmp_path):
 
 
 def test_external_encoder_stops_when_output_budget_is_exhausted(tmp_path):
-    from mindex.shared.backends.staging import StagingFull
-    from mindex.shared.media import atomic_media
-    from mindex.shared.work_budget import scope
+    from shared.backends.staging import StagingFull
+    from shared.media import atomic_media
+    from shared.work_budget import scope
 
     config = Config(data_dir=tmp_path, storage={"staging_quota_gb": 1024 / 1024**3})
     with open_context(config) as context:
         target = context.staging.root / "result.mp4"
         with pytest.raises(StagingFull), scope(context.store):
-            atomic_media(["-f", "lavfi", "-i", "testsrc2=size=320x240:rate=25", "-t", "1",
-                          "-c:v", "libx264"], target)
+            atomic_media(
+                ["-f", "lavfi", "-i", "testsrc2=size=320x240:rate=25", "-t", "1", "-c:v", "libx264"], target
+            )
         assert not target.exists()
         assert context.staging.usage()["reserved"] == 0
         assert context.staging.usage()["cached"] == 0
@@ -98,7 +102,7 @@ def test_gc_while_pool_registry_is_locked_is_reentrant():
     import gc
     import weakref
 
-    from mindex.shared.db.pg_backend import _POOLS_LOCK, PgBackend
+    from shared.db.pg_backend import _POOLS_LOCK, PgBackend
 
     backend = PgBackend("gc-reentrant-isolated", library_id="test")
     ref = weakref.ref(backend)
@@ -109,7 +113,7 @@ def test_gc_while_pool_registry_is_locked_is_reentrant():
 
 
 def test_reference_paging_includes_integer_id_tables(tmp_path):
-    from mindex.shared.resource_registry import _rows
+    from shared.resource_registry import _rows
 
     with open_context(Config(data_dir=tmp_path)) as context:
         with context.store.connect() as db:
@@ -140,7 +144,7 @@ def pg_store(tmp_path, monkeypatch):
         pytest.skip("需要隔离 MINDEX_TEST_POSTGRES_DSN")
     import psycopg
 
-    from mindex.shared.db.migrate_pg import migrate_pg
+    from shared.db.migrate_pg import migrate_pg
 
     monkeypatch.setenv("MINDEX_DATABASE_DSN", dsn)
     with psycopg.connect(dsn, autocommit=True) as db:
@@ -173,12 +177,14 @@ def test_pg_publication_and_download_cannot_race_conditional_delete(pg_store):
         collecting = workers.submit(coordinator.collect, media, "objects/key", grace=0)
         assert entered.wait(10)
         signing = workers.submit(coordinator.download, "objects/key", ttl=600)
-        publishing = workers.submit(pg_store.execute,
+        publishing = workers.submit(
+            pg_store.execute,
             "INSERT INTO shared_files(path,object_key,sha256,size,revision) VALUES(?,?,?,?,?)",
-            ("plans/current.json", "objects/key", "0" * 64, 3, "r"))
+            ("plans/current.json", "objects/key", "0" * 64, 3, "r"),
+        )
         try:
             with pytest.raises(TimeoutError):
-                signing.result(timeout=.1)
+                signing.result(timeout=0.1)
         finally:
             release.set()
         assert collecting.result(timeout=10)
@@ -192,7 +198,7 @@ def test_pg_publication_and_download_cannot_race_conditional_delete(pg_store):
 
 
 def test_hidden_partial_is_counted_after_owner_disappears(tmp_path):
-    from mindex.shared.backends.staging import StagingArea
+    from shared.backends.staging import StagingArea
 
     writer = StagingArea(tmp_path, quota_bytes=100)
     partial = tmp_path / ".result.partial"

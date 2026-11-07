@@ -42,8 +42,14 @@ class Item:
     extra: dict = field(default_factory=dict)
 
     def public(self) -> dict:
-        return {"title": self.title, "summary": self.summary, "url": self.url, "published_at": self.published_at,
-                "event_at": self.event_at, "hot": self.hot}
+        return {
+            "title": self.title,
+            "summary": self.summary,
+            "url": self.url,
+            "published_at": self.published_at,
+            "event_at": self.event_at,
+            "hot": self.hot,
+        }
 
 
 @dataclass
@@ -76,7 +82,7 @@ def register(source: TopicSource) -> TopicSource:
 
 
 def get(kind: str) -> TopicSource:
-    from mindex.topics import sources  # noqa: F401 — 导入即注册全部来源
+    from topics import sources  # noqa: F401 — 导入即注册全部来源
 
     try:
         return REGISTRY[kind]
@@ -85,10 +91,18 @@ def get(kind: str) -> TopicSource:
 
 
 def kinds() -> list[dict]:
-    from mindex.topics import sources  # noqa: F401
+    from topics import sources  # noqa: F401
 
-    return [{"kind": s.kind, "label": s.label, "third_party": s.third_party, "secret": s.secret,
-             "schema": s.config_model.model_json_schema()} for s in REGISTRY.values()]
+    return [
+        {
+            "kind": s.kind,
+            "label": s.label,
+            "third_party": s.third_party,
+            "secret": s.secret,
+            "schema": s.config_model.model_json_schema(),
+        }
+        for s in REGISTRY.values()
+    ]
 
 
 def check_url(url: str) -> str:
@@ -98,14 +112,22 @@ def check_url(url: str) -> str:
     return url
 
 
-def http_get(config, url: str, *, params: dict | None = None, headers: dict | None = None,
-             label: str = "数据源") -> tuple[int, dict, bytes]:
-    """GET ``url``，返回（状态码，响应头，正文）。HTTP 错误状态、超时、超限与协议不符都抛出 ``SourceError``。"""
+def http_get(
+    config, url: str, *, params: dict | None = None, headers: dict | None = None, label: str = "数据源"
+) -> tuple[int, dict, bytes]:
+    (
+        """GET ``url``，返回（状态码，响应头，正文）。HTTP 错误状态、超时、超限与协议不符都抛出 """
+        """``SourceError``。"""
+    )
     limits = config.topics.fetch
     check_url(url)
     try:
-        with httpx.Client(timeout=limits.timeout, follow_redirects=True, transport=TRANSPORT,
-                          headers={"User-Agent": USER_AGENT}) as client:
+        with httpx.Client(
+            timeout=limits.timeout,
+            follow_redirects=True,
+            transport=TRANSPORT,
+            headers={"User-Agent": USER_AGENT},
+        ) as client:
             with client.stream("GET", url, params=params, headers=headers) as response:
                 if response.url.scheme not in ("http", "https"):
                     raise SourceError("重定向到了非 http/https 地址")
@@ -124,8 +146,9 @@ def http_get(config, url: str, *, params: dict | None = None, headers: dict | No
         raise SourceError(f"{label}请求失败：{exc}") from exc
 
 
-_BLOCK = re.compile(r"<\s*/?\s*(p|br|div|li|ul|ol|h[1-6]|tr|td|th|table|blockquote|section|article)\b[^>]*>",
-                    re.IGNORECASE)
+_BLOCK = re.compile(
+    r"<\s*/?\s*(p|br|div|li|ul|ol|h[1-6]|tr|td|th|table|blockquote|section|article)\b[^>]*>", re.IGNORECASE
+)
 _TAG = re.compile(r"<[^>]+>")
 _SPACE = re.compile(r"\s+")
 

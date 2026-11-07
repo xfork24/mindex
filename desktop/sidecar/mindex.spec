@@ -27,6 +27,31 @@ SOURCE_MODULES = {
 
 datas, binaries, hiddenimports = [], [], []
 hiddenimports += collect_submodules("mindex")
+# 包内组件统一短名导入(shared.media 等,见 plans/code-style-normalization-plan.md 原始需求 2):
+# 运行时 mindex/__init__ 把包目录加入 sys.path 后以短名加载,冻结分析需把短名模块一并收进 TOC。
+# 构建环境把 backend/src 加入 sys.path 才能以短名解析这些包。
+_BACKEND_SRC = Path(__file__).resolve().parents[2] / "backend" / "src"
+if _BACKEND_SRC.is_dir():
+    sys.path.insert(0, str(_BACKEND_SRC))
+for _short_pkg in (
+    "admin",
+    "agent",
+    "api",
+    "cli",
+    "diagnostics",
+    "maintenance",
+    "models",
+    "persons",
+    "processing",
+    "search",
+    "server",
+    "settings",
+    "shared",
+    "studio",
+    "topics",
+    "worker",
+):
+    hiddenimports += collect_submodules(_short_pkg)
 hiddenimports += collect_submodules("uvicorn")
 # 只经 `mindex -m 模块` 运行、没有被任何模块导入的入口（AI 动画录制组件安装）。
 hiddenimports += ["playwright.__main__"]

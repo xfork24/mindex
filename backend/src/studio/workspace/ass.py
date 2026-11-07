@@ -12,12 +12,9 @@ from __future__ import annotations
 
 import re
 
-from mindex.studio.post_styles import (  # noqa: F401 — 样式模型在 post_styles（品牌模板与方案参数共用）
-    HEX_COLOR,
-    SUBTITLE_PRESET_IDS,
+from studio.post_styles import (
     SUBTITLE_PRESETS,
     OverlayStyle,
-    SubtitlePreset,
     SubtitleStyle,
 )
 
@@ -30,7 +27,6 @@ def preset(name: str) -> dict:
     if name not in SUBTITLE_PRESETS:
         raise ValueError(f"未知字幕样式：{name}")
     return SubtitleStyle.model_validate(SUBTITLE_PRESETS[name]).model_dump()
-
 
 
 def ass_color(hex_color: str, opacity: float = 1.0) -> str:
@@ -68,8 +64,17 @@ def scale(width: int, height: int) -> float:
     return min(width, height) / BASE_LINES
 
 
-def style_line(name: str, style: dict, *, font: str, size: float, width: int, height: int,
-               alignment: int | None = None, margin_v: float | None = None) -> str:
+def style_line(
+    name: str,
+    style: dict,
+    *,
+    font: str,
+    size: float,
+    width: int,
+    height: int,
+    alignment: int | None = None,
+    margin_v: float | None = None,
+) -> str:
     unit = scale(width, height)
     margin = style.get("margin")
     if margin_v is None:
@@ -80,30 +85,63 @@ def style_line(name: str, style: dict, *, font: str, size: float, width: int, he
     if alignment is None:
         alignment = {"bottom": 2, "middle": 5, "top": 8}[style.get("position", "bottom")]
     box = style.get("box")
-    back = ass_color(style.get("box_color", "#000000"), style.get("box_opacity", 0.6)) if box else "&H80000000"
+    back = (
+        ass_color(style.get("box_color", "#000000"), style.get("box_opacity", 0.6)) if box else "&H80000000"
+    )
     outline_color = back if box else ass_color(style.get("outline_color", "#000000"))
     outline = (max(style.get("outline", 0), 2.0) if box else style.get("outline", 1.0)) * unit
     fields = [
-        name, font, f"{size * unit:.1f}", ass_color(style.get("primary", "#FFFFFF")), "&H000000FF", outline_color,
-        back, "-1" if style.get("bold") else "0", "0", "0", "0", "100", "100", "0", "0", "3" if box else "1",
-        f"{outline:.2f}", f"{style.get('shadow', 0.5) * unit:.2f}", str(alignment), f"{20 * unit:.0f}",
-        f"{20 * unit:.0f}", f"{margin_v:.0f}", "1",
+        name,
+        font,
+        f"{size * unit:.1f}",
+        ass_color(style.get("primary", "#FFFFFF")),
+        "&H000000FF",
+        outline_color,
+        back,
+        "-1" if style.get("bold") else "0",
+        "0",
+        "0",
+        "0",
+        "100",
+        "100",
+        "0",
+        "0",
+        "3" if box else "1",
+        f"{outline:.2f}",
+        f"{style.get('shadow', 0.5) * unit:.2f}",
+        str(alignment),
+        f"{20 * unit:.0f}",
+        f"{20 * unit:.0f}",
+        f"{margin_v:.0f}",
+        "1",
     ]
     return "Style: " + ",".join(fields)
 
 
-FORMAT = ("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, "
-          "Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, "
-          "MarginL, MarginR, MarginV, Encoding")
+FORMAT = (
+    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, "
+    "Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, "
+    "MarginL, MarginR, MarginV, Encoding"
+)
 
 
-def build_ass(cues: list[dict], *, width: int, height: int, font: str, font_size: float, style: dict | None,
-              highlights: dict[str, list[str]] | None = None, layers: list[str] | None = None,
-              layer_styles: list[str] | None = None) -> str:
+def build_ass(
+    cues: list[dict],
+    *,
+    width: int,
+    height: int,
+    font: str,
+    font_size: float,
+    style: dict | None,
+    highlights: dict[str, list[str]] | None = None,
+    layers: list[str] | None = None,
+    layer_styles: list[str] | None = None,
+) -> str:
     """生成 ASS 文本。
 
-    ``cues``：``[{shot_id, start, end, text}]``（成片时间，秒）；``style`` 为 None 时不写字幕事件（只有文字层）。
-    ``layers``/``layer_styles``：文字层的 Dialogue 与 Style 行（由 ``overlays`` 生成，需求 6）。"""
+        ``cues``：``[{shot_id, start, end, text}]``（成片时间，秒）；``style`` 为 None
+    时不写字幕事件（只有文字层）。
+        ``layers``/``layer_styles``：文字层的 Dialogue 与 Style 行（由 ``overlays`` 生成，需求 6）。"""
     lines = [
         "[Script Info]",
         "ScriptType: v4.00+",
@@ -120,14 +158,20 @@ def build_ass(cues: list[dict], *, width: int, height: int, font: str, font_size
         size = style.get("font_size") or font_size
         lines.append(style_line("Default", style, font=font, size=size, width=width, height=height))
     lines += layer_styles or []
-    lines += ["", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
+    lines += [
+        "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
     if style is not None:
         base = ass_color(style.get("primary", "#FFFFFF"))
         color = ass_color(style.get("highlight", "#FFD400"))
         for cue in cues:
             words = (highlights or {}).get(cue["shot_id"]) or []
             text = highlight(cue["text"], words, color, base)
-            lines.append(f"Dialogue: 0,{ass_time(cue['start'])},{ass_time(cue['end'])},Default,,0,0,0,,{text}")
+            lines.append(
+                f"Dialogue: 0,{ass_time(cue['start'])},{ass_time(cue['end'])},Default,,0,0,0,,{text}"
+            )
     lines += layers or []
     return "\n".join(lines) + "\n"
 
@@ -149,15 +193,46 @@ def layer_styles(style: dict, *, font: str, width: int, height: int) -> list[str
     background = style.get("background", "#000000")
     opacity = style.get("background_opacity", 0.55)
     title = {"primary": primary, "outline_color": "#000000", "outline": 2.0, "shadow": 1.0, "bold": True}
-    boxed = {"primary": primary, "box": True, "box_color": background, "box_opacity": opacity, "shadow": 0,
-             "outline": 2.0, "bold": True}
+    boxed = {
+        "primary": primary,
+        "box": True,
+        "box_color": background,
+        "box_opacity": opacity,
+        "shadow": 0,
+        "outline": 2.0,
+        "bold": True,
+    }
     return [
-        style_line("Title", title, font=face, size=LAYER_SIZES["title"], width=width, height=height, alignment=5,
-                   margin_v=0),
-        style_line("LowerThird", boxed, font=face, size=LAYER_SIZES["lower_third"], width=width, height=height,
-                   alignment=1, margin_v=48 * unit),
-        style_line("Card", {**boxed, "bold": False}, font=face, size=LAYER_SIZES["data_card"], width=width,
-                   height=height, alignment=9, margin_v=16 * unit),
+        style_line(
+            "Title",
+            title,
+            font=face,
+            size=LAYER_SIZES["title"],
+            width=width,
+            height=height,
+            alignment=5,
+            margin_v=0,
+        ),
+        style_line(
+            "LowerThird",
+            boxed,
+            font=face,
+            size=LAYER_SIZES["lower_third"],
+            width=width,
+            height=height,
+            alignment=1,
+            margin_v=48 * unit,
+        ),
+        style_line(
+            "Card",
+            {**boxed, "bold": False},
+            font=face,
+            size=LAYER_SIZES["data_card"],
+            width=width,
+            height=height,
+            alignment=9,
+            margin_v=16 * unit,
+        ),
     ]
 
 
@@ -206,12 +281,15 @@ def layer_text(layer: dict, style: dict, *, width: int, height: int) -> tuple[st
     if layer.get("title"):
         rows.append(f"{{\\b1}}{escape(layer['title'])}{{\\b0}}")
     for item in layer.get("items") or []:
-        rows.append(f"{escape(item['label'])}  {{\\c{accent}\\b1}}{escape(item['value'])}{{\\c{primary}\\b0}}")
+        rows.append(
+            f"{escape(item['label'])}  {{\\c{accent}\\b1}}{escape(item['value'])}{{\\c{primary}\\b0}}"
+        )
     return "Card", prefix + "\\N".join(rows)
 
 
-def layer_events(shot_layers: list[tuple[str, float, float, list[dict]]], style: dict, *, width: int,
-                 height: int) -> list[str]:
+def layer_events(
+    shot_layers: list[tuple[str, float, float, list[dict]]], style: dict, *, width: int, height: int
+) -> list[str]:
     """``[(分镜, 镜头起点, 镜头终点, 文字层列表)]`` → Dialogue 行（Layer 1，压在字幕之上）。"""
     lines = []
     for _sid, start, end, layers in shot_layers:

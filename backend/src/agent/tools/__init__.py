@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from mindex.agent.registry import ToolRegistry
+from agent.registry import ToolRegistry
 
 
 def build_registry() -> ToolRegistry:
-    from mindex.agent.tools import (
+    from agent.tools import (
         groups,
         index,
         library,
@@ -32,9 +32,30 @@ def build_registry() -> ToolRegistry:
     )
 
     registry = ToolRegistry()
-    for module in (groups, meta, navigate, studio_read, studio_templates, studio_brands, studio_delivery, studio_write,
-                   studio_build, studio_detail, studio_animation, studio_overlays, studio_music, studio_tools, library,
-                   library_tasks, search, index, persons, persons_review, settings_tools, topics):
+    for module in (
+        groups,
+        meta,
+        navigate,
+        studio_read,
+        studio_templates,
+        studio_brands,
+        studio_delivery,
+        studio_write,
+        studio_build,
+        studio_detail,
+        studio_animation,
+        studio_overlays,
+        studio_music,
+        studio_tools,
+        library,
+        library_tasks,
+        search,
+        index,
+        persons,
+        persons_review,
+        settings_tools,
+        topics,
+    ):
         for spec in module.specs():
             registry.add(spec)
     return registry

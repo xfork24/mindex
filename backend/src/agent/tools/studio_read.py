@@ -10,11 +10,11 @@ from typing import Literal
 
 from pydantic import Field, StrictInt, field_validator, model_validator
 
-from mindex.agent.ids import resolve_shot, short
-from mindex.agent.registry import ToolContext, ToolError, ToolOutput, ToolSpec
-from mindex.agent.tools.common import STAGE_LABELS, STAGES, board_text, check, clip, load_view
-from mindex.agent.tools.media import animation_media, final_media, generated_media, shot_media, version_media
-from mindex.agent.tools.shot_details import (
+from agent.ids import resolve_shot, short
+from agent.registry import ToolContext, ToolError, ToolOutput, ToolSpec
+from agent.tools.common import STAGE_LABELS, STAGES, board_text, check, clip, load_view
+from agent.tools.media import animation_media, final_media, generated_media, shot_media, version_media
+from agent.tools.shot_details import (
     details_focus,
     page_details,
     plan_header,
@@ -22,7 +22,7 @@ from mindex.agent.tools.shot_details import (
     render_refs,
     resolve_refs,
 )
-from mindex.shared.config import StrictModel
+from shared.config import StrictModel
 
 JobId = Field(default=None, description="创作任务 ID；省略时使用当前页面打开的任务")
 PlanId = Field(default=None, description="方案 ID；省略时使用任务当前激活的方案")
@@ -36,8 +36,12 @@ async def list_jobs(args: ListJobs, ctx: ToolContext) -> ToolOutput:
     items = check(await ctx.client.get("/api/studio/jobs"), "列出任务")["items"][: args.limit]
     rows = [{"id": i["id"], "title": i["title"], "created_at": i["created_at"]} for i in items]
     text = "\n".join(f"{r['id']} | {r['title']} | {r['created_at']}" for r in rows) or "（还没有创作任务）"
-    return ToolOutput({"items": rows}, text=f"共 {len(rows)} 个任务（ID | 标题 | 创建时间）：\n{text}",
-                      meta={"kind": "jobs", "items": rows}, focus={"page": "studio", "section": "jobs"})
+    return ToolOutput(
+        {"items": rows},
+        text=f"共 {len(rows)} 个任务（ID | 标题 | 创建时间）：\n{text}",
+        meta={"kind": "jobs", "items": rows},
+        focus={"page": "studio", "section": "jobs"},
+    )
 
 
 class WorkspaceSummary(StrictModel):
@@ -50,22 +54,37 @@ async def get_workspace_summary(args: WorkspaceSummary, ctx: ToolContext) -> Too
     p, w = view.plan, view.w
     builds = [b for b in w["builds"] if b["plan_id"] == view.plan_id][-3:]
     value = {
-        "job": {"id": view.job["id"], "title": view.job["title"], "outline": view.job.get("outline", ""),
-                "source_ids": view.job.get("source_ids")},
-        "plans": [{"id": k, "name": v["name"], "active": k == w["active_plan"]} for k, v in w["plans"].items()],
-        "plan": {"id": view.plan_id, "name": p["name"], "revision": view.revision, "options": p["options"],
-                 "final": short(p.get("final")), "script_stale": bool(w.get("script_stale")) if view.active else None,
-                 "template_id": p["options"].get("template_id", "base"),
-                 "script_template_changed": bool(w.get("script_template_changed")) if view.active else None,
-                 "script_profile_changed": bool(w.get("script_profile_changed")) if view.active else None},
+        "job": {
+            "id": view.job["id"],
+            "title": view.job["title"],
+            "outline": view.job.get("outline", ""),
+            "source_ids": view.job.get("source_ids"),
+        },
+        "plans": [
+            {"id": k, "name": v["name"], "active": k == w["active_plan"]} for k, v in w["plans"].items()
+        ],
+        "plan": {
+            "id": view.plan_id,
+            "name": p["name"],
+            "revision": view.revision,
+            "options": p["options"],
+            "final": short(p.get("final")),
+            "script_stale": bool(w.get("script_stale")) if view.active else None,
+            "template_id": p["options"].get("template_id", "base"),
+            "script_template_changed": bool(w.get("script_template_changed")) if view.active else None,
+            "script_profile_changed": bool(w.get("script_profile_changed")) if view.active else None,
+        },
         "script": view.script(),
         "shots": view.shot_rows(),
-        "recent_builds": [{"id": b["id"], "status": b["status"], "created_at": b["created_at"]} for b in builds],
+        "recent_builds": [
+            {"id": b["id"], "status": b["status"], "created_at": b["created_at"]} for b in builds
+        ],
         "tts": w.get("tts_settings"),
     }
     lines = [
         f"任务 {view.job['id']}「{view.job['title']}」",
-        "方案：" + "；".join(f"{x['name']}({x['id']}){'【当前】' if x['active'] else ''}" for x in value["plans"]),
+        "方案："
+        + "；".join(f"{x['name']}({x['id']}){'【当前】' if x['active'] else ''}" for x in value["plans"]),
         f"查看方案 {p['name']}({view.plan_id}) revision={view.revision}",
         f"方案参数：{p['options']}",
         f"文案：{clip(view.script(), 300) if view.script() else '（尚无文案）'}",
@@ -73,7 +92,10 @@ async def get_workspace_summary(args: WorkspaceSummary, ctx: ToolContext) -> Too
     if value["plan"]["script_stale"]:
         lines.append("注意：文案已变化，现有分镜按旧文案拆出，构建时会重新拆分镜。")
     if value["plan"]["script_template_changed"]:
-        lines.append("提示：所选文案模板或提示词与当前文案生成时不同；已有文案不会自动重写，需要时用 run_node 重新生成文案。")
+        lines.append(
+            "提示：所选文案模板或提示词与当前文案生成时不同；已有文案不会自动重写，需要时用 run_node "
+            "重新生成文案。"
+        )
     if value["plan"].get("script_profile_changed"):
         lines.append("提示：账号档案已同步，当前文案按旧档案写成；需要时用 run_node 重新生成文案。")
     lines.append(f"分镜 {len(view.order)} 个（状态标记 ✓完成 ✗失败 —缺失）：")
@@ -81,16 +103,21 @@ async def get_workspace_summary(args: WorkspaceSummary, ctx: ToolContext) -> Too
     lines.append(f"成片版本：{short(p.get('final')) or '（尚无成片）'}")
     if builds:
         lines.append("最近构建：" + "；".join(f"{b['id']} {b['status']}" for b in builds))
-    return ToolOutput(value, text="\n".join(lines),
-                      meta={"kind": "workspace", "job_id": view.job["id"], "plan_id": view.plan_id},
-                      focus={"page": "studio", "job_id": view.job["id"], "plan_id": view.plan_id,
-                             "section": "storyboard"},
-                      media=final_media(view))
+    return ToolOutput(
+        value,
+        text="\n".join(lines),
+        meta={"kind": "workspace", "job_id": view.job["id"], "plan_id": view.plan_id},
+        focus={"page": "studio", "job_id": view.job["id"], "plan_id": view.plan_id, "section": "storyboard"},
+        media=final_media(view),
+    )
 
 
 class ResolveShots(StrictModel):
-    refs: list[str] = Field(min_length=1, max_length=50,
-                            description="用户提到的分镜：完整 ID、界面短 ID（如 a1daad59 或 shot-a1daad59）或 #序号")
+    refs: list[str] = Field(
+        min_length=1,
+        max_length=50,
+        description="用户提到的分镜：完整 ID、界面短 ID（如 a1daad59 或 shot-a1daad59）或 #序号",
+    )
     job_id: str | None = JobId
     plan_id: str | None = PlanId
 
@@ -120,17 +147,25 @@ async def resolve_shots(args: ResolveShots, ctx: ToolContext) -> ToolOutput:
     else:
         focus["section"] = "storyboard"
     media = [entry for sid in shots[:4] for entry in shot_media(view, sid)]
-    return ToolOutput({"plan_id": view.plan_id, "results": results}, text="\n".join(lines), focus=focus, media=media)
+    return ToolOutput(
+        {"plan_id": view.plan_id, "results": results}, text="\n".join(lines), focus=focus, media=media
+    )
 
 
 class ShotDetailsArgs(StrictModel):
     refs: list[str] | None = Field(
-        default=None, min_length=1, max_length=50,
-        description="要读取的分镜：完整 ID、界面短 ID（如 a1daad59 或 shot-a1daad59）或 #序号；省略时按顺序读取全部分镜")
+        default=None,
+        min_length=1,
+        max_length=50,
+        description="要读取的分镜：完整 ID、界面短 ID（如 a1daad59 或 shot-a1daad59）或 "
+        "#序号；省略时按顺序读取全部分镜",
+    )
     offset: StrictInt | None = Field(
-        default=None, ge=0, description="仅在省略 refs 时使用：从第几个分镜开始（从 0 计），默认 0")
+        default=None, ge=0, description="仅在省略 refs 时使用：从第几个分镜开始（从 0 计），默认 0"
+    )
     limit: StrictInt | None = Field(
-        default=None, ge=1, le=100, description="仅在省略 refs 时使用：最多返回多少个分镜（1–100），默认 100")
+        default=None, ge=1, le=100, description="仅在省略 refs 时使用：最多返回多少个分镜（1–100），默认 100"
+    )
     job_id: str | None = JobId
     plan_id: str | None = PlanId
 
@@ -157,23 +192,42 @@ async def get_shot_details(args: ShotDetailsArgs, ctx: ToolContext) -> ToolOutpu
         details = page_details(view, offset, limit)
         text, shown = render_list(header, details, offset)
         has_more = offset + shown < header["total"]
-        value = {**header, "mode": "list", "offset": offset, "returned": shown, "has_more": has_more,
-                 "next_offset": offset + shown if has_more else None, "shots": details[:shown]}
+        value = {
+            **header,
+            "mode": "list",
+            "offset": offset,
+            "returned": shown,
+            "has_more": has_more,
+            "next_offset": offset + shown if has_more else None,
+            "shots": details[:shown],
+        }
         focus = details_focus(view, None)
     else:
         items = resolve_refs(view, args.refs)
         text, rendered = render_refs(header, items)
-        value = {**header, "mode": "refs", "returned": sum(item["status"] == "ok" for item in items),
-                 "unrendered_refs": [item["ref"] for item in items[rendered:] if item["status"] == "ok"],
-                 "results": items}
+        value = {
+            **header,
+            "mode": "refs",
+            "returned": sum(item["status"] == "ok" for item in items),
+            "unrendered_refs": [item["ref"] for item in items[rendered:] if item["status"] == "ok"],
+            "results": items,
+        }
         focus = details_focus(view, items)
-    shown_ids = ([d["shot_id"] for d in value["shots"]] if args.refs is None
-                 else list(dict.fromkeys(item["shot_id"] for item in value["results"] if item["status"] == "ok")))
-    media = [entry for sid in shown_ids
-             for entry in (*generated_media(view, sid), *animation_media(view, sid))][:6]
-    return ToolOutput(value, text=text,
-                      meta={"kind": "shot_details", "job_id": view.job["id"], "plan_id": view.plan_id},
-                      focus=focus, media=media or None)
+    shown_ids = (
+        [d["shot_id"] for d in value["shots"]]
+        if args.refs is None
+        else list(dict.fromkeys(item["shot_id"] for item in value["results"] if item["status"] == "ok"))
+    )
+    media = [
+        entry for sid in shown_ids for entry in (*generated_media(view, sid), *animation_media(view, sid))
+    ][:6]
+    return ToolOutput(
+        value,
+        text=text,
+        meta={"kind": "shot_details", "job_id": view.job["id"], "plan_id": view.plan_id},
+        focus=focus,
+        media=media or None,
+    )
 
 
 class Preflight(StrictModel):
@@ -188,27 +242,46 @@ def summarize_nodes(nodes: list[dict]) -> tuple[dict, list[str]]:
     for n in nodes:
         if n["action"] == "reuse":
             continue
-        target = f"{STAGE_LABELS.get(n['stage'], n['stage'])}" + (f" {short(n['shot_id'])}" if n["shot_id"] else "")
-        lines.append(f"- {target}：{ {'rebuild': '重建', 'blocked': '阻塞', 'skip': '跳过'}.get(n['action'], n['action'])}"
-                     f"（{n.get('reason', '')}）")
+        target = f"{STAGE_LABELS.get(n['stage'], n['stage'])}" + (
+            f" {short(n['shot_id'])}" if n["shot_id"] else ""
+        )
+        lines.append(
+            f"- "
+            f"{target}："
+            f"{ {'rebuild': '重建', 'blocked': '阻塞', 'skip': '跳过'}.get(n['action'], n['action']) }"
+            f"（{n.get('reason', '')}）"
+        )
     return dict(counts), lines
 
 
 async def get_preflight(args: Preflight, ctx: ToolContext) -> ToolOutput:
     view = await load_view(ctx, args.job_id, args.plan_id)
-    data = check(await ctx.client.get(
-        f"/api/studio/jobs/{view.job['id']}/plans/{view.plan_id}/preflight", force=str(args.force).lower()),
-        "构建预检")
+    data = check(
+        await ctx.client.get(
+            f"/api/studio/jobs/{view.job['id']}/plans/{view.plan_id}/preflight", force=str(args.force).lower()
+        ),
+        "构建预检",
+    )
     counts, lines = summarize_nodes(data["nodes"])
-    text = (f"预检（方案 {view.plan_id}）：重建 {counts.get('rebuild', 0)}，复用 {counts.get('reuse', 0)}，"
-            f"阻塞 {counts.get('blocked', 0)}，跳过 {counts.get('skip', 0)}\n" + ("\n".join(lines) or "全部可复用"))
-    shots = list(dict.fromkeys(n["shot_id"] for n in data["nodes"]
-                               if n["shot_id"] and n["action"] in ("rebuild", "blocked")))[:20]
+    text = (
+        f"预检（方案 {view.plan_id}）：重建 {counts.get('rebuild', 0)}，复用 {counts.get('reuse', 0)}，"
+        f"阻塞 {counts.get('blocked', 0)}，跳过 {counts.get('skip', 0)}\n"
+        + ("\n".join(lines) or "全部可复用")
+    )
+    shots = list(
+        dict.fromkeys(
+            n["shot_id"] for n in data["nodes"] if n["shot_id"] and n["action"] in ("rebuild", "blocked")
+        )
+    )[:20]
     focus = {"page": "studio", "job_id": view.job["id"], "plan_id": view.plan_id, "section": "storyboard"}
     if shots:
         focus["shots"] = shots
-    return ToolOutput({"counts": counts, "nodes": data["nodes"], "token": data["token"]}, text=text,
-                      meta={"kind": "preflight", "counts": counts}, focus=focus)
+    return ToolOutput(
+        {"counts": counts, "nodes": data["nodes"], "token": data["token"]},
+        text=text,
+        meta={"kind": "preflight", "counts": counts},
+        focus=focus,
+    )
 
 
 class BuildStatus(StrictModel):
@@ -228,8 +301,15 @@ async def get_build_status(args: BuildStatus, ctx: ToolContext) -> ToolOutput:
         raise ToolError("没有找到构建记录", code="missing_build")
     counts = dict(Counter(n.get("status", "pending") for n in build["nodes"]))
     problems = [
-        {"key": n["key"], "stage": n["stage"], "shot_id": n["shot_id"], "status": n["status"], "error": n.get("error")}
-        for n in build["nodes"] if n.get("status") in ("failed", "blocked")
+        {
+            "key": n["key"],
+            "stage": n["stage"],
+            "shot_id": n["shot_id"],
+            "status": n["status"],
+            "error": n.get("error"),
+        }
+        for n in build["nodes"]
+        if n.get("status") in ("failed", "blocked")
     ]
     logs = []
     if args.log_lines:
@@ -238,31 +318,64 @@ async def get_build_status(args: BuildStatus, ctx: ToolContext) -> ToolOutput:
             logs = [
                 f"{(i.get('stage') or '')} {short(i.get('shot_id')) or ''} {i.get('message', '')}".strip()
                 for i in result["data"]["items"]
-            ][-args.log_lines:]
-    value = {"build_id": build["id"], "plan_id": build["plan_id"], "status": build["status"], "counts": counts,
-             "problems": problems, "error": build.get("error"), "logs": logs}
+            ][-args.log_lines :]
+    value = {
+        "build_id": build["id"],
+        "plan_id": build["plan_id"],
+        "status": build["status"],
+        "counts": counts,
+        "problems": problems,
+        "error": build.get("error"),
+        "logs": logs,
+    }
     lines = [f"构建 {build['id']}：{build['status']}，节点状态 {counts}"]
     if build.get("error"):
         lines.append(f"错误：{build['error']}")
     for item in problems:
-        lines.append(f"- {STAGE_LABELS.get(item['stage'], item['stage'])} {short(item['shot_id']) or ''}"
-                     f" {item['status']}：{item['error']}")
+        lines.append(
+            f"- {STAGE_LABELS.get(item['stage'], item['stage'])} {short(item['shot_id']) or ''}"
+            f" {item['status']}：{item['error']}"
+        )
     if logs:
         lines.append("最近日志：\n" + "\n".join(logs))
-    focus = {"page": "studio", "job_id": view.job["id"], "plan_id": build["plan_id"], "section": "log",
-             "build_id": build["id"]}
+    focus = {
+        "page": "studio",
+        "job_id": view.job["id"],
+        "plan_id": build["plan_id"],
+        "section": "log",
+        "build_id": build["id"],
+    }
     failed = list(dict.fromkeys(item["shot_id"] for item in problems if item["shot_id"]))[:20]
     if failed:
         focus["shots"] = failed
-    return ToolOutput(value, text="\n".join(lines),
-                      meta={"kind": "build", "job_id": view.job["id"], "build_id": build["id"], "status": build["status"]},
-                      focus=focus, media=final_media(view) if build["status"] == "complete" else None)
+    return ToolOutput(
+        value,
+        text="\n".join(lines),
+        meta={"kind": "build", "job_id": view.job["id"], "build_id": build["id"], "status": build["status"]},
+        focus=focus,
+        media=final_media(view) if build["status"] == "complete" else None,
+    )
 
 
 class ListVersions(StrictModel):
     job_id: str | None = JobId
-    stage: Literal["script", "content", "recall", "tts", "music", "draw", "generate", "animate", "select", "overlay",
-                   "render", "compose"] | None = None
+    stage: (
+        Literal[
+            "script",
+            "content",
+            "recall",
+            "tts",
+            "music",
+            "draw",
+            "generate",
+            "animate",
+            "select",
+            "overlay",
+            "render",
+            "compose",
+        ]
+        | None
+    ) = None
     shot: str | None = Field(default=None, description="分镜：完整 ID、短 ID 或 #序号")
     limit: int = Field(default=20, ge=1, le=100)
 
@@ -273,63 +386,124 @@ async def list_versions(args: ListVersions, ctx: ToolContext) -> ToolOutput:
     if args.shot:
         resolved = resolve_shot(view.order, args.shot)
         if resolved["status"] != "ok":
-            raise ToolError(f"无法确定分镜 {args.shot}：{resolved['status']}", code="unresolved_shot", value=resolved)
+            raise ToolError(
+                f"无法确定分镜 {args.shot}：{resolved['status']}", code="unresolved_shot", value=resolved
+            )
         shot_id = resolved["shot_id"]
     selected = {view.plan.get("script"), view.plan.get("final"), view.plan.get("board")}
     for item in view.plan["shots"].values():
         selected.update(item.values())
     items = [
-        v for v in view.w["versions"].values()
+        v
+        for v in view.w["versions"].values()
         if (args.stage is None or v["stage"] == args.stage) and (shot_id is None or v["shot_id"] == shot_id)
-    ][-args.limit:]
-    rows = [{"version_id": v["id"], "short_id": short(v["id"]), "stage": v["stage"], "shot_id": v["shot_id"],
-             "status": v["status"], "created_at": v["created_at"], "selected": v["id"] in selected,
-             "error": v.get("error")} for v in reversed(items)]
-    text = "\n".join(
-        f"{r['short_id']} {STAGE_LABELS.get(r['stage'], r['stage'])} {short(r['shot_id']) or ''} {r['status']} "
-        f"{r['created_at']}{' 【当前选用】' if r['selected'] else ''}{(' 错误：' + r['error']) if r['error'] else ''}"
-        for r in rows
-    ) or "（没有匹配的版本）"
+    ][-args.limit :]
+    rows = [
+        {
+            "version_id": v["id"],
+            "short_id": short(v["id"]),
+            "stage": v["stage"],
+            "shot_id": v["shot_id"],
+            "status": v["status"],
+            "created_at": v["created_at"],
+            "selected": v["id"] in selected,
+            "error": v.get("error"),
+        }
+        for v in reversed(items)
+    ]
+    text = (
+        "\n".join(
+            f"{r['short_id']} {STAGE_LABELS.get(r['stage'], r['stage'])} {short(r['shot_id']) or ''} "
+            f"{r['status']} "
+            f"{r['created_at']}{' 【当前选用】' if r['selected'] else ''}"
+            f"{(' 错误：' + r['error']) if r['error'] else ''}"
+            for r in rows
+        )
+        or "（没有匹配的版本）"
+    )
     focus = {"page": "studio", "job_id": view.job["id"], "plan_id": view.plan_id}
     if shot_id:
-        focus.update(shots=[shot_id],
-                     stage=args.stage if args.stage in ("content", "music", "draw", "generate", "animate", *STAGES) else "content")
+        focus.update(
+            shots=[shot_id],
+            stage=args.stage
+            if args.stage in ("content", "music", "draw", "generate", "animate", *STAGES)
+            else "content",
+        )
     elif args.stage == "script":
         focus["section"] = "script"
     elif args.stage == "compose":
         focus["section"] = "final"
     else:
         focus["section"] = "storyboard"
-    media = [entry for row in rows[:10]
-             for entry in version_media(view.version(row["version_id"]),
-                                        f"{STAGE_LABELS.get(row['stage'], row['stage'])} {row['short_id']}",
-                                        collapsed=row["stage"] != "compose")]
+    media = [
+        entry
+        for row in rows[:10]
+        for entry in version_media(
+            view.version(row["version_id"]),
+            f"{STAGE_LABELS.get(row['stage'], row['stage'])} {row['short_id']}",
+            collapsed=row["stage"] != "compose",
+        )
+    ]
     return ToolOutput({"items": rows}, text=text, focus=focus, media=media)
 
 
 def specs() -> list[ToolSpec]:
     return [
         ToolSpec("list_jobs", "studio", "列出创作任务（ID、标题、创建时间）。", ListJobs, "read", list_jobs),
-        ToolSpec("get_workspace_summary", "studio",
-                 "读取创作任务的工作台：方案、方案参数、revision、文案、分镜表（序号、短ID、完整ID、旁白、查询、各阶段状态；"
-                 "旁白与画面意象截断到 60 字、查询截断到 30 字，完整内容用 get_shot_details 读取）、"
-                 "成片与最近构建。修改分镜或方案前先调用它获取最新状态。",
-                 WorkspaceSummary, "read", get_workspace_summary),
-        ToolSpec("resolve_shots", "studio",
-                 "把用户提到的分镜（界面短 ID、完整 ID 或 #序号）解析为完整分镜 ID；有歧义时返回候选，须向用户确认。",
-                 ResolveShots, "read", resolve_shots),
-        ToolSpec("get_shot_details", "studio",
-                 "读取分镜的完整详情（不截断）：旁白、查询、画面意象、预估时长、召回粒度/数量与召回设置、人工区间、"
-                 "召回/配音/选片/渲染各阶段状态、字幕文本与时间轴（秒）、配音时长（秒）。省略 refs 时按顺序分页读取全部分镜"
-                 "（offset/limit，结果给出下一次 offset）；提供 refs（短 ID、完整 ID 或 #序号）时读取指定分镜。"
-                 "aigc 分镜附生成状态与生成画面，animation 分镜附动画源码版本、沙箱预览地址与录制画面。"
-                 "拆分、合并或改写旁白前必须先用它读取完整旁白。",
-                 ShotDetailsArgs, "read", get_shot_details),
-        ToolSpec("get_preflight", "studio",
-                 "构建预检：列出构建成片时哪些节点会重建、复用、阻塞或跳过，以及阻塞原因。不执行任何构建。",
-                 Preflight, "read", get_preflight),
-        ToolSpec("get_build_status", "studio", "查看构建执行状态、失败或阻塞的节点及原因、最近执行日志。",
-                 BuildStatus, "read", get_build_status),
-        ToolSpec("list_versions", "studio", "列出产物版本历史（可按阶段与分镜过滤），标出当前选用的版本。",
-                 ListVersions, "read", list_versions),
+        ToolSpec(
+            "get_workspace_summary",
+            "studio",
+            "读取创作任务的工作台：方案、方案参数、revision、文案、分镜表（序号、短ID、完整ID、旁白、查询、各阶段状态；"
+            "旁白与画面意象截断到 60 字、查询截断到 30 字，完整内容用 get_shot_details 读取）、"
+            "成片与最近构建。修改分镜或方案前先调用它获取最新状态。",
+            WorkspaceSummary,
+            "read",
+            get_workspace_summary,
+        ),
+        ToolSpec(
+            "resolve_shots",
+            "studio",
+            "把用户提到的分镜（界面短 ID、完整 ID 或 #序号）解析为完整分镜 "
+            "ID；有歧义时返回候选，须向用户确认。",
+            ResolveShots,
+            "read",
+            resolve_shots,
+        ),
+        ToolSpec(
+            "get_shot_details",
+            "studio",
+            "读取分镜的完整详情（不截断）：旁白、查询、画面意象、预估时长、召回粒度/数量与召回设置、人工区间、"
+            "召回/配音/选片/渲染各阶段状态、字幕文本与时间轴（秒）、配音时长（秒）。省略 refs "
+            "时按顺序分页读取全部分镜"
+            "（offset/limit，结果给出下一次 offset）；提供 refs（短 ID、完整 ID 或 #序号）时读取指定分镜。"
+            "aigc 分镜附生成状态与生成画面，animation 分镜附动画源码版本、沙箱预览地址与录制画面。"
+            "拆分、合并或改写旁白前必须先用它读取完整旁白。",
+            ShotDetailsArgs,
+            "read",
+            get_shot_details,
+        ),
+        ToolSpec(
+            "get_preflight",
+            "studio",
+            "构建预检：列出构建成片时哪些节点会重建、复用、阻塞或跳过，以及阻塞原因。不执行任何构建。",
+            Preflight,
+            "read",
+            get_preflight,
+        ),
+        ToolSpec(
+            "get_build_status",
+            "studio",
+            "查看构建执行状态、失败或阻塞的节点及原因、最近执行日志。",
+            BuildStatus,
+            "read",
+            get_build_status,
+        ),
+        ToolSpec(
+            "list_versions",
+            "studio",
+            "列出产物版本历史（可按阶段与分镜过滤），标出当前选用的版本。",
+            ListVersions,
+            "read",
+            list_versions,
+        ),
     ]

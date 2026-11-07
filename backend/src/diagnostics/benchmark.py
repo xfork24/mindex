@@ -1,3 +1,5 @@
+"""模型服务基准测试:嵌入延迟与吞吐的采样工具。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -5,9 +7,9 @@ from time import perf_counter
 
 import numpy as np
 
-from mindex.models.adapters import ModelError, make_embedder, request
-from mindex.shared.config import Config, fingerprint
-from mindex.shared.media import probe
+from models.adapters import ModelError, make_embedder, request
+from shared.config import Config, fingerprint
+from shared.media import probe
 
 
 def model_check(config: Config, video: Path, text: str, repeats: int = 3) -> dict:

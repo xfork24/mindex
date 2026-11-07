@@ -1,4 +1,5 @@
 """索引持久链与调度周期：检查真实账本、发布指针及跨节点重放，而非只检查 HTTP。"""
+
 from __future__ import annotations
 
 import os
@@ -9,16 +10,16 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
-from conftest import FixtureEmbedder
 from fastapi.testclient import TestClient
 
-from mindex.admin.source_tasks import IndexTasks
-from mindex.settings.runtime_settings import RuntimeConfig
-from mindex.shared.config import Config
-from mindex.shared.storage import Store
-from mindex.topics import profiles, scheduler
-from mindex.topics.models import ProfileBody, Schedule
-from mindex.topics.runner import TopicRuns
+from admin.source_tasks import IndexTasks
+from conftest import FixtureEmbedder
+from settings.runtime_settings import RuntimeConfig
+from shared.config import Config
+from shared.storage import Store
+from topics import profiles, scheduler
+from topics.models import ProfileBody, Schedule
+from topics.runner import TopicRuns
 
 
 @pytest.fixture
@@ -28,15 +29,19 @@ def pg_config(tmp_path, monkeypatch):
         pytest.skip("需要隔离 MINDEX_TEST_POSTGRES_DSN")
     import psycopg
 
-    from mindex.shared.db.migrate_pg import migrate_pg
+    from shared.db.migrate_pg import migrate_pg
 
     monkeypatch.setenv("MINDEX_DATABASE_DSN", dsn)
     with psycopg.connect(dsn, autocommit=True) as db:
         db.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public")
     with psycopg.connect(dsn) as db:
         migrate_pg(db)
-    return Config(data_dir=tmp_path / "api", database={"backend": "postgres"},
-                  queue={"backend": "postgres"}, locks={"backend": "postgres"})
+    return Config(
+        data_dir=tmp_path / "api",
+        database={"backend": "postgres"},
+        queue={"backend": "postgres"},
+        locks={"backend": "postgres"},
+    )
 
 
 def index_runner(config):
@@ -65,15 +70,15 @@ def wait_task(client, task_id):
         task = client.get(f"/api/index-tasks/{task_id}").json()
         if task["status"] not in {"queued", "running"}:
             return task
-        time.sleep(.02)
+        time.sleep(0.02)
     pytest.fail("索引任务未按时结束")
 
 
 def test_local_index_task_rest_and_cli(config, tmp_path):
     from typer.testing import CliRunner
 
-    from mindex.api import create_app
-    from mindex.cli import app
+    from api import create_app
+    from cli import app
 
     ready(Store.open(config))
     with TestClient(create_app(config)) as client:
@@ -99,22 +104,26 @@ def test_scheduler_uses_library_timezone_and_period_replay(config, monkeypatch):
     runs = TopicRuns(runtime, store)
     # 保留 queued 账本，以便直接核对周期占位；不执行网络挖掘。
     monkeypatch.setattr(runs, "launch", lambda task_id, config, lock: lock.release())
-    profile = profiles.create_profile(store, ProfileBody(name="财经", domain="金融",
-        schedule=Schedule(enabled=True, time="08:00")))["id"]
+    profile = profiles.create_profile(
+        store, ProfileBody(name="财经", domain="金融", schedule=Schedule(enabled=True, time="08:00"))
+    )["id"]
     now = datetime(2026, 11, 5, 0, 1, tzinfo=ZoneInfo("UTC"))
     sched = scheduler.TopicScheduler(store, runs, timezone="Asia/Shanghai", clock=lambda: now)
     ids = sched.tick()
     assert len(ids) == 1  # 节点为 UTC，当地库时间已到 08:01。
     assert sched.tick() == []
     stamp = now.astimezone(ZoneInfo("Asia/Shanghai")).isoformat()
-    again = runs.start_scheduled(profile, period="2026-11-05", ordinal=1,
-                                 trigger="catchup", created_at=stamp)
+    again = runs.start_scheduled(profile, period="2026-11-05", ordinal=1, trigger="catchup", created_at=stamp)
     assert again["id"] == ids[0]
     store.execute("UPDATE topic_runs SET status='failed' WHERE id=?", (ids[0],))
     second = sched.tick()
     assert len(second) == 1 and second != ids
-    assert runs.start_scheduled(profile, period="2026-11-05", ordinal=1,
-                                trigger="schedule", created_at=stamp)["id"] == ids[0]
+    assert (
+        runs.start_scheduled(profile, period="2026-11-05", ordinal=1, trigger="schedule", created_at=stamp)[
+            "id"
+        ]
+        == ids[0]
+    )
     store.execute("UPDATE topic_runs SET status='failed' WHERE id=?", (second[0],))
     third = sched.tick()
     store.execute("UPDATE topic_runs SET status='failed' WHERE id=?", (third[0],))
@@ -130,9 +139,9 @@ def test_scheduler_uses_library_timezone_and_period_replay(config, monkeypatch):
 def test_remote_mcp_does_not_open_local_library(config, tmp_path, monkeypatch):
     from typer.testing import CliRunner
 
-    from mindex.agent import mcp_server
-    from mindex.cli import app
-    from mindex.settings import runtime_settings
+    from agent import mcp_server
+    from cli import app
+    from settings import runtime_settings
 
     def unexpected(*args, **kwargs):
         raise AssertionError("远程 stdio 不得打开本地库或会话")
@@ -157,8 +166,9 @@ def test_remote_mcp_does_not_open_local_library(config, tmp_path, monkeypatch):
 
 @pytest.mark.requires_postgres
 def test_publication_lock_is_held_through_terminal_commit(pg_config, tmp_path):
-    from mindex.shared.db.fencing import publication_scope
-    from mindex.worker_runtime import Worker
+    from worker_runtime import Worker
+
+    from shared.db.fencing import publication_scope
 
     runner = index_runner(pg_config)
     ready(runner.store, "first")
@@ -196,7 +206,7 @@ def test_publication_lock_is_held_through_terminal_commit(pg_config, tmp_path):
         assert registered.wait(5)
         b.start()
         assert waiting.wait(5)
-        assert not inherited.wait(.15)
+        assert not inherited.wait(0.15)
     finally:
         release.set()
         a.join(8)
@@ -210,7 +220,7 @@ def test_publication_lock_is_held_through_terminal_commit(pg_config, tmp_path):
 
 @pytest.mark.requires_postgres
 def test_person_publication_and_release_activation_use_index_queue(pg_config):
-    from mindex.worker_runtime import Worker
+    from worker_runtime import Worker
 
     runner = index_runner(pg_config)
     ready(runner.store)
@@ -230,15 +240,19 @@ def test_person_publication_and_release_activation_use_index_queue(pg_config):
 
 @pytest.mark.requires_postgres
 def test_index_api_queue_cancel_retry_and_real_lexical_worker(pg_config, tmp_path):
-    from mindex.api import create_app
-    from mindex.worker_runtime import Worker
+    from worker_runtime import Worker
+
+    from api import create_app
 
     runner = index_runner(pg_config)
     ready(runner.store)
     with TestClient(create_app(pg_config)) as client:
         task = client.post("/api/index-tasks", json={"action": "lexical", "index_id": "v"}).json()
         assert task["status"] == "queued"
-        assert runner.store.one("SELECT kind,status FROM task_queue") == {"kind": "index", "status": "pending"}
+        assert runner.store.one("SELECT kind,status FROM task_queue") == {
+            "kind": "index",
+            "status": "pending",
+        }
         assert client.post(f"/api/index-tasks/{task['id']}/cancel").json()["status"] == "cancelled"
         assert client.post(f"/api/index-tasks/{task['id']}/retry").json()["status"] == "queued"
     other = pg_config.model_copy(update={"data_dir": tmp_path / "worker"})
@@ -250,7 +264,7 @@ def test_index_api_queue_cancel_retry_and_real_lexical_worker(pg_config, tmp_pat
 
 @pytest.mark.requires_postgres
 def test_worker_waits_for_submission_lock_instead_of_failing(pg_config):
-    from mindex.worker_runtime import Worker
+    from worker_runtime import Worker
 
     runner = index_runner(pg_config)
     ready(runner.store)
@@ -271,10 +285,13 @@ def test_worker_waits_for_submission_lock_instead_of_failing(pg_config):
         for _ in range(100):
             if runner.get(task["id"])["status"] == "running":
                 break
-            time.sleep(.02)
+            time.sleep(0.02)
         assert runner.get(task["id"])["status"] == "running"
-        time.sleep(.1)
-        assert runner.store.one("SELECT attempts,status FROM task_queue") == {"attempts": 1, "status": "running"}
+        time.sleep(0.1)
+        assert runner.store.one("SELECT attempts,status FROM task_queue") == {
+            "attempts": 1,
+            "status": "running",
+        }
     finally:
         lock.release()
         thread.join(8)
@@ -283,10 +300,14 @@ def test_worker_waits_for_submission_lock_instead_of_failing(pg_config):
 
 
 @pytest.mark.requires_postgres
-@pytest.mark.parametrize("outcome", ["success", "thread", "failure", "cancel", "expired", "lease-expired", "rebound", "invalid-publication"])
+@pytest.mark.parametrize(
+    "outcome",
+    ["success", "thread", "failure", "cancel", "expired", "lease-expired", "rebound", "invalid-publication"],
+)
 def test_publication_is_invisible_until_terminal_transaction(pg_config, outcome):
-    from mindex.shared.db.fencing import publication_scope
-    from mindex.worker_runtime import Worker
+    from worker_runtime import Worker
+
+    from shared.db.fencing import publication_scope
 
     runner = index_runner(pg_config)
     ready(runner.store)
@@ -299,7 +320,9 @@ def test_publication_is_invisible_until_terminal_transaction(pg_config, outcome)
 
         def publish():
             with publication_scope(store, config=config):
-                store.activate("missing" if outcome == "invalid-publication" else "v", execution=claimed.execution)
+                store.activate(
+                    "missing" if outcome == "invalid-publication" else "v", execution=claimed.execution
+                )
 
         if outcome == "thread":
             from concurrent.futures import ThreadPoolExecutor
@@ -313,8 +336,14 @@ def test_publication_is_invisible_until_terminal_transaction(pg_config, outcome)
         if outcome == "failure":
             raise ValueError("模拟发布登记后执行失败")
 
-    worker = Worker(pg_config, queues=["index"], once=True, task_ttl=.8 if outcome == "expired" else 30,
-                    renew_interval=10, extra_handlers={"index": handler})
+    worker = Worker(
+        pg_config,
+        queues=["index"],
+        once=True,
+        task_ttl=0.8 if outcome == "expired" else 30,
+        renew_interval=10,
+        extra_handlers={"index": handler},
+    )
 
     def run():
         try:
@@ -335,7 +364,9 @@ def test_publication_is_invisible_until_terminal_transaction(pg_config, outcome)
         if outcome == "lease-expired":
             runner.store.execute("DELETE FROM lock_holders WHERE name='index-write'")
         if outcome == "rebound":
-            runner.store.execute("UPDATE index_tasks SET queue_attempt_id='new-attempt' WHERE id=?", (task["id"],))
+            runner.store.execute(
+                "UPDATE index_tasks SET queue_attempt_id='new-attempt' WHERE id=?", (task["id"],)
+            )
     finally:
         release.set()
         thread.join(8)
@@ -348,19 +379,20 @@ def test_publication_is_invisible_until_terminal_transaction(pg_config, outcome)
         assert runner.store.active_index() is None
         assert runner.get(task["id"])["status"] != "complete" and row["status"] != "succeeded"
     # 失败/取消/失联都必须释放 attempt 持有的发布锁。
-    from mindex.shared import lock_backend
+    from shared import lock_backend
+
     with lock_backend.named(runner.store, "index-write", exclusive=True, timeout=0):
         pass
 
 
 @pytest.mark.requires_postgres
 def test_real_visual_index_build_dispatches_without_caller_lock(pg_config, video_file, monkeypatch):
-    from conftest import FixtureAnalyzer
+    from worker_runtime import Worker
 
-    from mindex.models import adapters
-    from mindex.processing.indexing import IndexBuilder
-    from mindex.processing.pipeline import Pipeline
-    from mindex.worker_runtime import Worker
+    from conftest import FixtureAnalyzer
+    from models import adapters
+    from processing.indexing import IndexBuilder
+    from processing.pipeline import Pipeline
 
     embedder = FixtureEmbedder(pg_config)
     Pipeline(pg_config, analyzer=FixtureAnalyzer(embedder)).prepare(video_file)
@@ -381,7 +413,7 @@ def test_real_visual_index_build_dispatches_without_caller_lock(pg_config, video
         for _ in range(100):
             if runner.store.one("SELECT id FROM index_tasks"):
                 break
-            time.sleep(.02)
+            time.sleep(0.02)
         pg_config.embedding.model = "changed-after-submission"
         assert Worker(pg_config, queues=["index"], once=True).run() == 1
     finally:
@@ -394,18 +426,29 @@ def test_real_visual_index_build_dispatches_without_caller_lock(pg_config, video
 
 @pytest.mark.requires_postgres
 def test_scheduler_leader_rotation_replays_one_period_across_directories(pg_config, tmp_path, monkeypatch):
-    from mindex.shared.db.locks_pg import PgLockProvider
-    from mindex.shared.db.queue_pg import PgTaskQueue
+    from shared.db.locks_pg import PgLockProvider
+    from shared.db.queue_pg import PgTaskQueue
 
     a, b = Store.open(pg_config), Store.open(pg_config.model_copy(update={"data_dir": tmp_path / "b"}))
-    pid = profiles.create_profile(a, ProfileBody(name="财经", domain="金融",
-        schedule=Schedule(enabled=True, time="08:00")))["id"]
+    pid = profiles.create_profile(
+        a, ProfileBody(name="财经", domain="金融", schedule=Schedule(enabled=True, time="08:00"))
+    )["id"]
     runs_a, runs_b = TopicRuns(RuntimeConfig(pg_config, a), a), TopicRuns(RuntimeConfig(pg_config, b), b)
     instant = datetime(2026, 11, 5, 9, tzinfo=ZoneInfo("Asia/Shanghai"))
-    sa = scheduler.TopicScheduler(a, runs_a, timezone="Asia/Shanghai", clock=lambda: instant,
-        leader=PgLockProvider(a.backend, a.library_id))
-    sb = scheduler.TopicScheduler(b, runs_b, timezone="Asia/Shanghai", clock=lambda: instant,
-        leader=PgLockProvider(b.backend, b.library_id))
+    sa = scheduler.TopicScheduler(
+        a,
+        runs_a,
+        timezone="Asia/Shanghai",
+        clock=lambda: instant,
+        leader=PgLockProvider(a.backend, a.library_id),
+    )
+    sb = scheduler.TopicScheduler(
+        b,
+        runs_b,
+        timezone="Asia/Shanghai",
+        clock=lambda: instant,
+        leader=PgLockProvider(b.backend, b.library_id),
+    )
     lease = sa._leader.lease(scheduler.LEADER_NAME, wait=0)
     try:
         assert sb.tick() == []
@@ -414,8 +457,9 @@ def test_scheduler_leader_rotation_replays_one_period_across_directories(pg_conf
     ids = sa.tick()
     assert len(ids) == 1
     assert sb.tick() == []
-    replay = runs_b.start_scheduled(pid, period="2026-11-05", ordinal=1,
-                                    trigger="catchup", created_at=instant.isoformat())
+    replay = runs_b.start_scheduled(
+        pid, period="2026-11-05", ordinal=1, trigger="catchup", created_at=instant.isoformat()
+    )
     assert replay["id"] == ids[0]
     assert len(a.rows("SELECT * FROM task_queue")) == len(a.rows("SELECT * FROM scheduled_runs")) == 1
     # 周期、账本、队列任一写入失败，都不允许留下其他两项。
@@ -428,8 +472,9 @@ def test_scheduler_leader_rotation_replays_one_period_across_directories(pg_conf
 
     monkeypatch.setattr(PgTaskQueue, "enqueue", crash)
     with pytest.raises(RuntimeError, match="周期入队"):
-        runs_b.start_scheduled(pid, period="2026-11-05", ordinal=2,
-                               trigger="schedule", created_at=instant.isoformat())
+        runs_b.start_scheduled(
+            pid, period="2026-11-05", ordinal=2, trigger="schedule", created_at=instant.isoformat()
+        )
     assert len(a.rows("SELECT * FROM task_queue")) == len(a.rows("SELECT * FROM scheduled_runs")) == 1
     assert len(a.rows("SELECT * FROM topic_runs")) == 1
 
@@ -438,26 +483,41 @@ def test_scheduler_leader_rotation_replays_one_period_across_directories(pg_conf
 def test_v18_upgrade_and_nonempty_execution_tables_export(pg_config, tmp_path):
     import psycopg
 
-    from mindex.maintenance.pg_export import export_pg_to_sqlite
-    from mindex.shared.db.migrate_pg import migrate_pg
+    from maintenance.pg_export import export_pg_to_sqlite
+    from shared.db.migrate_pg import migrate_pg
 
     with psycopg.connect(os.environ["MINDEX_TEST_POSTGRES_DSN"]) as db:
-        before = db.execute("SELECT version,checksum FROM schema_migrations WHERE version<=18 ORDER BY version").fetchall()
-        db.execute("DROP TABLE studio_events; DROP TABLE uploaded_assets; DROP TABLE upload_parts; DROP TABLE upload_sessions; DROP TABLE external_calls; DROP TABLE studio_tasks; DROP TABLE directory_heads; DROP TABLE directory_manifests; DROP TABLE scheduled_runs; DROP TABLE index_tasks; DELETE FROM schema_migrations WHERE version>=19")
+        before = db.execute(
+            "SELECT version,checksum FROM schema_migrations WHERE version<=18 ORDER BY version"
+        ).fetchall()
+        db.execute(
+            "DROP TABLE studio_events; DROP TABLE uploaded_assets; DROP TABLE upload_parts; DROP TABLE "
+            "upload_sessions; DROP TABLE external_calls; DROP TABLE studio_tasks; DROP TABLE "
+            "directory_heads; DROP TABLE directory_manifests; DROP TABLE scheduled_runs; DROP TABLE "
+            "index_tasks; DELETE FROM schema_migrations WHERE version>=19"
+        )
         db.execute("INSERT INTO settings(key,value) VALUES('upgrade-marker','preserve')")
         # 还原至 v18 的真实结构；不能只删除迁移历史而保留后续 ALTER 列。
-        db.execute("DROP TABLE migration_objects; DROP TABLE migration_stages; "
-                   "ALTER TABLE migration_runs DROP COLUMN source_library_id, DROP COLUMN manifest_sha256, "
-                   "DROP COLUMN phase, DROP COLUMN source_tables, DROP COLUMN restored_tables")
+        db.execute(
+            "DROP TABLE migration_objects; DROP TABLE migration_stages; "
+            "ALTER TABLE migration_runs DROP COLUMN source_library_id, DROP COLUMN manifest_sha256, "
+            "DROP COLUMN phase, DROP COLUMN source_tables, DROP COLUMN restored_tables"
+        )
         assert migrate_pg(db) == 25
-        assert db.execute("SELECT version,checksum FROM schema_migrations WHERE version<=18 ORDER BY version").fetchall() == before
+        assert (
+            db.execute(
+                "SELECT version,checksum FROM schema_migrations WHERE version<=18 ORDER BY version"
+            ).fetchall()
+            == before
+        )
     store = Store.open(pg_config)
     assert store.one("SELECT value FROM settings WHERE key='upgrade-marker'")["value"] == "preserve"
     ready(store)
     index = index_runner(pg_config).start({"action": "lexical", "index_id": "v"})
     pid = profiles.create_profile(store, ProfileBody(name="财经", domain="金融"))["id"]
-    topic = TopicRuns(RuntimeConfig(pg_config, store), store).start_scheduled(pid, period="2026-11-05", ordinal=1,
-        trigger="schedule", created_at="2026-11-05T09:00:00+00:00")
+    topic = TopicRuns(RuntimeConfig(pg_config, store), store).start_scheduled(
+        pid, period="2026-11-05", ordinal=1, trigger="schedule", created_at="2026-11-05T09:00:00+00:00"
+    )
     path = tmp_path / "export.sqlite3"
     report = export_pg_to_sqlite(store, path)
     restored = Store(path)

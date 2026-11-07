@@ -9,10 +9,10 @@ import threading
 from fastapi import APIRouter, HTTPException
 from filelock import Timeout
 
-from mindex.admin.curation import EntityNotFound
-from mindex.admin.source_tasks import IndexOptions, IndexTasks
-from mindex.models.adapters import ModelError, MultimodalEmbedder
-from mindex.shared.processing_lock import ProcessingLock, index_write_lock
+from admin.curation import EntityNotFound
+from admin.source_tasks import IndexOptions, IndexTasks
+from models.adapters import ModelError, MultimodalEmbedder
+from shared.processing_lock import ProcessingLock, index_write_lock
 
 log = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ def _require_version(store, index_id: str) -> dict:
 
 def _warm_in_background(config) -> None:
     def run():
-        from mindex.search.warmup import warm_up
+        from search.warmup import warm_up
 
         try:
             warm_up(config, startup=False)
@@ -65,7 +65,7 @@ def indexes_router(runtime, store, embedder: MultimodalEmbedder | None = None) -
     @router.get("/{index_id}/check")
     def check(index_id: str):
         # 同步端点由 FastAPI 放进线程池执行：检查要读取向量库与媒体引用，耗时较长。
-        from mindex.processing.indexing import check_index
+        from processing.indexing import check_index
 
         _require_version(store, index_id)
         issues = check_index(store, index_id, config=runtime.current())
@@ -73,12 +73,12 @@ def indexes_router(runtime, store, embedder: MultimodalEmbedder | None = None) -
 
     @router.post("/{index_id}/activate")
     def activate(index_id: str):
-        from mindex.processing.indexing import check_index
+        from processing.indexing import check_index
 
         config = runtime.current()
         _require_version(store, index_id)
         if config.queue.backend == "postgres":
-            from mindex.admin.source_tasks import IndexTasks
+            from admin.source_tasks import IndexTasks
 
             IndexTasks(runtime, store, embedder).run_here({"action": "activate", "index_id": index_id})
             active = _active(store) or {}
@@ -100,7 +100,7 @@ def indexes_router(runtime, store, embedder: MultimodalEmbedder | None = None) -
                     raise HTTPException(422, {"message": "索引检查失败", "issues": issues})
                 spec = store.index_version(index_id)["spec"]
                 if spec["space"].get("schema") == 2:
-                    from mindex.models.adapters import make_embedder
+                    from models.adapters import make_embedder
 
                     client = embedder or make_embedder(config)
                     if client.identity() != spec["space"]:
@@ -131,10 +131,17 @@ def index_tasks_router(runtime, store, embedder=None) -> APIRouter:
 
     @router.get("")
     def tasks(limit: int = 50):
-        from mindex.shared.background_tasks import public_task
+        from shared.background_tasks import public_task
 
-        return {"items": [public_task(row) for row in store.rows(
-            "SELECT * FROM index_tasks ORDER BY created_at DESC,rowid DESC LIMIT ?", (max(1, min(limit, 200)),))]}
+        return {
+            "items": [
+                public_task(row)
+                for row in store.rows(
+                    "SELECT * FROM index_tasks ORDER BY created_at DESC,rowid DESC LIMIT ?",
+                    (max(1, min(limit, 200)),),
+                )
+            ]
+        }
 
     @router.get("/{task_id}")
     def get(task_id: str):

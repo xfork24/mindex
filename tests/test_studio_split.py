@@ -4,13 +4,14 @@ import base64
 import json
 
 import pytest
-from conftest import FixtureStoryboarder, legacy_job
 
-from mindex.models.adapters import ModelError
-from mindex.models.speech import decode_audio
-from mindex.models.storyboard import QwenStoryboarder
-from mindex.shared.types import ShotDraft
-from mindex.studio import studio, studio_steps
+from conftest import FixtureStoryboarder, legacy_job
+from models.adapters import ModelError
+from models.speech import decode_audio
+from models.storyboard import QwenStoryboarder
+from shared.types import ShotDraft
+from studio import steps as studio_steps
+from studio import studio
 
 
 def chat_payload(content: str, finish_reason: str = "stop") -> dict:
@@ -80,7 +81,8 @@ def test_coverage_warning_for_divergent_text(config):
 
 def test_qwen_storyboarder_retries_invalid_output_with_feedback(config, monkeypatch):
     good = chat_payload(
-        '```json\n{"shots":[{"visual":"山谷间风吹草动","text":"山风掠过山谷。","query":"山峦 空镜 自然 风吹草动",'
+        '```json\n{"shots":[{"visual":"山谷间风吹草动","text":"山风掠过山谷。",'
+        '"query":"山峦 空镜 自然 风吹草动",'
         '"estimated_seconds":2.0}]}\n```'
     )
     responses = iter([chat_payload("这不是 JSON"), good])
@@ -90,7 +92,7 @@ def test_qwen_storyboarder_retries_invalid_output_with_feedback(config, monkeypa
         messages.append(kwargs["json"]["messages"])
         return next(responses)
 
-    monkeypatch.setattr("mindex.models.adapters.request", fake_request)
+    monkeypatch.setattr("models.adapters.request", fake_request)
     drafts = QwenStoryboarder(config).split("山风掠过山谷。")
     assert len(messages) == 2
     feedback = [part["text"] for part in messages[1][-1]["content"] if isinstance(part, dict)]
@@ -99,27 +101,36 @@ def test_qwen_storyboarder_retries_invalid_output_with_feedback(config, monkeypa
 
 
 def _shots_payload(*shots):
-    return chat_payload(json.dumps({"shots": [
-        {"visual": visual, "text": text, "query": "测试 画面", "estimated_seconds": 1.5}
-        for visual, text in shots
-    ]}, ensure_ascii=False))
+    return chat_payload(
+        json.dumps(
+            {
+                "shots": [
+                    {"visual": visual, "text": text, "query": "测试 画面", "estimated_seconds": 1.5}
+                    for visual, text in shots
+                ]
+            },
+            ensure_ascii=False,
+        )
+    )
 
 
 def test_qwen_storyboarder_retries_soft_issues_then_returns_best(config, monkeypatch):
     text = "远处的山峦在晨雾中慢慢显现出来。湖面平静。"
     # 第 1 次：两镜都缺 visual（2 个问题）；第 2 次：1 个问题；第 3 次：覆盖失败。应返回第 2 次。
-    responses = iter([
-        _shots_payload(("", "远处的山峦在晨雾中慢慢显现出来。"), ("", "湖面平静。")),
-        _shots_payload(("晨雾中的山峦", "远处的山峦在晨雾中慢慢显现出来。"), ("", "湖面平静。")),
-        _shots_payload(("湖面", "完全无关的内容。")),
-    ])
+    responses = iter(
+        [
+            _shots_payload(("", "远处的山峦在晨雾中慢慢显现出来。"), ("", "湖面平静。")),
+            _shots_payload(("晨雾中的山峦", "远处的山峦在晨雾中慢慢显现出来。"), ("", "湖面平静。")),
+            _shots_payload(("湖面", "完全无关的内容。")),
+        ]
+    )
     messages = []
 
     def fake_request(method, url, **kwargs):
         messages.append(kwargs["json"]["messages"])
         return next(responses)
 
-    monkeypatch.setattr("mindex.models.adapters.request", fake_request)
+    monkeypatch.setattr("models.adapters.request", fake_request)
     drafts = QwenStoryboarder(config).split(text)
     assert len(messages) == config.studio.generator.split_retries + 1 == 3
     assert drafts[0].visual == "晨雾中的山峦" and drafts[1].visual == ""
@@ -136,7 +147,7 @@ def test_qwen_storyboarder_returns_immediately_without_soft_issues(config, monke
         calls.append(kwargs["json"])
         return _shots_payload(("山谷", "山风掠过山谷。"))
 
-    monkeypatch.setattr("mindex.models.adapters.request", fake_request)
+    monkeypatch.setattr("models.adapters.request", fake_request)
     QwenStoryboarder(config).split("山风掠过山谷。", vocabulary=["山谷", "瀑布"])
     assert len(calls) == 1
     user = calls[0]["messages"][1]["content"]
@@ -152,7 +163,7 @@ def test_qwen_storyboarder_omits_vocabulary_when_absent(config, monkeypatch):
         calls.append(kwargs["json"])
         return _shots_payload(("山谷", "山风掠过山谷。"))
 
-    monkeypatch.setattr("mindex.models.adapters.request", fake_request)
+    monkeypatch.setattr("models.adapters.request", fake_request)
     for vocabulary in (None, []):
         QwenStoryboarder(config).split("山风掠过山谷。", vocabulary=vocabulary)
     assert all(len(call["messages"][1]["content"]) == 1 for call in calls)
@@ -160,7 +171,7 @@ def test_qwen_storyboarder_omits_vocabulary_when_absent(config, monkeypatch):
 
 
 def test_execute_split_passes_vocabulary_keyword(config):
-    from mindex.studio import workspace as ws
+    from studio import workspace as ws
 
     job_id = legacy_job(config, "红色首先出现在画面里。随后蓝色铺满屏幕。")["id"]
     w = ws.load(config, job_id)
@@ -172,34 +183,49 @@ def test_execute_split_passes_vocabulary_keyword(config):
 
 
 def test_qwen_storyboarder_fails_after_exhausted_retries(config, monkeypatch):
-    monkeypatch.setattr("mindex.models.adapters.request", lambda *args, **kwargs: chat_payload("坏输出"))
+    monkeypatch.setattr("models.adapters.request", lambda *args, **kwargs: chat_payload("坏输出"))
     with pytest.raises(ModelError, match="未通过校验"):
         QwenStoryboarder(config).split("任意文本。")
 
 
 def test_qwen_storyboarder_rejects_truncated_output(config, monkeypatch):
     monkeypatch.setattr(
-        "mindex.models.adapters.request", lambda *args, **kwargs: chat_payload("{", finish_reason="length")
+        "models.adapters.request", lambda *args, **kwargs: chat_payload("{", finish_reason="length")
     )
     with pytest.raises(ModelError, match="截断"):
         QwenStoryboarder(config).split("任意文本。")
 
 
 def test_qwen_storyboarder_rejects_empty_content(config, monkeypatch):
-    monkeypatch.setattr("mindex.models.adapters.request", lambda *args, **kwargs: chat_payload("  "))
+    monkeypatch.setattr("models.adapters.request", lambda *args, **kwargs: chat_payload("  "))
     with pytest.raises(ModelError, match="空内容"):
         QwenStoryboarder(config).split("任意文本。")
 
 
 SINGAPORE_TERMS = (
-    "Singapore", "新加坡", "Changi", "樟宜", "Jewel", "星耀", "Marina Bay", "滨海湾", "Sentosa", "圣淘沙",
-    "Merlion", "鱼尾狮", "Gardens by the Bay", "Lion City", "狮城", "Chinatown", "牛车水",
+    "Singapore",
+    "新加坡",
+    "Changi",
+    "樟宜",
+    "Jewel",
+    "星耀",
+    "Marina Bay",
+    "滨海湾",
+    "Sentosa",
+    "圣淘沙",
+    "Merlion",
+    "鱼尾狮",
+    "Gardens by the Bay",
+    "Lion City",
+    "狮城",
+    "Chinatown",
+    "牛车水",
 )
 
 
 def test_split_prompt_preserves_narration_and_requires_chinese_keywords(config, monkeypatch):
     """旁白保留原语言，召回词统一为基于该分镜的 2–5 个中文词。"""
-    from mindex.models.storyboard import QUERY_RULES
+    from models.storyboard import QUERY_RULES
 
     systems = []
     draft = {
@@ -217,7 +243,7 @@ def test_split_prompt_preserves_narration_and_requires_chinese_keywords(config, 
         systems.append(kwargs["json"]["messages"][0]["content"])
         return chat_payload(json.dumps(draft, ensure_ascii=False))
 
-    monkeypatch.setattr("mindex.models.adapters.request", fake_request)
+    monkeypatch.setattr("models.adapters.request", fake_request)
     drafts = QwenStoryboarder(config).split("The wind crossed the valley.")
     assert drafts[0].text == "The wind crossed the valley."
     assert drafts[0].visual == "风吹过山谷的远景"
@@ -232,8 +258,6 @@ def test_split_prompt_preserves_narration_and_requires_chinese_keywords(config, 
     assert "不设最低字数" not in system
 
 
-
-
 def test_shot_schema_keeps_visual_text_query_order():
     assert next(iter(ShotDraft.model_fields)) == "visual"
     assert list(ShotDraft.model_json_schema()["properties"])[:3] == ["visual", "text", "query"]
@@ -241,7 +265,7 @@ def test_shot_schema_keeps_visual_text_query_order():
 
 def test_split_examples_are_one_contrasting_pair_without_singapore():
     """示例恰好一对（具体列举 + 抽象修辞），不涉及新加坡，且自身满足硬校验与软校验（需求 5.9）。"""
-    from mindex.models.storyboard import (
+    from models.storyboard import (
         ABSTRACT_EXAMPLE,
         CONCRETE_EXAMPLE,
         SPLIT_EXAMPLES,
@@ -269,7 +293,7 @@ def test_split_examples_are_one_contrasting_pair_without_singapore():
 
 def test_execute_split_failure_keeps_board(config):
     """拆分失败时只新增失败版本，已有方案的 board 与分镜内容不变（需求 6.6）。"""
-    from mindex.studio import workspace as ws
+    from studio import workspace as ws
 
     class Broken:
         def split(self, text: str, vocabulary: list[str] | None = None) -> list[ShotDraft]:
@@ -316,7 +340,16 @@ def test_qwen_retries_missing_text(config, monkeypatch):
     outputs = iter(
         [
             {"shots": [{"text": "第一句。", "query": "画面", "estimated_seconds": 1}]},
-            {"shots": [{"visual": "两句话的画面", "text": "第一句。第二句。", "query": "画面", "estimated_seconds": 2}]},
+            {
+                "shots": [
+                    {
+                        "visual": "两句话的画面",
+                        "text": "第一句。第二句。",
+                        "query": "画面",
+                        "estimated_seconds": 2,
+                    }
+                ]
+            },
         ]
     )
     calls = []
@@ -325,7 +358,7 @@ def test_qwen_retries_missing_text(config, monkeypatch):
         calls.append(kwargs["json"])
         return chat_payload(json.dumps(next(outputs), ensure_ascii=False))
 
-    monkeypatch.setattr("mindex.models.adapters.request", response)
+    monkeypatch.setattr("models.adapters.request", response)
     drafts = QwenStoryboarder(config).split("第一句。第二句。")
     assert len(calls) == 2
     assert drafts[0].text == "第一句。第二句。"

@@ -9,11 +9,15 @@ function planTemplateId() {
 async function loadScriptTemplates(force = false) {
   if (scriptTemplates.items && !force) return scriptTemplates.items;
   if (!scriptTemplates.loading || force) {
-    scriptTemplates.loading = api("/api/studio/templates").then((data) => {
-      scriptTemplates.items = data.items;
-      scriptTemplates.failed = false;
-      return data.items;
-    }).finally(() => { scriptTemplates.loading = null; });
+    scriptTemplates.loading = api("/api/studio/templates")
+      .then((data) => {
+        scriptTemplates.items = data.items;
+        scriptTemplates.failed = false;
+        return data.items;
+      })
+      .finally(() => {
+        scriptTemplates.loading = null;
+      });
   }
   return scriptTemplates.loading;
 }
@@ -26,7 +30,10 @@ function renderTemplateSelect() {
   const tab = $("studio-templates-tab");
   if (tab) tab.href = templatesPageUrl(null, state.id);
   const topicsTab = $("studio-topics-tab");
-  if (topicsTab) topicsTab.href = state.id ? `/studio/topics?job=${encodeURIComponent(state.id)}` : "/studio/topics";
+  if (topicsTab)
+    topicsTab.href = state.id
+      ? `/studio/topics?job=${encodeURIComponent(state.id)}`
+      : "/studio/topics";
   const changed = $("script-template-changed");
   if (changed) changed.hidden = !state.data.script_template_changed;
   const scopeChanged = $("script-material-scope-changed");
@@ -37,10 +44,12 @@ function renderTemplateSelect() {
   if (!scriptTemplates.items) {
     // 读取失败只提示一次，不在每次重绘时重试；页面重新可见时会重新读取。
     if (!scriptTemplates.failed && !scriptTemplates.loading) {
-      loadScriptTemplates().then(() => state.data && renderTemplateSelect()).catch((error) => {
-        scriptTemplates.failed = true;
-        fail(error);
-      });
+      loadScriptTemplates()
+        .then(() => state.data && renderTemplateSelect())
+        .catch((error) => {
+          scriptTemplates.failed = true;
+          fail(error);
+        });
     }
     return;
   }
@@ -48,7 +57,11 @@ function renderTemplateSelect() {
   const choices = scriptTemplates.items.map((item) => [item.id, templateLabel(item)]);
   // 方案引用的模板不在目录里（理论上已被删除保护拦住）时仍显示其 ID，避免下拉悄悄改值。
   if (!choices.some(([id]) => id === current)) choices.push([current, current]);
-  const key = JSON.stringify([choices.map(([id]) => id), scriptTemplates.items.map((i) => i.updated_at), current]);
+  const key = JSON.stringify([
+    choices.map(([id]) => id),
+    scriptTemplates.items.map((i) => i.updated_at),
+    current,
+  ]);
   if (select.dataset.key !== key) {
     select.dataset.key = key;
     fillSelect(select, choices, current);
@@ -59,10 +72,12 @@ function renderTemplateSelect() {
 async function chooseTemplate(id) {
   if (busy() || id === planTemplateId()) return;
   try {
-    await accept(await api(planBase(), "PATCH", {
-      revision: state.data.revision,
-      options: { ...plan().options, template_id: id }
-    }));
+    await accept(
+      await api(planBase(), "PATCH", {
+        revision: state.data.revision,
+        options: { ...plan().options, template_id: id },
+      }),
+    );
     notice(MindexI18n.msg("ui.script_template_switched"));
   } finally {
     $("script-template").dataset.key = "";
@@ -81,7 +96,9 @@ function planReferences() {
 function renderReferences() {
   const box = $("script-references");
   if (!box || !state.data) return;
-  const items = planReferences(), limit = state.data.reference_limit || 0, locked = busy();
+  const items = planReferences(),
+    limit = state.data.reference_limit || 0,
+    locked = busy();
   const total = items.reduce((sum, item) => sum + item.chars, 0);
   const key = JSON.stringify([plan().id, items, limit, locked]);
   if (box.dataset.key === key) return;
@@ -90,18 +107,27 @@ function renderReferences() {
   const head = el("div", null, "script-references-head");
   head.append(
     el("strong", MindexI18n.msg("ui.reference_title")),
-    el("span", MindexI18n.msg("ui.reference_total", { p0: total, p1: limit }), "muted")
+    el("span", MindexI18n.msg("ui.reference_total", { p0: total, p1: limit }), "muted"),
   );
   box.append(head);
   if (!items.length) box.append(el("p", MindexI18n.msg("ui.reference_empty"), "muted"));
   const list = el("ul", null, "reference-list");
   for (const item of items) {
     const row = el("li", null, "reference-row");
-    const remove = mutationButton(MindexI18n.msg("ui.reference_remove"), () => removeReference(item));
-    MindexI18n.setAttr(remove, "aria-label", MindexI18n.msg("ui.reference_remove_aria", { p0: item.name }));
+    const remove = mutationButton(MindexI18n.msg("ui.reference_remove"), () =>
+      removeReference(item),
+    );
+    MindexI18n.setAttr(
+      remove,
+      "aria-label",
+      MindexI18n.msg("ui.reference_remove_aria", { p0: item.name }),
+    );
     remove.disabled = locked;
-    row.append(el("span", item.name), el("span", MindexI18n.msg("ui.reference_chars", { p0: item.chars }), "muted"),
-      remove);
+    row.append(
+      el("span", item.name),
+      el("span", MindexI18n.msg("ui.reference_chars", { p0: item.chars }), "muted"),
+      remove,
+    );
     list.append(row);
   }
   if (items.length) box.append(list);
@@ -137,15 +163,20 @@ function pasteReference() {
   text.input.rows = 12;
   text.input.required = true;
   const limit = state.data.reference_limit || 0;
-  body.append(name.wrap, text.wrap,
-    el("p", MindexI18n.msg("ui.reference_limit_note", { p0: limit }), "muted"));
+  body.append(
+    name.wrap,
+    text.wrap,
+    el("p", MindexI18n.msg("ui.reference_limit_note", { p0: limit }), "muted"),
+  );
   const save = button(MindexI18n.msg("ui.reference_save"), async () => {
     if (!text.input.value.trim()) throw new Error(MindexI18n.msg("ui.reference_empty_error"));
-    await accept(await api(`${planBase()}/references`, "POST", {
-      revision: state.data.revision,
-      name: name.input.value.trim() || null,
-      text: text.input.value
-    }));
+    await accept(
+      await api(`${planBase()}/references`, "POST", {
+        revision: state.data.revision,
+        name: name.input.value.trim() || null,
+        text: text.input.value,
+      }),
+    );
     closeDialog();
     notice(MindexI18n.msg("ui.reference_added"));
   });
@@ -155,7 +186,9 @@ function pasteReference() {
 async function removeReference(item) {
   if (busy()) return;
   const query = `?revision=${encodeURIComponent(state.data.revision)}`;
-  await accept(await api(`${planBase()}/references/${encodeURIComponent(item.id)}${query}`, "DELETE"));
+  await accept(
+    await api(`${planBase()}/references/${encodeURIComponent(item.id)}${query}`, "DELETE"),
+  );
   notice(MindexI18n.msg("ui.reference_removed"));
 }
 // 选题来源与账号档案快照（job.topic，见 /studio/topics）：显示来源选题、档案是否已更新，并可同步。
@@ -172,32 +205,43 @@ function renderJobTopic() {
   }
   const key = `${state.id}:${topic.profile_hash}`;
   if (jobTopic.key !== key && !jobTopic.loading) {
-    jobTopic.loading = api(`/api/topics/jobs/${encodeURIComponent(state.id)}/profile`).then((data) => {
-      jobTopic.key = key;
-      jobTopic.data = data;
-    }).catch((error) => {
-      jobTopic.key = key;
-      jobTopic.data = null;
-      fail(error);
-    }).finally(() => {
-      jobTopic.loading = null;
-      renderJobTopic();
-    });
+    jobTopic.loading = api(`/api/topics/jobs/${encodeURIComponent(state.id)}/profile`)
+      .then((data) => {
+        jobTopic.key = key;
+        jobTopic.data = data;
+      })
+      .catch((error) => {
+        jobTopic.key = key;
+        jobTopic.data = null;
+        fail(error);
+      })
+      .finally(() => {
+        jobTopic.loading = null;
+        renderJobTopic();
+      });
   }
   const data = jobTopic.key === key ? jobTopic.data : null;
   box.hidden = false;
   box.replaceChildren();
   const link = document.createElement("a");
   link.className = "quiet nav-link";
-  const params = new URLSearchParams({ profile: topic.profile_id, card: topic.card_id, job: state.id });
+  const params = new URLSearchParams({
+    profile: topic.profile_id,
+    card: topic.card_id,
+    job: state.id,
+  });
   link.href = `/studio/topics?${params}`;
   link.textContent = topic.title || topic.card_id;
   const line = el("p", null, "job-topic-line");
   line.append(el("span", MindexI18n.msg("ui.job_topic_from")), link);
-  if (data?.profile_name) line.append(el("span", MindexI18n.msg("ui.job_topic_profile", { p0: data.profile_name }), "muted"));
+  if (data?.profile_name)
+    line.append(
+      el("span", MindexI18n.msg("ui.job_topic_profile", { p0: data.profile_name }), "muted"),
+    );
   box.append(line);
   if (!data) return;
-  if (!data.profile_exists) box.append(el("p", MindexI18n.msg("ui.job_topic_profile_deleted"), "muted"));
+  if (!data.profile_exists)
+    box.append(el("p", MindexI18n.msg("ui.job_topic_profile_deleted"), "muted"));
   else if (data.outdated) {
     const row = el("p", null, "job-topic-outdated");
     const sync = mutationButton(MindexI18n.msg("ui.job_topic_sync"), () => syncJobTopic());

@@ -6,16 +6,16 @@ from collections import Counter
 
 import numpy as np
 import pytest
-from conftest import FixtureEmbedder
 
-from mindex.models.adapters import ModelError
-from mindex.persons.persons import Persons
-from mindex.processing.indexing import IndexBuilder, VectorIndex
-from mindex.processing.pipeline import Pipeline
-from mindex.search import search as search_module
-from mindex.search.search import SearchEngine, document_terms, lexical_search, tokens
-from mindex.shared.storage import Store, bump_snapshot_revision
-from mindex.shared.types import TextSearch
+from conftest import FixtureEmbedder
+from models.adapters import ModelError
+from persons.persons import Persons
+from processing.indexing import IndexBuilder, VectorIndex
+from processing.pipeline import Pipeline
+from search import search as search_module
+from search.search import SearchEngine, document_terms, lexical_search, tokens
+from shared.storage import Store, bump_snapshot_revision
+from shared.types import TextSearch
 
 # ---------- 1. VectorIndex.query：无过滤多取 + 内存后过滤 ----------
 
@@ -30,8 +30,13 @@ def build_index(root, segments=40, windows=2, seed=7):
                 continue  # 部分片段没有对白向量
             for window in range(windows):
                 vector = rng.normal(size=6)
-                index.upsert(f"{view}-{number}-{window}", (vector / np.linalg.norm(vector)).tolist(),
-                             segment, view, "doc")
+                index.upsert(
+                    f"{view}-{number}-{window}",
+                    (vector / np.linalg.norm(vector)).tolist(),
+                    segment,
+                    view,
+                    "doc",
+                )
     return index
 
 
@@ -51,7 +56,7 @@ def test_postfiltered_query_matches_filtered_query(tmp_path, view, count):
 
 
 def test_postfilter_grows_candidates_until_enough(tmp_path, monkeypatch):
-    from mindex.processing import indexing
+    from processing import indexing
 
     index = build_index(tmp_path)
     monkeypatch.setattr(indexing, "POSTFILTER_MIN_CANDIDATES", 2)
@@ -74,7 +79,7 @@ def test_postfilter_grows_candidates_until_enough(tmp_path, monkeypatch):
 
 
 def test_postfilter_falls_back_to_where_filter_beyond_cap(tmp_path, monkeypatch):
-    from mindex.processing import indexing
+    from processing import indexing
 
     index = build_index(tmp_path)
     monkeypatch.setattr(indexing, "POSTFILTER_MIN_CANDIDATES", 5)
@@ -129,10 +134,18 @@ def old_lexical_search(text, snapshots, count, exclude=()):
 
 
 def corpus():
-    lines = ["雨夜里一个女性角色在街道上奔跑", "男人在办公室里打电话", "女性角色回头微笑，女性角色流泪",
-             "", "两个人在雨中争吵，雨越下越大", "空镜头：城市夜景"]
-    return [{"id": f"s{i}", "views": {"description": t, "dialogue": t[::-1], "style": ""}}
-            for i, t in enumerate(lines)]
+    lines = [
+        "雨夜里一个女性角色在街道上奔跑",
+        "男人在办公室里打电话",
+        "女性角色回头微笑，女性角色流泪",
+        "",
+        "两个人在雨中争吵，雨越下越大",
+        "空镜头：城市夜景",
+    ]
+    return [
+        {"id": f"s{i}", "views": {"description": t, "dialogue": t[::-1], "style": ""}}
+        for i, t in enumerate(lines)
+    ]
 
 
 @pytest.mark.parametrize("query", ["女性角色", "雨夜 街道", "不存在的词汇xyz", "雨", ""])
@@ -159,8 +172,10 @@ def test_document_terms_are_cached_by_text_content():
 
 def put_member(store, index_id, number, **extra):
     snapshot = {"id": f"seg-{number}", "source_id": "src", "start": 0, "end": 1, **extra}
-    store.execute("INSERT INTO index_members(index_id,segment_id,snapshot,complete) VALUES(?,?,?,1)",
-                  (index_id, snapshot["id"], json.dumps(snapshot)))
+    store.execute(
+        "INSERT INTO index_members(index_id,segment_id,snapshot,complete) VALUES(?,?,?,1)",
+        (index_id, snapshot["id"], json.dumps(snapshot)),
+    )
 
 
 def test_snapshots_shared_caches_and_invalidates(tmp_path):
@@ -196,21 +211,49 @@ def put_person_release(store, content_id="ix", person_id="pv1", release_id="rel1
         "format": 2,
         "entities": [
             {"id": "a1", "kind": "actor", "name": "演员甲", "aliases": []},
-            {"id": "r1", "kind": "role", "name": "角色乙", "aliases": [], "work_id": "w1", "actor_ids": ["a1"]},
+            {
+                "id": "r1",
+                "kind": "role",
+                "name": "角色乙",
+                "aliases": [],
+                "work_id": "w1",
+                "actor_ids": ["a1"],
+            },
         ],
         "evidence": [
-            {"id": "e1", "actor_id": "a1", "stage_id": "r1", "role_id": "old", "source_id": "src", "shot_id": "seg-0",
-             "start": 0, "end": 1, "status": "accepted",
-             "data": {"score": 0.9, "body_feature": [0.1] * 8, "space": {"model": "m", "n": 1}}},
-            {"id": "e2", "actor_id": "a1", "role_id": "r1", "source_id": "src", "shot_id": "seg-1",
-             "start": 1, "end": 2, "status": "accepted",
-             "data": {"score": 0.8, "body_feature": [0.2] * 8, "space": {"model": "m", "n": 1}}},
+            {
+                "id": "e1",
+                "actor_id": "a1",
+                "stage_id": "r1",
+                "role_id": "old",
+                "source_id": "src",
+                "shot_id": "seg-0",
+                "start": 0,
+                "end": 1,
+                "status": "accepted",
+                "data": {"score": 0.9, "body_feature": [0.1] * 8, "space": {"model": "m", "n": 1}},
+            },
+            {
+                "id": "e2",
+                "actor_id": "a1",
+                "role_id": "r1",
+                "source_id": "src",
+                "shot_id": "seg-1",
+                "start": 1,
+                "end": 2,
+                "status": "accepted",
+                "data": {"score": 0.8, "body_feature": [0.2] * 8, "space": {"model": "m", "n": 1}},
+            },
         ],
         "coverage": [{"source_id": "src", "data": {"start": 0, "end": 2}}],
     }
-    store.execute("INSERT OR REPLACE INTO person_versions(id,data) VALUES(?,?)", (person_id, json.dumps(value)))
-    store.execute("INSERT OR REPLACE INTO search_releases(id,content_id,person_id) VALUES(?,?,?)",
-                  (release_id, content_id, person_id))
+    store.execute(
+        "INSERT OR REPLACE INTO person_versions(id,data) VALUES(?,?)", (person_id, json.dumps(value))
+    )
+    store.execute(
+        "INSERT OR REPLACE INTO search_releases(id,content_id,person_id) VALUES(?,?,?)",
+        (release_id, content_id, person_id),
+    )
     return value
 
 
@@ -229,7 +272,9 @@ def test_published_entities_and_evidence_equal_published(tmp_path):
     for light, original in zip(evidence["evidence"], full["evidence"]):
         assert "body_feature" not in light["data"]
         assert {k: v for k, v in original["data"].items() if k != "body_feature"} == light["data"]
-        assert {k: v for k, v in original.items() if k != "data"} == {k: v for k, v in light.items() if k != "data"}
+        assert {k: v for k, v in original.items() if k != "data"} == {
+            k: v for k, v in light.items() if k != "data"
+        }
     assert evidence["evidence"][0]["data"]["space"] is evidence["evidence"][1]["data"]["space"]  # 去重共享
     assert catalogue.published_entities(release) is shared  # 命中缓存
     assert catalogue.published_evidence(release) is evidence
@@ -302,10 +347,16 @@ def random_evidence(rng, count=300, sources=3, people=6):
         start = round(float(rng.uniform(0, 100)), 1)
         # 含零长度与端点恰好相接的区间，覆盖边界条件
         end = round(start + float(rng.choice([0, 0.5, 2, 5, 20])), 1)
-        items.append({"id": f"e{number}", "source_id": f"src{int(rng.integers(sources))}",
-                      "actor_id": f"a{int(rng.integers(people))}",
-                      "role_id": f"r{int(rng.integers(people))}" if rng.random() < 0.8 else None,
-                      "start": start, "end": end})
+        items.append(
+            {
+                "id": f"e{number}",
+                "source_id": f"src{int(rng.integers(sources))}",
+                "actor_id": f"a{int(rng.integers(people))}",
+                "role_id": f"r{int(rng.integers(people))}" if rng.random() < 0.8 else None,
+                "start": start,
+                "end": end,
+            }
+        )
     return items
 
 
@@ -313,19 +364,31 @@ def random_segments(rng, count=80, sources=3):
     segments = []
     for number in range(count):
         start = round(float(rng.uniform(0, 100)), 1)
-        segments.append({"id": f"s{number}", "source_id": f"src{int(rng.integers(sources))}",
-                         "start": start, "end": round(start + float(rng.choice([1, 3, 6])), 1)})
+        segments.append(
+            {
+                "id": f"s{number}",
+                "source_id": f"src{int(rng.integers(sources))}",
+                "start": start,
+                "end": round(start + float(rng.choice([1, 3, 6])), 1),
+            }
+        )
     return segments
 
 
 def test_evidence_index_matches_linear_scan():
-    from mindex.persons.person_names import EvidenceIndex, overlaps_for
+    from persons.person_names import EvidenceIndex, overlaps_for
 
     rng = np.random.default_rng(11)
     evidence = random_evidence(rng)
     index = EvidenceIndex(evidence)
-    groups_options = [["a0"], ["r1"], ["a0", "a1"], [["a0", "r2"], ["a3"]], [["a1", "a2", "r0"], ["r3", "a4"]],
-                      [["a5"], ["a0"], ["r1"]]]
+    groups_options = [
+        ["a0"],
+        ["r1"],
+        ["a0", "a1"],
+        [["a0", "r2"], ["a3"]],
+        [["a1", "a2", "r0"], ["r3", "a4"]],
+        [["a5"], ["a0"], ["r1"]],
+    ]
     checked = hits = 0
     for segment in random_segments(rng):
         for groups in groups_options:
@@ -338,7 +401,7 @@ def test_evidence_index_matches_linear_scan():
 
 
 def test_evidence_index_boundaries_are_half_open():
-    from mindex.persons.person_names import EvidenceIndex
+    from persons.person_names import EvidenceIndex
 
     evidence = [{"id": "e", "source_id": "s", "actor_id": "a", "role_id": None, "start": 1.0, "end": 2.0}]
     index = EvidenceIndex(evidence)
@@ -367,7 +430,7 @@ def old_coverage_missing(snapshots, coverage):
 
 
 def test_coverage_missing_matches_reference_implementation():
-    from mindex.persons.person_names import coverage_missing
+    from persons.person_names import coverage_missing
 
     rng = np.random.default_rng(5)
     outcomes = set()
@@ -375,9 +438,13 @@ def test_coverage_missing_matches_reference_implementation():
         dense = trial % 2 == 0  # 稀疏与致密覆盖交替，两个分支（有缺失 / 完整覆盖）都要比对到
         lengths = [30, 60, 120] if dense else [0, 1, 5]
         coverage = [
-            {"source_id": f"src{int(rng.integers(3))}",
-             "data": {"start": (a := round(float(rng.uniform(0, 100 if not dense else 20)), 1)),
-                      "end": round(a + float(rng.choice(lengths)), 1)}}
+            {
+                "source_id": f"src{int(rng.integers(3))}",
+                "data": {
+                    "start": (a := round(float(rng.uniform(0, 100 if not dense else 20)), 1)),
+                    "end": round(a + float(rng.choice(lengths)), 1),
+                },
+            }
             for _ in range(int(rng.integers(0, 14)))
         ]
         segments = random_segments(rng, count=int(rng.integers(1, 6)))
@@ -401,14 +468,16 @@ def build_mapped_index(root, segments=40):
             identifier = f"{view}-{number}"
             vector = rng.normal(size=6)
             index.upsert(identifier, (vector / np.linalg.norm(vector)).tolist(), segment, view, "doc")
-            store.execute("INSERT INTO representations(id,index_id,segment_id,view,document) VALUES(?,?,?,?,?)",
-                          (identifier, "ix-mapped", segment["id"], view, "doc"))
+            store.execute(
+                "INSERT INTO representations(id,index_id,segment_id,view,document) VALUES(?,?,?,?,?)",
+                (identifier, "ix-mapped", segment["id"], view, "doc"),
+            )
     return store, index
 
 
 @pytest.mark.parametrize("view", ["video", "dialogue"])
 def test_mapped_postfilter_matches_filtered_query_and_skips_chroma_metadata(tmp_path, view, monkeypatch):
-    from mindex.processing import indexing
+    from processing import indexing
 
     indexing._REPRESENTATION_MAPS.clear()
     _, index = build_mapped_index(tmp_path)
@@ -430,7 +499,7 @@ def test_mapped_postfilter_matches_filtered_query_and_skips_chroma_metadata(tmp_
 
 
 def test_mapped_postfilter_fetches_metadata_for_ids_missing_from_map(tmp_path):
-    from mindex.processing import indexing
+    from processing import indexing
 
     indexing._REPRESENTATION_MAPS.clear()
     store, index = build_mapped_index(tmp_path)
@@ -443,7 +512,7 @@ def test_mapped_postfilter_fetches_metadata_for_ids_missing_from_map(tmp_path):
 
 
 def test_candidates_are_shared_between_channels_for_the_same_vector(tmp_path, monkeypatch):
-    from mindex.processing import indexing
+    from processing import indexing
 
     indexing._REPRESENTATION_MAPS.clear()
     _, index = build_mapped_index(tmp_path)

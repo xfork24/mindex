@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import copy
 
-from conftest import FixtureSpeaker
 from fastapi.testclient import TestClient
-from test_studio_workspace import setup_workspace, wait_build
 
-from mindex.api import create_app
-from mindex.studio import workspace as ws
+from api import create_app
+from conftest import FixtureSpeaker
+from studio import workspace as ws
+from test_studio_workspace import setup_workspace, wait_build
 
 
 def test_tts_conflicts_explain_service_change_without_claiming_text_changed(config):

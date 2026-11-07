@@ -14,7 +14,7 @@ async def save_upload(upload: UploadFile, path: Path, max_bytes: int):
 
     任何失败（413、422、读写异常或请求取消）都会先删除已写入的半成品再重新抛出。
     """
-    from mindex.shared.work_budget import GrowingReservation
+    from shared.work_budget import GrowingReservation
 
     try:
         size = 0

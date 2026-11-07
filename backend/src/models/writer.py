@@ -10,11 +10,11 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
-from mindex.models.adapters import ModelError
-from mindex.models.storyboard import chat_completion
-from mindex.shared.config import Config
-from mindex.shared.trace import record
-from mindex.shared.types import MaterialDigest, ScriptTemplate
+from models.adapters import ModelError
+from models.storyboard import chat_completion
+from shared.config import Config
+from shared.trace import record
+from shared.types import MaterialDigest, ScriptTemplate
 
 # 2: 非空素材摘要作为独立参考段发送，并附加素材参考规则。
 # 3: 系统提示来自文案模板（通用解说模板替代原内置提示词）；素材规则改为独立编号的段落；可附参考文稿。

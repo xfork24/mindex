@@ -7,8 +7,8 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import Field
 
-from mindex.shared.config import StrictModel
-from mindex.shared.media_groups import Groups
+from shared.config import StrictModel
+from shared.media_groups import Groups
 
 GroupType = Literal["source", "music"]
 
@@ -58,7 +58,7 @@ def groups_router(store):
 
     @router.post("/groups/resolve")
     def resolve_scope(body: ResolveBody):
-        from mindex.shared.types import Filters
+        from shared.types import Filters
 
         values = invoke(Filters(**body.model_dump()).effective_sources, store)
         if values == set():

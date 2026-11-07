@@ -1,70 +1,249 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-  <script src="/assets/shared/i18n-boot.js?v=bf7e8b3c7c"></script>
-  <script src="/assets/shared/theme.js?v=ba2154c954"></script>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title data-i18n="[[0,&quot;ui.music_page_title&quot;]]">Mindex · 音乐库</title><link rel="icon" href="/assets/shared/favicon.svg?v=8d7f9242de" type="image/svg+xml">
-  <link rel="stylesheet" href="/assets/shared/style.css?v=87b28bc99b"><link rel="stylesheet" href="/assets/shared/agent-panel.css?v=4284eb0eb0"><link rel="stylesheet" href="/assets/studio/studio.css?v=c83fdc13f9"><link rel="stylesheet" href="/assets/studio/templates.css?v=0f1410c87d">
-  <script src="/assets/shared/messages.js?v=6a8ef772ae" defer></script><script src="/assets/shared/i18n.js?v=e981ac227d" defer></script><script src="/assets/shared/api.js?v=f9ecd754db" defer></script><script src="/assets/shared/control-layout.js?v=8295190463" defer></script><script src="/assets/shared/group-controls.js?v=c33cc964b5" defer></script><script src="/assets/shared/multiselect.js?v=f02ca7cc76" defer></script><script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script><script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script><script src="/assets/shared/agent-markdown.js?v=8f0018e90a" defer></script><script src="/assets/shared/agent-panel.js?v=2e639588c0" defer></script><script src="/assets/shared/feedback.js?v=4630718c9e" defer></script><script src="/assets/admin/music.js?v=d1c75f6a6c" defer></script>
-</head>
-<body class="studio studio-templates admin-music">
-  <header><a class="brand" href="/">m<span>index</span><i></i></a><nav class="page-nav" aria-label="页面导航" data-i18n-aria-label="ui.main_navigation"><a class="quiet nav-link" href="/search" data-i18n="[[0,&quot;ui.c9b1e68e3537&quot;]]">视频检索</a><a class="quiet nav-link" href="/" data-i18n="[[0,&quot;ui.b6fc3cef0bd0&quot;]]">创作</a><a class="quiet nav-link" href="/admin" aria-current="page" data-i18n="[[0,&quot;ui.f517302fec0d&quot;]]">素材管理</a><a class="quiet nav-link" href="/persons" data-i18n="[[0,&quot;ui.0973ef28d791&quot;]]">人物库</a><a class="quiet nav-link" href="/settings" data-i18n="[[0,&quot;ui.7debf9cb0372&quot;]]">设置</a></nav><div class="header-actions"><button id="reload" class="quiet" type="button" data-i18n="[[0,&quot;ui.music_reload&quot;]]" data-i18n-aria-label="ui.music_reload">刷新音乐库</button><button type="button" class="quiet theme-toggle" data-theme-toggle></button><button type="button" class="quiet language-switch" data-language-toggle aria-label="中文 / English"><span data-language="zh" lang="zh-CN">文</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en" lang="en">En</span></button></div></header>
-  <main class="studio-main">
-    <section class="studio-intro"><h1 data-i18n="[[0,&quot;ui.music_heading_page&quot;]]">音乐库</h1><p data-i18n="[[0,&quot;ui.music_intro&quot;]]">导入授权音乐，分析 BPM 与节拍并标记情绪，供分镜配乐选用。</p></section>
-    <nav class="studio-tabs admin-tabs" aria-label="素材管理分区" data-i18n-aria-label="ui.admin_tabs_aria"><a class="studio-tab" href="/admin" data-i18n="[[0,&quot;ui.admin_tab_sources&quot;]]">素材</a><a class="studio-tab" href="/admin/music" aria-current="page" data-i18n="[[0,&quot;ui.admin_tab_music&quot;]]">音乐库</a><a class="studio-tab" href="/admin/groups" data-i18n="[[0,&quot;ui.groups_manage&quot;]]">管理</a></nav>
-    <div id="notice" class="notice" role="status" aria-live="polite"></div>
-    <div class="workspace">
-      <aside class="job-panel template-panel" aria-label="曲目列表" data-i18n-aria-label="ui.music_list_aria">
-        <div class="detail-actions"><input id="music-search" type="search" placeholder="搜索曲名、作者、标签" data-i18n-placeholder="ui.music_search_placeholder" aria-label="搜索曲目" data-i18n-aria-label="ui.music_search_aria"><select id="music-mood" aria-label="按情绪筛选" data-i18n-aria-label="ui.music_mood_filter"></select></div>
-        <div id="music-group-filter"></div>
-        <div id="music-list"></div>
-      </aside>
-      <section class="work-panel" aria-label="曲目详情" data-i18n-aria-label="ui.music_detail_aria">
-        <form id="music-import" class="template-card template-form" novalidate>
-          <h2 data-i18n="[[0,&quot;ui.music_import_heading&quot;]]">导入曲目</h2>
-          <div class="template-fields">
-            <label class="form-field" data-i18n="[[0,&quot;ui.music_field_file&quot;]]">音频文件<input id="mi-file" type="file" accept="audio/mpeg,audio/wav,audio/x-wav,audio/flac,audio/ogg,audio/mp4,audio/aac,.mp3,.wav,.flac,.ogg,.m4a,.aac" required></label>
-            <label class="form-field" data-i18n="[[0,&quot;ui.music_field_title&quot;]]">曲名<input id="mi-title" maxlength="120"></label>
-            <label class="form-field" data-i18n="[[0,&quot;ui.music_field_artist&quot;]]">作者<input id="mi-artist" maxlength="120"></label>
-            <label class="form-field" data-i18n="[[0,&quot;ui.music_field_source&quot;]]">授权来源（必填）<input id="mi-source" maxlength="200" required></label>
-            <label class="form-field" data-i18n="[[0,&quot;ui.music_field_license&quot;]]">许可（必填）<input id="mi-license" maxlength="200" required></label>
-            <label class="form-field" data-i18n="[[0,&quot;ui.music_field_attribution&quot;]]">署名（必填）<input id="mi-attribution" maxlength="300" required></label>
-            <label class="form-field" data-i18n="[[0,&quot;ui.music_field_expires&quot;]]">授权有效期（可选）<input id="mi-expires" type="date"></label>
-            <label class="form-field" data-i18n="[[0,&quot;ui.music_field_tags&quot;]]">标签（逗号分隔）<input id="mi-tags" maxlength="400"></label>
-          </div>
-          <div class="template-form-foot"><span class="template-form-actions"><button id="mi-submit" class="submit" type="submit" data-i18n="[[0,&quot;ui.music_import_submit&quot;]]">导入并分析</button></span></div>
-          <p id="music-import-error" class="warn-text" role="alert" hidden></p>
-        </form>
-        <div id="music-empty" class="empty"><h2 data-i18n="[[0,&quot;ui.music_select_title&quot;]]">选择一首曲目</h2><p data-i18n="[[0,&quot;ui.music_select_hint&quot;]]">在左侧选择曲目，查看节奏分析、修改授权信息与情绪标签。</p></div>
-        <div id="music-view" hidden>
-          <div class="template-card">
-            <div class="section-head template-title-row">
-              <h2 id="music-title"></h2><span id="music-tags" class="template-tags"></span>
-              <div class="head-actions"><button id="music-analyze" class="quiet" type="button" data-i18n="[[0,&quot;ui.music_analyze&quot;]]">重新分析</button><a id="music-download" class="quiet" download data-i18n="[[0,&quot;ui.music_download&quot;]]">下载</a><button id="music-delete" class="quiet danger" type="button" data-i18n="[[0,&quot;ui.music_delete&quot;]]">删除</button></div>
-            </div>
-            <audio id="music-audio" controls preload="metadata"></audio>
-            <p id="music-analysis" class="muted"></p>
-            <form id="music-form" class="template-form" novalidate>
-              <div class="template-fields">
-                <label class="form-field" data-i18n="[[0,&quot;ui.music_field_title&quot;]]">曲名<input id="mf-title" maxlength="120" required></label>
-                <label class="form-field" data-i18n="[[0,&quot;ui.music_field_artist&quot;]]">作者<input id="mf-artist" maxlength="120"></label>
-                <label class="form-field" data-i18n="[[0,&quot;ui.music_field_source&quot;]]">授权来源（必填）<input id="mf-source" maxlength="200" required></label>
-                <label class="form-field" data-i18n="[[0,&quot;ui.music_field_license&quot;]]">许可（必填）<input id="mf-license" maxlength="200" required></label>
-                <label class="form-field" data-i18n="[[0,&quot;ui.music_field_attribution&quot;]]">署名（必填）<input id="mf-attribution" maxlength="300" required></label>
-                <label class="form-field" data-i18n="[[0,&quot;ui.music_field_expires&quot;]]">授权有效期（可选）<input id="mf-expires" type="date"></label>
-                <label class="form-field" data-i18n="[[0,&quot;ui.music_field_tags&quot;]]">标签（逗号分隔）<input id="mf-tags" maxlength="400"></label>
-              </div>
-              <fieldset id="music-moods" class="brand-section"><legend data-i18n="[[0,&quot;ui.music_moods_legend&quot;]]">情绪标签（最多 3 个）</legend></fieldset>
-              <div class="template-form-foot"><span class="template-form-actions"><button id="music-save" class="submit" type="submit" data-i18n="[[0,&quot;ui.music_save_track&quot;]]">保存曲目信息</button></span></div>
-              <p id="music-error" class="warn-text" role="alert" hidden></p>
-            </form>
-            <p id="music-meta" class="muted template-meta"></p>
-          </div>
-        </div>
+  <head>
+    <script src="/assets/shared/i18n-boot.js?v=6ad8b45125"></script>
+    <script src="/assets/shared/theme.js?v=06b5a45391"></script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title data-i18n='[[0,"ui.music_page_title"]]'>Mindex · 音乐库</title>
+    <link rel="icon" href="/assets/shared/favicon.svg?v=8d7f9242de" type="image/svg+xml" />
+    <link rel="stylesheet" href="/assets/shared/style.css?v=7303c8f392" />
+    <link rel="stylesheet" href="/assets/shared/agent-panel.css?v=4402a24df2" />
+    <link rel="stylesheet" href="/assets/studio/studio.css?v=b02cf94e3b" />
+    <link rel="stylesheet" href="/assets/studio/templates.css?v=5070e0407e" />
+    <script src="/assets/shared/messages.js?v=6a8ef772ae" defer></script>
+    <script src="/assets/shared/i18n.js?v=71113d017f" defer></script>
+    <script src="/assets/shared/api.js?v=799acf885b" defer></script>
+    <script src="/assets/shared/control-layout.js?v=1278e93f03" defer></script>
+    <script src="/assets/shared/group-controls.js?v=200a6e2ce7" defer></script>
+    <script src="/assets/shared/multiselect.js?v=580ad4713c" defer></script>
+    <script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script>
+    <script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script>
+    <script src="/assets/shared/agent-markdown.js?v=9dd4d8c653" defer></script>
+    <script src="/assets/shared/agent-panel.js?v=11ba8e2e53" defer></script>
+    <script src="/assets/shared/feedback.js?v=a83918f9e5" defer></script>
+    <script src="/assets/admin/music.js?v=eac4524924" defer></script>
+  </head>
+  <body class="studio studio-templates admin-music">
+    <header>
+      <a class="brand" href="/">m<span>index</span><i></i></a>
+      <nav class="page-nav" aria-label="页面导航" data-i18n-aria-label="ui.main_navigation">
+        <a class="quiet nav-link" href="/search" data-i18n='[[0,"ui.c9b1e68e3537"]]'>视频检索</a
+        ><a class="quiet nav-link" href="/" data-i18n='[[0,"ui.b6fc3cef0bd0"]]'>创作</a
+        ><a
+          class="quiet nav-link"
+          href="/admin"
+          aria-current="page"
+          data-i18n='[[0,"ui.f517302fec0d"]]'
+          >素材管理</a
+        ><a class="quiet nav-link" href="/persons" data-i18n='[[0,"ui.0973ef28d791"]]'>人物库</a
+        ><a class="quiet nav-link" href="/settings" data-i18n='[[0,"ui.7debf9cb0372"]]'>设置</a>
+      </nav>
+      <div class="header-actions">
+        <button
+          id="reload"
+          class="quiet"
+          type="button"
+          data-i18n='[[0,"ui.music_reload"]]'
+          data-i18n-aria-label="ui.music_reload"
+        >
+          刷新音乐库</button
+        ><button type="button" class="quiet theme-toggle" data-theme-toggle></button
+        ><button
+          type="button"
+          class="quiet language-switch"
+          data-language-toggle
+          aria-label="中文 / English"
+        >
+          <span data-language="zh" lang="zh-CN">文</span
+          ><span class="language-divider" aria-hidden="true">/</span
+          ><span data-language="en" lang="en">En</span>
+        </button>
+      </div>
+    </header>
+    <main class="studio-main">
+      <section class="studio-intro">
+        <h1 data-i18n='[[0,"ui.music_heading_page"]]'>音乐库</h1>
+        <p data-i18n='[[0,"ui.music_intro"]]'>
+          导入授权音乐，分析 BPM 与节拍并标记情绪，供分镜配乐选用。
+        </p>
       </section>
-    </div>
-  </main>
-  <footer><span data-i18n="[[0,&quot;ui.music_footer&quot;]]">Mindex / 音乐库</span><span data-i18n="[[0,&quot;ui.3c60f44b51aa&quot;]]">本地素材库 · 工作流分步执行</span></footer>
-</body>
+      <nav
+        class="studio-tabs admin-tabs"
+        aria-label="素材管理分区"
+        data-i18n-aria-label="ui.admin_tabs_aria"
+      >
+        <a class="studio-tab" href="/admin" data-i18n='[[0,"ui.admin_tab_sources"]]'>素材</a
+        ><a
+          class="studio-tab"
+          href="/admin/music"
+          aria-current="page"
+          data-i18n='[[0,"ui.admin_tab_music"]]'
+          >音乐库</a
+        ><a class="studio-tab" href="/admin/groups" data-i18n='[[0,"ui.groups_manage"]]'>管理</a>
+      </nav>
+      <div id="notice" class="notice" role="status" aria-live="polite"></div>
+      <div class="workspace">
+        <aside
+          class="job-panel template-panel"
+          aria-label="曲目列表"
+          data-i18n-aria-label="ui.music_list_aria"
+        >
+          <div class="detail-actions">
+            <input
+              id="music-search"
+              type="search"
+              placeholder="搜索曲名、作者、标签"
+              data-i18n-placeholder="ui.music_search_placeholder"
+              aria-label="搜索曲目"
+              data-i18n-aria-label="ui.music_search_aria"
+            /><select
+              id="music-mood"
+              aria-label="按情绪筛选"
+              data-i18n-aria-label="ui.music_mood_filter"
+            ></select>
+          </div>
+          <div id="music-group-filter"></div>
+          <div id="music-list"></div>
+        </aside>
+        <section
+          class="work-panel"
+          aria-label="曲目详情"
+          data-i18n-aria-label="ui.music_detail_aria"
+        >
+          <form id="music-import" class="template-card template-form" novalidate>
+            <h2 data-i18n='[[0,"ui.music_import_heading"]]'>导入曲目</h2>
+            <div class="template-fields">
+              <label class="form-field" data-i18n='[[0,"ui.music_field_file"]]'
+                >音频文件<input
+                  id="mi-file"
+                  type="file"
+                  accept="audio/mpeg,audio/wav,audio/x-wav,audio/flac,audio/ogg,audio/mp4,audio/aac,.mp3,.wav,.flac,.ogg,.m4a,.aac"
+                  required
+              /></label>
+              <label class="form-field" data-i18n='[[0,"ui.music_field_title"]]'
+                >曲名<input id="mi-title" maxlength="120"
+              /></label>
+              <label class="form-field" data-i18n='[[0,"ui.music_field_artist"]]'
+                >作者<input id="mi-artist" maxlength="120"
+              /></label>
+              <label class="form-field" data-i18n='[[0,"ui.music_field_source"]]'
+                >授权来源（必填）<input id="mi-source" maxlength="200" required
+              /></label>
+              <label class="form-field" data-i18n='[[0,"ui.music_field_license"]]'
+                >许可（必填）<input id="mi-license" maxlength="200" required
+              /></label>
+              <label class="form-field" data-i18n='[[0,"ui.music_field_attribution"]]'
+                >署名（必填）<input id="mi-attribution" maxlength="300" required
+              /></label>
+              <label class="form-field" data-i18n='[[0,"ui.music_field_expires"]]'
+                >授权有效期（可选）<input id="mi-expires" type="date"
+              /></label>
+              <label class="form-field" data-i18n='[[0,"ui.music_field_tags"]]'
+                >标签（逗号分隔）<input id="mi-tags" maxlength="400"
+              /></label>
+            </div>
+            <div class="template-form-foot">
+              <span class="template-form-actions"
+                ><button
+                  id="mi-submit"
+                  class="submit"
+                  type="submit"
+                  data-i18n='[[0,"ui.music_import_submit"]]'
+                >
+                  导入并分析
+                </button></span
+              >
+            </div>
+            <p id="music-import-error" class="warn-text" role="alert" hidden></p>
+          </form>
+          <div id="music-empty" class="empty">
+            <h2 data-i18n='[[0,"ui.music_select_title"]]'>选择一首曲目</h2>
+            <p data-i18n='[[0,"ui.music_select_hint"]]'>
+              在左侧选择曲目，查看节奏分析、修改授权信息与情绪标签。
+            </p>
+          </div>
+          <div id="music-view" hidden>
+            <div class="template-card">
+              <div class="section-head template-title-row">
+                <h2 id="music-title"></h2>
+                <span id="music-tags" class="template-tags"></span>
+                <div class="head-actions">
+                  <button
+                    id="music-analyze"
+                    class="quiet"
+                    type="button"
+                    data-i18n='[[0,"ui.music_analyze"]]'
+                  >
+                    重新分析</button
+                  ><a
+                    id="music-download"
+                    class="quiet"
+                    download
+                    data-i18n='[[0,"ui.music_download"]]'
+                    >下载</a
+                  ><button
+                    id="music-delete"
+                    class="quiet danger"
+                    type="button"
+                    data-i18n='[[0,"ui.music_delete"]]'
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
+              <audio id="music-audio" controls preload="metadata"></audio>
+              <p id="music-analysis" class="muted"></p>
+              <form id="music-form" class="template-form" novalidate>
+                <div class="template-fields">
+                  <label class="form-field" data-i18n='[[0,"ui.music_field_title"]]'
+                    >曲名<input id="mf-title" maxlength="120" required
+                  /></label>
+                  <label class="form-field" data-i18n='[[0,"ui.music_field_artist"]]'
+                    >作者<input id="mf-artist" maxlength="120"
+                  /></label>
+                  <label class="form-field" data-i18n='[[0,"ui.music_field_source"]]'
+                    >授权来源（必填）<input id="mf-source" maxlength="200" required
+                  /></label>
+                  <label class="form-field" data-i18n='[[0,"ui.music_field_license"]]'
+                    >许可（必填）<input id="mf-license" maxlength="200" required
+                  /></label>
+                  <label class="form-field" data-i18n='[[0,"ui.music_field_attribution"]]'
+                    >署名（必填）<input id="mf-attribution" maxlength="300" required
+                  /></label>
+                  <label class="form-field" data-i18n='[[0,"ui.music_field_expires"]]'
+                    >授权有效期（可选）<input id="mf-expires" type="date"
+                  /></label>
+                  <label class="form-field" data-i18n='[[0,"ui.music_field_tags"]]'
+                    >标签（逗号分隔）<input id="mf-tags" maxlength="400"
+                  /></label>
+                </div>
+                <fieldset id="music-moods" class="brand-section">
+                  <legend data-i18n='[[0,"ui.music_moods_legend"]]'>情绪标签（最多 3 个）</legend>
+                </fieldset>
+                <div class="template-form-foot">
+                  <span class="template-form-actions"
+                    ><button
+                      id="music-save"
+                      class="submit"
+                      type="submit"
+                      data-i18n='[[0,"ui.music_save_track"]]'
+                    >
+                      保存曲目信息
+                    </button></span
+                  >
+                </div>
+                <p id="music-error" class="warn-text" role="alert" hidden></p>
+              </form>
+              <p id="music-meta" class="muted template-meta"></p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+    <footer>
+      <span data-i18n='[[0,"ui.music_footer"]]'>Mindex / 音乐库</span
+      ><span data-i18n='[[0,"ui.3c60f44b51aa"]]'>本地素材库 · 工作流分步执行</span>
+    </footer>
+  </body>
 </html>

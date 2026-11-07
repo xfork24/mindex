@@ -7,11 +7,11 @@ import asyncio
 import pytest
 from fastapi.testclient import TestClient
 
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext, ToolError
-from mindex.agent.tools import build_registry
-from mindex.api import create_app
-from mindex.processing.pipeline import Pipeline
+from agent.loopback import MindexClient
+from agent.registry import ToolContext, ToolError
+from agent.tools import build_registry
+from api import create_app
+from processing.pipeline import Pipeline
 
 
 @pytest.fixture

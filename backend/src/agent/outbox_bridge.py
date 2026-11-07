@@ -24,7 +24,7 @@ class OutboxBridge:
         self._thread: threading.Thread | None = None
 
     def drain_once(self) -> int:
-        from mindex.shared.db.agent_outbox import acknowledge, drain
+        from shared.db.agent_outbox import acknowledge, drain
 
         items = drain(self.store, consume=False)
         delivered = 0

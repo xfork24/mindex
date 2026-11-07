@@ -1,66 +1,500 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-  <script src="/assets/shared/i18n-boot.js?v=bf7e8b3c7c"></script>
-  <script src="/assets/shared/theme.js?v=ba2154c954"></script>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title data-i18n="[[0,&quot;ui.74b7ad79367e&quot;]]">Mindex · 创作</title><link rel="icon" href="/assets/shared/favicon.svg?v=8d7f9242de" type="image/svg+xml">
-  <link rel="stylesheet" href="/assets/shared/style.css?v=87b28bc99b"><link rel="stylesheet" href="/assets/shared/agent-panel.css?v=4284eb0eb0"><link rel="stylesheet" href="/assets/studio/studio.css?v=c83fdc13f9">
-  <script src="/assets/shared/messages.js?v=6a8ef772ae" defer></script><script src="/assets/shared/i18n.js?v=e981ac227d" defer></script><script src="/assets/shared/api.js?v=f9ecd754db" defer></script><script src="/assets/shared/control-layout.js?v=8295190463" defer></script><script src="/assets/shared/group-controls.js?v=c33cc964b5" defer></script><script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script><script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script><script src="/assets/shared/agent-markdown.js?v=8f0018e90a" defer></script><script src="/assets/shared/agent-panel.js?v=2e639588c0" defer></script><script src="/assets/shared/feedback.js?v=4630718c9e" defer></script><script src="/assets/shared/multiselect.js?v=f02ca7cc76" defer></script><script src="/assets/studio/studio-state.js?v=a927c089b9" defer></script><script src="/assets/studio/studio-jobs.js?v=e2667d420d" defer></script><script src="/assets/studio/studio-workspace.js?v=f1fd55a338" defer></script><script src="/assets/studio/studio-board.js?v=5c2ac17a24" defer></script><script src="/assets/studio/studio-editor.js?v=8ed3e675da" defer></script><script src="/assets/studio/studio-stages.js?v=b84a9d3f07" defer></script><script src="/assets/studio/studio-post.js?v=94a9898557" defer></script><script src="/assets/studio/delivery-editor.js?v=541768e23b" defer></script><script src="/assets/studio/studio-delivery.js?v=204cb1aa94" defer></script><script src="/assets/studio/studio-plan.js?v=a33befd3b9" defer></script><script src="/assets/studio/studio-recall.js?v=e8fb85d093" defer></script><script src="/assets/studio/studio-build.js?v=b45d589ea5" defer></script><script src="/assets/studio/studio-template-text.js?v=312f179827" defer></script><script src="/assets/studio/studio-templates.js?v=30b348fbe2" defer></script><script src="/assets/studio/studio-main.js?v=062e98f029" defer></script>
-<script src="/assets/shared/shot-player.js?v=0d7ae3ceb4"></script>
-  <link rel="stylesheet" href="/assets/shared/sidebar.css?v=dd2c815e5f">
-  <script src="/assets/shared/sidebar.js?v=f094192f60" defer></script>
-</head>
-<body class="studio">
-  <header><a class="brand" href="/">m<span>index</span><i></i></a><nav class="page-nav" aria-label="页面导航" data-i18n-aria-label="ui.main_navigation"><a class="quiet nav-link" href="/search" data-i18n="[[0,&quot;ui.c9b1e68e3537&quot;]]">视频检索</a><a class="quiet nav-link" href="/" aria-current="page" data-i18n="[[0,&quot;ui.b6fc3cef0bd0&quot;]]">创作</a><a class="quiet nav-link" href="/admin" data-i18n="[[0,&quot;ui.f517302fec0d&quot;]]">素材管理</a><a class="quiet nav-link" href="/persons" data-i18n="[[0,&quot;ui.0973ef28d791&quot;]]">人物库</a><a class="quiet nav-link" href="/settings" data-i18n="[[0,&quot;ui.7debf9cb0372&quot;]]">设置</a></nav><div class="header-actions"><button id="reload" class="quiet" data-i18n="[[0,&quot;ui.040f050b56e5&quot;]]" data-i18n-aria-label="ui.040f050b56e5">刷新任务</button><button type="button" class="quiet theme-toggle" data-theme-toggle></button><button type="button" class="quiet language-switch" data-language-toggle aria-label="中文 / English"><span data-language="zh" lang="zh-CN">文</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en" lang="en">En</span></button></div></header>
-  <main class="studio-main">
-    <section class="studio-intro"><h1 data-i18n="[[0,&quot;ui.8c66fab876f3&quot;]]">创作工作台</h1><p data-i18n="[[0,&quot;ui.fae955fec0db&quot;]]">从文案生成分镜，逐镜配音、召回画面并合成带字幕的成片，各步骤可单独执行与重试。</p></section>
-    <nav class="studio-tabs" aria-label="创作分区" data-i18n-aria-label="ui.studio_tabs_aria"><a class="studio-tab" href="/" aria-current="page" data-i18n="[[0,&quot;ui.studio_tab_jobs&quot;]]">创作任务</a><a class="studio-tab" id="studio-topics-tab" href="/studio/topics" data-i18n="[[0,&quot;ui.studio_tab_topics&quot;]]">选题挖掘</a><a class="studio-tab" id="studio-templates-tab" href="/studio/templates" data-i18n="[[0,&quot;ui.studio_tab_templates&quot;]]">文案模板</a><a class="studio-tab" id="studio-brands-tab" href="/studio/brands" data-i18n="[[0,&quot;ui.studio_tab_brands&quot;]]">风格模板</a><a class="studio-tab" href="/studio/delivery-templates" data-i18n="[[0,&quot;ui.studio_tab_delivery_templates&quot;]]">交付模板</a></nav>
-    <div id="notice" class="notice" role="status" aria-live="polite"></div>
-    <div class="workspace">
-      <button type="button" class="sidebar-toggle" data-sidebar-toggle="studio" aria-controls="job-panel" aria-expanded="true" aria-label="收起左侧面板" title="收起左侧面板"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button>
-      <aside id="job-panel" class="job-panel" aria-label="创作任务" data-i18n-aria-label="ui.e8c80f52ae86">
-        <form id="create-form"><label for="create-text" data-i18n="[[0,&quot;ui.create_video_label&quot;]]">创作视频</label><textarea id="create-text" rows="5" maxlength="2000" placeholder="输入你想要创作的视频大纲，例如：生成一个新加坡旅游介绍视频，300字左右，按顺序讲星耀樟宜、植物园、牛车水中国美食、滨海湾公园的白天和夜景，最后总结一下。英文（Ctrl/⌘ + Enter 创建任务）" data-i18n-placeholder="ui.create_video_placeholder"></textarea>
-          <label class="form-field" data-i18n="[[0,&quot;ui.f711792f098b&quot;],[2,&quot;ui.833c18d4bee3&quot;],[3,&quot;ui.8c638554b6f7&quot;]]">可用素材<select id="create-sources" multiple></select><span class="muted">本任务的召回只在这里列出的素材中进行；逐镜的素材范围只能在其中二次选择</span><span class="muted" id="create-sources-empty" hidden>素材库为空，暂无可用素材</span></label>
-          <button class="submit" id="create-button" type="submit" data-i18n="[[0,&quot;ui.cf42fd678f46&quot;]]">创建任务 <span>↗</span></button></form>
-        <div id="create-status" role="status" aria-live="polite" hidden><span data-i18n="[[0,&quot;ui.creating_task&quot;]]">正在创建任务</span><span id="create-dots" aria-hidden="true">.</span></div>
-        <div id="job-list" aria-label="任务列表" data-i18n-aria-label="ui.cfd7488ce6a8"></div>
-      </aside>
-      <section class="work-panel" aria-label="任务工作区" data-i18n-aria-label="ui.44eb6d3706d9">
-        <div id="no-job" class="empty"><h2 data-i18n="[[0,&quot;ui.ea0444c7adfd&quot;]]">选择一个创作任务</h2><p data-i18n="[[0,&quot;ui.5de872517c83&quot;]]">在左侧创建新任务，或点击已有任务查看进度、编辑分镜与选片。</p></div>
-        <div id="legacy-run" class="empty" role="status" aria-live="polite" hidden><p id="legacy-run-text"></p><button id="cancel-legacy" class="quiet" type="button" data-i18n="[[0,&quot;ui.studio_cancel_run&quot;]]">取消执行</button></div>
-        <div id="job-workspace" hidden>
-          <div id="job-header"></div>
-          <div id="job-topic" class="job-topic" data-capability="job-profile" role="status" aria-live="polite" hidden></div>
-          <details id="job-meta"><summary data-i18n="[[0,&quot;ui.15dcece34f96&quot;]]">任务元信息</summary><div id="job-meta-body"></div></details>
-          <div class="plan-bar"><label data-i18n="[[0,&quot;ui.373241734247&quot;]]">构建方案 <select id="plan-select"></select></label><button id="new-plan" class="quiet" data-i18n="[[0,&quot;ui.0cda8d1c7182&quot;]]">新建</button><button id="copy-plan" class="quiet" data-i18n="[[0,&quot;ui.4edd1d00875d&quot;]]">复制</button><button id="delete-job" class="quiet" data-i18n="[[0,&quot;ui.delete_job&quot;]]">删除任务</button><button id="rename-plan" class="quiet" data-i18n="[[0,&quot;ui.73bd4c354a12&quot;]]">命名</button><button id="delete-plan" class="quiet" data-i18n="[[0,&quot;ui.delete_plan&quot;]]">删除方案</button><button id="plan-settings" class="quiet" data-i18n="[[0,&quot;ui.b876f5881f16&quot;]]">方案参数</button><button id="run-all" class="quiet" data-i18n="[[0,&quot;ui.bfa31b77d1ef&quot;]]">构建成片</button><button id="cancel-run" class="quiet" type="button" hidden data-i18n="[[0,&quot;ui.studio_cancel_run&quot;]]">取消执行</button></div>
-          <section class="execution-log-section" aria-labelledby="log-heading"><h2 id="log-heading" data-i18n="[[0,&quot;ui.f99f7a3f1e2e&quot;]]">工作日志</h2><pre id="execution-log" role="log" aria-live="polite" aria-relevant="additions" tabindex="0" contenteditable="false" data-i18n="[[0,&quot;ui.27b3fd17f4de&quot;]]">当前方案暂无执行日志。</pre></section>
-          <details id="script-section" open><summary data-i18n="[[0,&quot;ui.script_section_title&quot;]]">文案创作</summary>
-            <div class="script-panel">
-              <p id="script-outline" class="muted" hidden></p>
-              <p id="script-materials" class="muted" role="status" hidden></p>
-              <p id="script-error" class="warn-text" role="alert" hidden></p>
-              <p id="script-stale" class="warn-text" role="status" hidden data-i18n="[[0,&quot;ui.script_stale_warning&quot;]]">文案已变化，现有分镜还是按旧文案拆出的。构建成片时会重新拆分镜。</p>
-              <div class="script-template-bar"><label for="script-template" data-i18n="[[0,&quot;ui.script_template_label&quot;]]">文案模板</label><select id="script-template" aria-describedby="script-template-changed" disabled></select><a id="script-template-manage" class="quiet nav-link" href="/studio/templates" data-i18n="[[0,&quot;ui.script_template_manage&quot;]]">管理模板</a></div>
-              <p id="script-template-changed" class="muted" role="status" hidden data-i18n="[[0,&quot;ui.script_template_changed&quot;]]">模板已变化，可重新生成文案。</p>
-              <p id="script-material-scope-changed" class="muted" role="status" hidden data-i18n="[[0,&quot;ui.script_material_scope_changed&quot;]]">素材范围或组成员已变化，可重新生成文案。</p>
-              <p id="script-profile-changed" class="muted" role="status" hidden data-i18n="[[0,&quot;ui.script_profile_changed&quot;]]">账号档案已同步，当前文案按旧档案写成，可重新生成文案。</p>
-              <div id="script-references" class="script-references" role="group" aria-label="参考文稿" data-i18n-aria-label="ui.reference_title"></div>
-              <textarea id="script-text" rows="8" maxlength="2000" placeholder="文案待创作。点击“生成文案”，或直接在这里输入即可。" aria-label="文案" data-i18n-placeholder="ui.script_placeholder" data-i18n-aria-label="ui.script_aria_label"></textarea>
-              <div class="script-actions"><button id="script-generate" type="button" class="quiet" data-i18n="[[0,&quot;ui.script_generate&quot;]]">生成文案</button><span id="script-counter" class="muted"></span></div>
-              <div id="script-history" class="version-history"></div>
-            </div>
-          </details>
-          <details id="storyboard-section" open><summary data-i18n="[[0,&quot;ui.3aa6e5b4b49a&quot;]]">分镜工作台 <span id="shot-count" class="muted"></span></summary><div class="section-head"><span id="storyboard-warning" class="warn-text"></span></div><div id="retrieval-deps" class="retrieval-deps" aria-label="检索组合依赖" data-i18n-aria-label="ui.retrieval_deps_label" hidden></div><div id="board-batch" class="board-batch" role="group" aria-labelledby="batch-label"><span id="batch-label" class="board-batch-label" data-i18n="[[0,&quot;ui.board_batch_label&quot;]]">批量操作</span><select id="batch-stage" aria-label="批量操作的阶段" data-i18n-aria-label="ui.board_batch_stage"><option value="split" data-i18n="[[0,&quot;ui.board_batch_split&quot;]]">文案与查询（拆分镜）</option><option value="picture" data-i18n="[[0,&quot;ui.board_batch_picture&quot;]]">召回（画面）</option><option value="tts" data-i18n="[[0,&quot;ui.0f10bb37a946&quot;]]">配音</option><option value="select" data-i18n="[[0,&quot;ui.7a88bdc950ad&quot;]]">选片与对齐</option><option value="render" data-i18n="[[0,&quot;ui.d458415b7971&quot;]]">分镜渲染</option></select><button id="batch-execute" type="button" class="quiet execute-column" data-stage="split" data-i18n="[[0,&quot;ui.execute_all_reuse&quot;]]">全部执行/复用</button><button id="batch-regenerate" type="button" class="quiet regenerate-column" data-stage="split" data-i18n="[[0,&quot;ui.2d41d4534686&quot;]]">全部重新生成</button></div><div id="storyboard-board" class="storyboard-board"><div class="shot-strip-wrap"><button id="strip-prev" type="button" class="quiet strip-nav" aria-label="上一组分镜" data-i18n-aria-label="ui.board_strip_prev" hidden>‹</button><div id="shot-strip" class="shot-strip" role="list" aria-label="分镜" data-i18n-aria-label="ui.board_strip_label"></div><button id="strip-next" type="button" class="quiet strip-nav" aria-label="下一组分镜" data-i18n-aria-label="ui.board_strip_next" hidden>›</button></div><div id="shot-stage-area" class="shot-stage-area"><p id="stage-placeholder" class="stage-placeholder muted" data-i18n="[[0,&quot;ui.board_placeholder&quot;]]">请从上方选择分镜和阶段：鼠标悬停分镜可展开全部阶段，点击分镜直接打开它显示的阶段。</p><div id="stage-panel" class="shot-detail-panel" tabindex="-1" role="region" aria-label="阶段详情" data-i18n-aria-label="ui.board_panel_label" hidden></div></div></div></details><div id="stage-popover" class="stage-popover" role="menu" hidden></div>
-          <details id="result-section" open><summary data-i18n="[[0,&quot;ui.edd30289d98f&quot;]]">成片</summary><div class="section-head"><h2 data-i18n="[[0,&quot;ui.51798e2a3d1f&quot;]]">当前成片</h2><span id="final-hint" class="muted"></span></div><div id="final-player"></div><div id="final-history"></div></details>
-          <details id="delivery-section"><summary data-i18n="[[0,&quot;ui.delivery_summary&quot;]]">交付</summary><div class="section-head"><h2 data-i18n="[[0,&quot;ui.delivery_heading&quot;]]">多画幅与发布</h2></div><div id="delivery-body"></div></details>
-          <details id="artifacts-section"><summary data-i18n="[[0,&quot;ui.94d23c51c04a&quot;]]">产物与调试记录</summary><div class="section-head"><h2 data-i18n="[[0,&quot;ui.7c33e144b88a&quot;]]">当前产物</h2><span id="current-artifacts-hint" class="muted"></span><button id="reload-artifacts" class="quiet" data-i18n="[[0,&quot;ui.74d444c5a79d&quot;]]">刷新产物</button><a id="download-archive" class="quiet nav-link" data-i18n="[[0,&quot;ui.e4108401cc4b&quot;]]">下载任务 ZIP ↧</a></div><div id="current-artifacts"></div><div id="artifact-view"></div><div id="build-history"></div></details>
-        </div>
+  <head>
+    <script src="/assets/shared/i18n-boot.js?v=6ad8b45125"></script>
+    <script src="/assets/shared/theme.js?v=06b5a45391"></script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title data-i18n='[[0,"ui.74b7ad79367e"]]'>Mindex · 创作</title>
+    <link rel="icon" href="/assets/shared/favicon.svg?v=8d7f9242de" type="image/svg+xml" />
+    <link rel="stylesheet" href="/assets/shared/style.css?v=7303c8f392" />
+    <link rel="stylesheet" href="/assets/shared/agent-panel.css?v=4402a24df2" />
+    <link rel="stylesheet" href="/assets/studio/studio.css?v=b02cf94e3b" />
+    <script src="/assets/shared/messages.js?v=6a8ef772ae" defer></script>
+    <script src="/assets/shared/i18n.js?v=71113d017f" defer></script>
+    <script src="/assets/shared/api.js?v=799acf885b" defer></script>
+    <script src="/assets/shared/control-layout.js?v=1278e93f03" defer></script>
+    <script src="/assets/shared/group-controls.js?v=200a6e2ce7" defer></script>
+    <script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script>
+    <script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script>
+    <script src="/assets/shared/agent-markdown.js?v=9dd4d8c653" defer></script>
+    <script src="/assets/shared/agent-panel.js?v=11ba8e2e53" defer></script>
+    <script src="/assets/shared/feedback.js?v=a83918f9e5" defer></script>
+    <script src="/assets/shared/multiselect.js?v=580ad4713c" defer></script>
+    <script src="/assets/studio/studio-state.js?v=8158053fdb" defer></script>
+    <script src="/assets/studio/studio-jobs.js?v=b1432edc8a" defer></script>
+    <script src="/assets/studio/studio-workspace.js?v=27100516ac" defer></script>
+    <script src="/assets/studio/studio-board.js?v=470314aac4" defer></script>
+    <script src="/assets/studio/studio-editor.js?v=f8a6cc5e15" defer></script>
+    <script src="/assets/studio/studio-stages.js?v=3e5de9ba9e" defer></script>
+    <script src="/assets/studio/studio-post.js?v=deadc03072" defer></script>
+    <script src="/assets/studio/delivery-editor.js?v=b8b4a7bbbf" defer></script>
+    <script src="/assets/studio/studio-delivery.js?v=324dfbbadf" defer></script>
+    <script src="/assets/studio/studio-plan.js?v=65b3e74449" defer></script>
+    <script src="/assets/studio/studio-recall.js?v=a6fb00b4e1" defer></script>
+    <script src="/assets/studio/studio-build.js?v=f6c42c551a" defer></script>
+    <script src="/assets/studio/studio-template-text.js?v=bcfd3c7d6c" defer></script>
+    <script src="/assets/studio/studio-templates.js?v=5856324534" defer></script>
+    <script src="/assets/studio/studio-main.js?v=30918ce79f" defer></script>
+    <script src="/assets/shared/shot-player.js?v=855e64534e"></script>
+    <link rel="stylesheet" href="/assets/shared/sidebar.css?v=ae3a90c0f4" />
+    <script src="/assets/shared/sidebar.js?v=25662ce192" defer></script>
+  </head>
+  <body class="studio">
+    <header>
+      <a class="brand" href="/">m<span>index</span><i></i></a>
+      <nav class="page-nav" aria-label="页面导航" data-i18n-aria-label="ui.main_navigation">
+        <a class="quiet nav-link" href="/search" data-i18n='[[0,"ui.c9b1e68e3537"]]'>视频检索</a
+        ><a class="quiet nav-link" href="/" aria-current="page" data-i18n='[[0,"ui.b6fc3cef0bd0"]]'
+          >创作</a
+        ><a class="quiet nav-link" href="/admin" data-i18n='[[0,"ui.f517302fec0d"]]'>素材管理</a
+        ><a class="quiet nav-link" href="/persons" data-i18n='[[0,"ui.0973ef28d791"]]'>人物库</a
+        ><a class="quiet nav-link" href="/settings" data-i18n='[[0,"ui.7debf9cb0372"]]'>设置</a>
+      </nav>
+      <div class="header-actions">
+        <button
+          id="reload"
+          class="quiet"
+          data-i18n='[[0,"ui.040f050b56e5"]]'
+          data-i18n-aria-label="ui.040f050b56e5"
+        >
+          刷新任务</button
+        ><button type="button" class="quiet theme-toggle" data-theme-toggle></button
+        ><button
+          type="button"
+          class="quiet language-switch"
+          data-language-toggle
+          aria-label="中文 / English"
+        >
+          <span data-language="zh" lang="zh-CN">文</span
+          ><span class="language-divider" aria-hidden="true">/</span
+          ><span data-language="en" lang="en">En</span>
+        </button>
+      </div>
+    </header>
+    <main class="studio-main">
+      <section class="studio-intro">
+        <h1 data-i18n='[[0,"ui.8c66fab876f3"]]'>创作工作台</h1>
+        <p data-i18n='[[0,"ui.fae955fec0db"]]'>
+          从文案生成分镜，逐镜配音、召回画面并合成带字幕的成片，各步骤可单独执行与重试。
+        </p>
       </section>
-    </div>
-  </main>
-  <dialog id="work-dialog" aria-labelledby="dialog-title"><button id="dialog-close" type="button" class="quiet close" aria-label="关闭" data-i18n-aria-label="ui.6c14bd7f6f9e">✕</button><h2 id="dialog-title"></h2><div id="dialog-content"></div></dialog>
-  <dialog id="play-dialog" aria-labelledby="play-title"><button id="play-close" type="button" class="quiet close" aria-label="关闭播放" data-i18n-aria-label="ui.e830eabb98f5">✕</button><h2 id="play-title"></h2><video id="play-video" controls preload="metadata"></video></dialog>
-  <footer><span data-i18n="[[0,&quot;ui.9141f0fd8297&quot;]]">Mindex / 创作</span><span data-i18n="[[0,&quot;ui.3c60f44b51aa&quot;]]">本地素材库 · 工作流分步执行</span></footer>
-</body>
+      <nav class="studio-tabs" aria-label="创作分区" data-i18n-aria-label="ui.studio_tabs_aria">
+        <a class="studio-tab" href="/" aria-current="page" data-i18n='[[0,"ui.studio_tab_jobs"]]'
+          >创作任务</a
+        ><a
+          class="studio-tab"
+          id="studio-topics-tab"
+          href="/studio/topics"
+          data-i18n='[[0,"ui.studio_tab_topics"]]'
+          >选题挖掘</a
+        ><a
+          class="studio-tab"
+          id="studio-templates-tab"
+          href="/studio/templates"
+          data-i18n='[[0,"ui.studio_tab_templates"]]'
+          >文案模板</a
+        ><a
+          class="studio-tab"
+          id="studio-brands-tab"
+          href="/studio/brands"
+          data-i18n='[[0,"ui.studio_tab_brands"]]'
+          >风格模板</a
+        ><a
+          class="studio-tab"
+          href="/studio/delivery-templates"
+          data-i18n='[[0,"ui.studio_tab_delivery_templates"]]'
+          >交付模板</a
+        >
+      </nav>
+      <div id="notice" class="notice" role="status" aria-live="polite"></div>
+      <div class="workspace">
+        <button
+          type="button"
+          class="sidebar-toggle"
+          data-sidebar-toggle="studio"
+          aria-controls="job-panel"
+          aria-expanded="true"
+          aria-label="收起左侧面板"
+          title="收起左侧面板"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            aria-hidden="true"
+          >
+            <path d="m14 6-6 6 6 6" />
+          </svg>
+        </button>
+        <aside
+          id="job-panel"
+          class="job-panel"
+          aria-label="创作任务"
+          data-i18n-aria-label="ui.e8c80f52ae86"
+        >
+          <form id="create-form">
+            <label for="create-text" data-i18n='[[0,"ui.create_video_label"]]'>创作视频</label
+            ><textarea
+              id="create-text"
+              rows="5"
+              maxlength="2000"
+              placeholder="输入你想要创作的视频大纲，例如：生成一个新加坡旅游介绍视频，300字左右，按顺序讲星耀樟宜、植物园、牛车水中国美食、滨海湾公园的白天和夜景，最后总结一下。英文（Ctrl/⌘ + Enter 创建任务）"
+              data-i18n-placeholder="ui.create_video_placeholder"
+            ></textarea>
+            <label
+              class="form-field"
+              data-i18n='[[0,"ui.f711792f098b"],[2,"ui.833c18d4bee3"],[3,"ui.8c638554b6f7"]]'
+              >可用素材<select id="create-sources" multiple></select
+              ><span class="muted"
+                >本任务的召回只在这里列出的素材中进行；逐镜的素材范围只能在其中二次选择</span
+              ><span class="muted" id="create-sources-empty" hidden
+                >素材库为空，暂无可用素材</span
+              ></label
+            >
+            <button
+              class="submit"
+              id="create-button"
+              type="submit"
+              data-i18n='[[0,"ui.cf42fd678f46"]]'
+            >
+              创建任务 <span>↗</span>
+            </button>
+          </form>
+          <div id="create-status" role="status" aria-live="polite" hidden>
+            <span data-i18n='[[0,"ui.creating_task"]]'>正在创建任务</span
+            ><span id="create-dots" aria-hidden="true">.</span>
+          </div>
+          <div id="job-list" aria-label="任务列表" data-i18n-aria-label="ui.cfd7488ce6a8"></div>
+        </aside>
+        <section class="work-panel" aria-label="任务工作区" data-i18n-aria-label="ui.44eb6d3706d9">
+          <div id="no-job" class="empty">
+            <h2 data-i18n='[[0,"ui.ea0444c7adfd"]]'>选择一个创作任务</h2>
+            <p data-i18n='[[0,"ui.5de872517c83"]]'>
+              在左侧创建新任务，或点击已有任务查看进度、编辑分镜与选片。
+            </p>
+          </div>
+          <div id="legacy-run" class="empty" role="status" aria-live="polite" hidden>
+            <p id="legacy-run-text"></p>
+            <button
+              id="cancel-legacy"
+              class="quiet"
+              type="button"
+              data-i18n='[[0,"ui.studio_cancel_run"]]'
+            >
+              取消执行
+            </button>
+          </div>
+          <div id="job-workspace" hidden>
+            <div id="job-header"></div>
+            <div
+              id="job-topic"
+              class="job-topic"
+              data-capability="job-profile"
+              role="status"
+              aria-live="polite"
+              hidden
+            ></div>
+            <details id="job-meta">
+              <summary data-i18n='[[0,"ui.15dcece34f96"]]'>任务元信息</summary>
+              <div id="job-meta-body"></div>
+            </details>
+            <div class="plan-bar">
+              <label data-i18n='[[0,"ui.373241734247"]]'
+                >构建方案
+                <select id="plan-select"></select></label
+              ><button id="new-plan" class="quiet" data-i18n='[[0,"ui.0cda8d1c7182"]]'>新建</button
+              ><button id="copy-plan" class="quiet" data-i18n='[[0,"ui.4edd1d00875d"]]'>复制</button
+              ><button id="delete-job" class="quiet" data-i18n='[[0,"ui.delete_job"]]'>
+                删除任务</button
+              ><button id="rename-plan" class="quiet" data-i18n='[[0,"ui.73bd4c354a12"]]'>
+                命名</button
+              ><button id="delete-plan" class="quiet" data-i18n='[[0,"ui.delete_plan"]]'>
+                删除方案</button
+              ><button id="plan-settings" class="quiet" data-i18n='[[0,"ui.b876f5881f16"]]'>
+                方案参数</button
+              ><button id="run-all" class="quiet" data-i18n='[[0,"ui.bfa31b77d1ef"]]'>
+                构建成片</button
+              ><button
+                id="cancel-run"
+                class="quiet"
+                type="button"
+                hidden
+                data-i18n='[[0,"ui.studio_cancel_run"]]'
+              >
+                取消执行
+              </button>
+            </div>
+            <section class="execution-log-section" aria-labelledby="log-heading">
+              <h2 id="log-heading" data-i18n='[[0,"ui.f99f7a3f1e2e"]]'>工作日志</h2>
+              <pre
+                id="execution-log"
+                role="log"
+                aria-live="polite"
+                aria-relevant="additions"
+                tabindex="0"
+                contenteditable="false"
+                data-i18n='[[0,"ui.27b3fd17f4de"]]'
+              >
+当前方案暂无执行日志。</pre>
+            </section>
+            <details id="script-section" open>
+              <summary data-i18n='[[0,"ui.script_section_title"]]'>文案创作</summary>
+              <div class="script-panel">
+                <p id="script-outline" class="muted" hidden></p>
+                <p id="script-materials" class="muted" role="status" hidden></p>
+                <p id="script-error" class="warn-text" role="alert" hidden></p>
+                <p
+                  id="script-stale"
+                  class="warn-text"
+                  role="status"
+                  hidden
+                  data-i18n='[[0,"ui.script_stale_warning"]]'
+                >
+                  文案已变化，现有分镜还是按旧文案拆出的。构建成片时会重新拆分镜。
+                </p>
+                <div class="script-template-bar">
+                  <label for="script-template" data-i18n='[[0,"ui.script_template_label"]]'
+                    >文案模板</label
+                  ><select
+                    id="script-template"
+                    aria-describedby="script-template-changed"
+                    disabled
+                  ></select
+                  ><a
+                    id="script-template-manage"
+                    class="quiet nav-link"
+                    href="/studio/templates"
+                    data-i18n='[[0,"ui.script_template_manage"]]'
+                    >管理模板</a
+                  >
+                </div>
+                <p
+                  id="script-template-changed"
+                  class="muted"
+                  role="status"
+                  hidden
+                  data-i18n='[[0,"ui.script_template_changed"]]'
+                >
+                  模板已变化，可重新生成文案。
+                </p>
+                <p
+                  id="script-material-scope-changed"
+                  class="muted"
+                  role="status"
+                  hidden
+                  data-i18n='[[0,"ui.script_material_scope_changed"]]'
+                >
+                  素材范围或组成员已变化，可重新生成文案。
+                </p>
+                <p
+                  id="script-profile-changed"
+                  class="muted"
+                  role="status"
+                  hidden
+                  data-i18n='[[0,"ui.script_profile_changed"]]'
+                >
+                  账号档案已同步，当前文案按旧档案写成，可重新生成文案。
+                </p>
+                <div
+                  id="script-references"
+                  class="script-references"
+                  role="group"
+                  aria-label="参考文稿"
+                  data-i18n-aria-label="ui.reference_title"
+                ></div>
+                <textarea
+                  id="script-text"
+                  rows="8"
+                  maxlength="2000"
+                  placeholder="文案待创作。点击“生成文案”，或直接在这里输入即可。"
+                  aria-label="文案"
+                  data-i18n-placeholder="ui.script_placeholder"
+                  data-i18n-aria-label="ui.script_aria_label"
+                ></textarea>
+                <div class="script-actions">
+                  <button
+                    id="script-generate"
+                    type="button"
+                    class="quiet"
+                    data-i18n='[[0,"ui.script_generate"]]'
+                  >
+                    生成文案</button
+                  ><span id="script-counter" class="muted"></span>
+                </div>
+                <div id="script-history" class="version-history"></div>
+              </div>
+            </details>
+            <details id="storyboard-section" open>
+              <summary data-i18n='[[0,"ui.3aa6e5b4b49a"]]'>
+                分镜工作台 <span id="shot-count" class="muted"></span>
+              </summary>
+              <div class="section-head">
+                <span id="storyboard-warning" class="warn-text"></span>
+              </div>
+              <div
+                id="retrieval-deps"
+                class="retrieval-deps"
+                aria-label="检索组合依赖"
+                data-i18n-aria-label="ui.retrieval_deps_label"
+                hidden
+              ></div>
+              <div id="board-batch" class="board-batch" role="group" aria-labelledby="batch-label">
+                <span
+                  id="batch-label"
+                  class="board-batch-label"
+                  data-i18n='[[0,"ui.board_batch_label"]]'
+                  >批量操作</span
+                ><select
+                  id="batch-stage"
+                  aria-label="批量操作的阶段"
+                  data-i18n-aria-label="ui.board_batch_stage"
+                >
+                  <option value="split" data-i18n='[[0,"ui.board_batch_split"]]'>
+                    文案与查询（拆分镜）
+                  </option>
+                  <option value="picture" data-i18n='[[0,"ui.board_batch_picture"]]'>
+                    召回（画面）
+                  </option>
+                  <option value="tts" data-i18n='[[0,"ui.0f10bb37a946"]]'>配音</option>
+                  <option value="select" data-i18n='[[0,"ui.7a88bdc950ad"]]'>选片与对齐</option>
+                  <option value="render" data-i18n='[[0,"ui.d458415b7971"]]'>
+                    分镜渲染
+                  </option></select
+                ><button
+                  id="batch-execute"
+                  type="button"
+                  class="quiet execute-column"
+                  data-stage="split"
+                  data-i18n='[[0,"ui.execute_all_reuse"]]'
+                >
+                  全部执行/复用</button
+                ><button
+                  id="batch-regenerate"
+                  type="button"
+                  class="quiet regenerate-column"
+                  data-stage="split"
+                  data-i18n='[[0,"ui.2d41d4534686"]]'
+                >
+                  全部重新生成
+                </button>
+              </div>
+              <div id="storyboard-board" class="storyboard-board">
+                <div class="shot-strip-wrap">
+                  <button
+                    id="strip-prev"
+                    type="button"
+                    class="quiet strip-nav"
+                    aria-label="上一组分镜"
+                    data-i18n-aria-label="ui.board_strip_prev"
+                    hidden
+                  >
+                    ‹
+                  </button>
+                  <div
+                    id="shot-strip"
+                    class="shot-strip"
+                    role="list"
+                    aria-label="分镜"
+                    data-i18n-aria-label="ui.board_strip_label"
+                  ></div>
+                  <button
+                    id="strip-next"
+                    type="button"
+                    class="quiet strip-nav"
+                    aria-label="下一组分镜"
+                    data-i18n-aria-label="ui.board_strip_next"
+                    hidden
+                  >
+                    ›
+                  </button>
+                </div>
+                <div id="shot-stage-area" class="shot-stage-area">
+                  <p
+                    id="stage-placeholder"
+                    class="stage-placeholder muted"
+                    data-i18n='[[0,"ui.board_placeholder"]]'
+                  >
+                    请从上方选择分镜和阶段：鼠标悬停分镜可展开全部阶段，点击分镜直接打开它显示的阶段。
+                  </p>
+                  <div
+                    id="stage-panel"
+                    class="shot-detail-panel"
+                    tabindex="-1"
+                    role="region"
+                    aria-label="阶段详情"
+                    data-i18n-aria-label="ui.board_panel_label"
+                    hidden
+                  ></div>
+                </div>
+              </div>
+            </details>
+            <div id="stage-popover" class="stage-popover" role="menu" hidden></div>
+            <details id="result-section" open>
+              <summary data-i18n='[[0,"ui.edd30289d98f"]]'>成片</summary>
+              <div class="section-head">
+                <h2 data-i18n='[[0,"ui.51798e2a3d1f"]]'>当前成片</h2>
+                <span id="final-hint" class="muted"></span>
+              </div>
+              <div id="final-player"></div>
+              <div id="final-history"></div>
+            </details>
+            <details id="delivery-section">
+              <summary data-i18n='[[0,"ui.delivery_summary"]]'>交付</summary>
+              <div class="section-head">
+                <h2 data-i18n='[[0,"ui.delivery_heading"]]'>多画幅与发布</h2>
+              </div>
+              <div id="delivery-body"></div>
+            </details>
+            <details id="artifacts-section">
+              <summary data-i18n='[[0,"ui.94d23c51c04a"]]'>产物与调试记录</summary>
+              <div class="section-head">
+                <h2 data-i18n='[[0,"ui.7c33e144b88a"]]'>当前产物</h2>
+                <span id="current-artifacts-hint" class="muted"></span
+                ><button id="reload-artifacts" class="quiet" data-i18n='[[0,"ui.74d444c5a79d"]]'>
+                  刷新产物</button
+                ><a id="download-archive" class="quiet nav-link" data-i18n='[[0,"ui.e4108401cc4b"]]'
+                  >下载任务 ZIP ↧</a
+                >
+              </div>
+              <div id="current-artifacts"></div>
+              <div id="artifact-view"></div>
+              <div id="build-history"></div>
+            </details>
+          </div>
+        </section>
+      </div>
+    </main>
+    <dialog id="work-dialog" aria-labelledby="dialog-title">
+      <button
+        id="dialog-close"
+        type="button"
+        class="quiet close"
+        aria-label="关闭"
+        data-i18n-aria-label="ui.6c14bd7f6f9e"
+      >
+        ✕
+      </button>
+      <h2 id="dialog-title"></h2>
+      <div id="dialog-content"></div>
+    </dialog>
+    <dialog id="play-dialog" aria-labelledby="play-title">
+      <button
+        id="play-close"
+        type="button"
+        class="quiet close"
+        aria-label="关闭播放"
+        data-i18n-aria-label="ui.e830eabb98f5"
+      >
+        ✕
+      </button>
+      <h2 id="play-title"></h2>
+      <video id="play-video" controls preload="metadata"></video>
+    </dialog>
+    <footer>
+      <span data-i18n='[[0,"ui.9141f0fd8297"]]'>Mindex / 创作</span
+      ><span data-i18n='[[0,"ui.3c60f44b51aa"]]'>本地素材库 · 工作流分步执行</span>
+    </footer>
+  </body>
 </html>

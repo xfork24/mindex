@@ -6,11 +6,11 @@ import json
 from collections import defaultdict
 from types import SimpleNamespace
 
-from mindex.admin.source_tasks import person_setup
-from mindex.processing.dialogue import READY, current_dialogue
-from mindex.shared.background_tasks import public_task
-from mindex.shared.config import fingerprint
-from mindex.shared.scene_plans import current_segments, select_scenes
+from admin.source_tasks import person_setup
+from processing.dialogue import READY, current_dialogue
+from shared.background_tasks import public_task
+from shared.config import fingerprint
+from shared.scene_plans import current_segments, select_scenes
 
 
 def covered_shots(shots, rows):
@@ -43,8 +43,8 @@ def same_json(left, right):
 
 
 def source_work(store, source, *, segments=None, analysis_rows=None, active=None, published=None):
-    from mindex.persons.persons import Persons
-    from mindex.processing.channel_index import normalize_snapshot, snapshots_for
+    from persons.persons import Persons
+    from processing.channel_index import normalize_snapshot, snapshots_for
 
     sid = source["id"]
     segments = current_segments(store, sid, segments)
@@ -62,23 +62,28 @@ def source_work(store, source, *, segments=None, analysis_rows=None, active=None
             for start, end in plan:
                 # Match Pipeline._segment's existing-record lookup. Historical IDs
                 # need not equal the ID a current fingerprint would generate.
-                existing = next((s for s in scenes if abs(s["start"] - start) < 1e-6
-                                 and abs(s["end"] - end) < 1e-6), None)
-                planned_ids.add(existing["id"] if existing else fingerprint(
-                    [sid, "scene", round(start, 6), round(end, 6), scene_plan["profile"]]
-                ))
+                existing = next(
+                    (s for s in scenes if abs(s["start"] - start) < 1e-6 and abs(s["end"] - end) < 1e-6), None
+                )
+                planned_ids.add(
+                    existing["id"]
+                    if existing
+                    else fingerprint([sid, "scene", round(start, 6), round(end, 6), scene_plan["profile"]])
+                )
     expected_ids = segment_ids | planned_ids
     annotations = {
         r["segment_id"]
         for r in store.rows(
-            "SELECT DISTINCT a.segment_id FROM annotations a JOIN segments s ON s.id=a.segment_id WHERE s.source_id=?",
+            "SELECT DISTINCT a.segment_id FROM annotations a JOIN segments s ON s.id=a.segment_id WHERE "
+            "s.source_id=?",
             (sid,),
         )
     } & expected_ids
     skipped_rows = store.rows(
         "SELECT a.segment_id,a.data FROM annotations a JOIN segments s ON s.id=a.segment_id "
         "WHERE s.source_id=? AND json_extract(a.data,'$.status')='skipped' "
-        "AND a.rowid=(SELECT MAX(b.rowid) FROM annotations b WHERE b.segment_id=a.segment_id)", (sid,)
+        "AND a.rowid=(SELECT MAX(b.rowid) FROM annotations b WHERE b.segment_id=a.segment_id)",
+        (sid,),
     )
     skipped = {r["segment_id"] for r in skipped_rows} & annotations
     skipped_reasons = defaultdict(int)
@@ -100,14 +105,24 @@ def source_work(store, source, *, segments=None, analysis_rows=None, active=None
     linked = store.rows("SELECT DISTINCT actor_id,role_id FROM person_evidence WHERE source_id=?", (sid,))
     people = {r[k] for r in linked for k in ("actor_id", "role_id") if r[k]}
     active = active or store.active_index()
-    published = [normalize_snapshot(s) for s in published] if published is not None else (
-        [normalize_snapshot(s) for s in store.snapshots(active["id"], sid) if s["source_id"] == sid]
-        if active
-        else []
+    published = (
+        [normalize_snapshot(s) for s in published]
+        if published is not None
+        else (
+            [normalize_snapshot(s) for s in store.snapshots(active["id"], sid) if s["source_id"] == sid]
+            if active
+            else []
+        )
     )
     kinds = ("moment", "shot", "scene")
-    fresh = snapshots_for(SimpleNamespace(store=store), sid, kinds, status_only=True,
-                          segments=segments, analysis_rows=analysis_rows)
+    fresh = snapshots_for(
+        SimpleNamespace(store=store),
+        sid,
+        kinds,
+        status_only=True,
+        segments=segments,
+        analysis_rows=analysis_rows,
+    )
     work = {
         "shots": {
             "status": "complete"
@@ -117,7 +132,9 @@ def source_work(store, source, *, segments=None, analysis_rows=None, active=None
             else "not_processed",
             "result": {
                 "shots": len(shots),
-                "completed_shots": source.get("completed_shots", len(shots) if not source["missing_artifacts"] else 0),
+                "completed_shots": source.get(
+                    "completed_shots", len(shots) if not source["missing_artifacts"] else 0
+                ),
                 "moments": source["moment_count"],
                 "missing_artifacts": source["missing_artifacts"],
             },
@@ -128,7 +145,13 @@ def source_work(store, source, *, segments=None, analysis_rows=None, active=None
                 **source["channels"]["dialogue"],
                 **{
                     k: dialogue.get(k)
-                    for k in ("source", "selected_track", "subtitle_file", "model_identity", "fallback_reason")
+                    for k in (
+                        "source",
+                        "selected_track",
+                        "subtitle_file",
+                        "model_identity",
+                        "fallback_reason",
+                    )
                 },
                 "utterances": len(dialogue.get("utterances", [])),
             },
@@ -142,7 +165,9 @@ def source_work(store, source, *, segments=None, analysis_rows=None, active=None
             "result": {
                 "analyzed": len(annotations - skipped),
                 "skipped": len(skipped),
-                "skipped_reasons": [{"reason": reason, "count": count} for reason, count in sorted(skipped_reasons.items())],
+                "skipped_reasons": [
+                    {"reason": reason, "count": count} for reason, count in sorted(skipped_reasons.items())
+                ],
                 "pending": pending,
                 "total": len(expected_ids),
                 "scenes": sum(s["kind"] == "scene" for s in segments) + len(planned_ids - segment_ids),
@@ -158,7 +183,8 @@ def source_work(store, source, *, segments=None, analysis_rows=None, active=None
             "setup": person_setup(store, sid),
         },
     }
-    from mindex.processing.embedding_coverage import embedding_coverage
+    from processing.embedding_coverage import embedding_coverage
+
     for name, coverage_fields in embedding_coverage(store, sid, active, fresh, segments, published).items():
         work[name].update(coverage_fields)
     release, person_snapshot = catalogue.published(active["id"], source_id=sid) if active else (None, {})
@@ -171,7 +197,9 @@ def source_work(store, source, *, segments=None, analysis_rows=None, active=None
     published_evidence = [e for e in person_snapshot.get("evidence", []) if e["source_id"] == sid]
     published_coverage = [e for e in person_snapshot.get("coverage", []) if e["source_id"] == sid]
     work["persons"]["search"] = {
-        "current": bool(release) and bool(shots) and covered_shots(shots, published_coverage) == len(shots)
+        "current": bool(release)
+        and bool(shots)
+        and covered_shots(shots, published_coverage) == len(shots)
         and same_json(evidence, published_evidence)
         and same_json(
             sorted([{**c, "data": json.loads(c["data"])} for c in coverage], key=lambda c: c["cache_id"]),
@@ -215,11 +243,16 @@ def attach_tasks(store, source, work):
             else None
         )
         value["publish_task"] = public_task(publication_task) if publication_task else None
-        scene_task = store.one(
-            "SELECT * FROM source_tasks WHERE source_id=? AND work='publish' "
-            "AND json_extract(options,'$.work')=? AND json_extract(options,'$.scope')='scene' "
-            "ORDER BY rowid DESC LIMIT 1", (sid, name)
-        ) if has_source_tasks else None
+        scene_task = (
+            store.one(
+                "SELECT * FROM source_tasks WHERE source_id=? AND work='publish' "
+                "AND json_extract(options,'$.work')=? AND json_extract(options,'$.scope')='scene' "
+                "ORDER BY rowid DESC LIMIT 1",
+                (sid, name),
+            )
+            if has_source_tasks
+            else None
+        )
         value["scene_publish_task"] = public_task(scene_task) if scene_task else None
         latest = sorted(
             [t for t in (value["task"], value["publish_task"]) if t],
@@ -229,7 +262,10 @@ def attach_tasks(store, source, work):
         ready = name in {"shots", "dialogue"} or bool(source["prepared"])
         value["can_start"] = ready
         value["start_reason"] = None if ready else "请先完成分镜处理"
-        value["can_publish_scene"] = (name in {"shots", "dialogue", "analysis"} and bool(source["prepared"])
-                                      and value.get("scene_search", {}).get("expected_segments", 0) > 0)
+        value["can_publish_scene"] = (
+            name in {"shots", "dialogue", "analysis"}
+            and bool(source["prepared"])
+            and value.get("scene_search", {}).get("expected_segments", 0) > 0
+        )
         value["can_publish"] = bool(source["prepared"]) and value["status"] in READY | {"partial"}
     return work

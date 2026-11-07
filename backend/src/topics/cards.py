@@ -1,6 +1,7 @@
 """选题卡片（``topic_cards``）：保存、视图、列表、修改，以及打分与大纲的编排。
 
-- ``body`` JSON：angle、reason、item_ids、visuals、scores（五项）、coverage（覆盖报告）、outline、outline_origin
+- ``body`` JSON：angle、reason、item_ids、visuals、scores（五项）、coverage（覆盖报告）、outline、
+outline_origin
   （generated/manual）、template_id、warnings、scored_at、outlined_at。
 - 状态：new（新）、dismissed（已忽略）、adopted（已建任务，只能由建任务产生）。
 """
@@ -11,16 +12,16 @@ from typing import Literal
 
 from pydantic import Field
 
-from mindex.admin.curation import EntityNotFound
-from mindex.models.adapters import ModelError
-from mindex.shared.config import StrictModel
-from mindex.studio import script_templates
-from mindex.topics import coverage as topic_coverage
-from mindex.topics import items as topic_items
-from mindex.topics import outline as topic_outline
-from mindex.topics import profiles, scoring
-from mindex.topics.common import check_id, dumps, loads, new_id, now
-from mindex.topics.sources.local import made_videos
+from admin.curation import EntityNotFound
+from models.adapters import ModelError
+from shared.config import StrictModel
+from studio import script_templates
+from topics import coverage as topic_coverage
+from topics import items as topic_items
+from topics import outline as topic_outline
+from topics import profiles, scoring
+from topics.common import check_id, dumps, loads, new_id, now
+from topics.sources.local import made_videos
 
 STATUSES = ("new", "dismissed", "adopted")
 
@@ -53,33 +54,68 @@ def view(row: dict, *, detail: bool = False, store=None) -> dict:
         current = profiles.material_signature(store, profile)
         previous = body["coverage"].get("material_scope", {"source_ids": [], "groups": []})
         if current != previous:
-            body["coverage"] = {"status": "stale", "reason": "素材范围或组成员已变化，请重新打分",
-                                "visuals": [], "hits": 0, "total": 0, "ratio": 0}
+            body["coverage"] = {
+                "status": "stale",
+                "reason": "素材范围或组成员已变化，请重新打分",
+                "visuals": [],
+                "hits": 0,
+                "total": 0,
+                "ratio": 0,
+            }
             body["scores"] = {}
         elif body["coverage"].get("verification_version") != topic_coverage.coverage_verify.VERSION:
-            body["coverage"] = {"status": "stale", "reason": "旧报告未进行候选相关性核验，请重新打分",
-                                "visuals": [], "hits": 0, "total": 0, "ratio": 0}
+            body["coverage"] = {
+                "status": "stale",
+                "reason": "旧报告未进行候选相关性核验，请重新打分",
+                "visuals": [],
+                "hits": 0,
+                "total": 0,
+                "ratio": 0,
+            }
             body["scores"] = {}
         elif body["coverage"].get("coverage_overrides", {}) != profile.coverage.model_dump(exclude_none=True):
-            body["coverage"] = {"status": "stale", "reason": "素材覆盖核验配置已变化，请重新打分",
-                                "visuals": [], "hits": 0, "total": 0, "ratio": 0}
+            body["coverage"] = {
+                "status": "stale",
+                "reason": "素材覆盖核验配置已变化，请重新打分",
+                "visuals": [],
+                "hits": 0,
+                "total": 0,
+                "ratio": 0,
+            }
             body["scores"] = {}
-    result = {"id": row["id"], "profile_id": row["profile_id"], "run_id": row["run_id"], "title": row["title"],
-              "status": row["status"], "job_id": row["job_id"],
-              "total": None if (body.get("coverage") or {}).get("status") == "stale" else row["total"],
-              "angle": body.get("angle", ""), "reason": body.get("reason", ""), "visuals": body.get("visuals", []),
-              "scores": body.get("scores") or {}, "outline": body.get("outline"),
-              "outline_origin": body.get("outline_origin"), "template_id": body.get("template_id") or "base",
-              "warnings": body.get("warnings", []), "item_ids": body.get("item_ids", []),
-              "coverage": body.get("coverage") if detail else _coverage_summary(body.get("coverage")),
-              "scored_at": body.get("scored_at"), "outlined_at": body.get("outlined_at"),
-              "created_at": row["created_at"], "updated_at": row["updated_at"]}
+    result = {
+        "id": row["id"],
+        "profile_id": row["profile_id"],
+        "run_id": row["run_id"],
+        "title": row["title"],
+        "status": row["status"],
+        "job_id": row["job_id"],
+        "total": None if (body.get("coverage") or {}).get("status") == "stale" else row["total"],
+        "angle": body.get("angle", ""),
+        "reason": body.get("reason", ""),
+        "visuals": body.get("visuals", []),
+        "scores": body.get("scores") or {},
+        "outline": body.get("outline"),
+        "outline_origin": body.get("outline_origin"),
+        "template_id": body.get("template_id") or "base",
+        "warnings": body.get("warnings", []),
+        "item_ids": body.get("item_ids", []),
+        "coverage": body.get("coverage") if detail else _coverage_summary(body.get("coverage")),
+        "scored_at": body.get("scored_at"),
+        "outlined_at": body.get("outlined_at"),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
     if detail and store is not None:
-        names = {r["id"]: r["name"] for r in store.rows("SELECT id,name FROM topic_sources WHERE profile_id=?",
-                                                          (row["profile_id"],))}
-        result["items"] = [{k: item[k] for k in ("id", "title", "summary", "url", "published_at", "event_at", "hot")}
-                           | {"source_name": names.get(item["source_id"])}
-                           for item in topic_items.items_by_id(store, result["item_ids"])]
+        names = {
+            r["id"]: r["name"]
+            for r in store.rows("SELECT id,name FROM topic_sources WHERE profile_id=?", (row["profile_id"],))
+        }
+        result["items"] = [
+            {k: item[k] for k in ("id", "title", "summary", "url", "published_at", "event_at", "hot")}
+            | {"source_name": names.get(item["source_id"])}
+            for item in topic_items.items_by_id(store, result["item_ids"])
+        ]
     return result
 
 
@@ -90,18 +126,25 @@ def get_card(store, card_id: str) -> dict:
 def list_cards(store, profile_id: str, *, status: str | None = "new", limit: int = 100) -> list[dict]:
     profiles.get_profile(store, profile_id)
     if status in (None, "all"):
-        rows = store.rows("SELECT * FROM topic_cards WHERE profile_id=? ORDER BY total DESC, created_at DESC, id "
-                          "LIMIT ?", (profile_id, limit))
+        rows = store.rows(
+            "SELECT * FROM topic_cards WHERE profile_id=? ORDER BY total DESC, created_at DESC, id LIMIT ?",
+            (profile_id, limit),
+        )
     else:
         if status not in STATUSES:
             raise ValueError(f"未知的卡片状态：{status}")
-        rows = store.rows("SELECT * FROM topic_cards WHERE profile_id=? AND status=? "
-                          "ORDER BY total DESC, created_at DESC, id LIMIT ?", (profile_id, status, limit))
+        rows = store.rows(
+            "SELECT * FROM topic_cards WHERE profile_id=? AND status=? "
+            "ORDER BY total DESC, created_at DESC, id LIMIT ?",
+            (profile_id, status, limit),
+        )
     return [view(row, store=store) for row in rows]
 
 
 def counts(store, profile_id: str) -> dict:
-    rows = store.rows("SELECT status, COUNT(*) AS n FROM topic_cards WHERE profile_id=? GROUP BY status", (profile_id,))
+    rows = store.rows(
+        "SELECT status, COUNT(*) AS n FROM topic_cards WHERE profile_id=? GROUP BY status", (profile_id,)
+    )
     found = {row["status"]: row["n"] for row in rows}
     return {status: found.get(status, 0) for status in STATUSES}
 
@@ -117,12 +160,23 @@ def save_body(store, card_id: str, body: dict, **columns) -> None:
 
 def create(store, profile_id: str, run_id: str | None, draft, members: list[dict]) -> str:
     card_id, stamp = new_id("tc"), now()
-    body = {"angle": draft.angle, "reason": draft.reason, "item_ids": [m["id"] for m in members],
-            "visuals": draft.visuals, "scores": {}, "coverage": None, "outline": None, "outline_origin": None,
-            "template_id": script_templates.DEFAULT_TEMPLATE, "warnings": []}
-    store.execute("INSERT INTO topic_cards(id,profile_id,run_id,title,body,total,status,created_at,updated_at) "
-                  "VALUES(?,?,?,?,?,?,?,?,?)", (card_id, profile_id, run_id, draft.title.strip(), dumps(body), 0, "new",
-                                                stamp, stamp))
+    body = {
+        "angle": draft.angle,
+        "reason": draft.reason,
+        "item_ids": [m["id"] for m in members],
+        "visuals": draft.visuals,
+        "scores": {},
+        "coverage": None,
+        "outline": None,
+        "outline_origin": None,
+        "template_id": script_templates.DEFAULT_TEMPLATE,
+        "warnings": [],
+    }
+    store.execute(
+        "INSERT INTO topic_cards(id,profile_id,run_id,title,body,total,status,created_at,updated_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?)",
+        (card_id, profile_id, run_id, draft.title.strip(), dumps(body), 0, "new", stamp, stamp),
+    )
     return card_id
 
 
@@ -140,8 +194,10 @@ def discard(store, card_ids: list[str]) -> None:
             if len(kept) == len(ids):
                 continue
             if kept:
-                db.execute("UPDATE topic_gaps SET card_ids=?,count=?,card_id=? WHERE id=?",
-                           (dumps(kept), len(kept), kept[-1], row["id"]))
+                db.execute(
+                    "UPDATE topic_gaps SET card_ids=?,count=?,card_id=? WHERE id=?",
+                    (dumps(kept), len(kept), kept[-1], row["id"]),
+                )
             else:
                 db.execute("DELETE FROM topic_gaps WHERE id=?", (row["id"],))
 
@@ -172,11 +228,13 @@ def update_card(store, card_id: str, changes: CardChanges) -> dict:
 # ---------------------------------------------------------------- 打分
 
 
-def evaluate(config, store, profile_id: str, card_ids: list[str], *, llm, embedder, progress=None) -> list[str]:
+def evaluate(
+    config, store, profile_id: str, card_ids: list[str], *, llm, embedder, progress=None
+) -> list[str]:
     """为卡片计算五项分数、覆盖报告与总分并保存；返回告警。"""
     if not card_ids:
         return []
-    from mindex.topics import gaps as topic_gaps
+    from topics import gaps as topic_gaps
 
     profile = profiles.body_of(store, profile_id)
     filters = profiles.material_filters(profile)
@@ -194,8 +252,12 @@ def evaluate(config, store, profile_id: str, card_ids: list[str], *, llm, embedd
         audience = [scoring.AUDIENCE_DEFAULT] * len(cards)
         warnings.append(f"受众匹配评分失败，按 {scoring.AUDIENCE_DEFAULT} 计：{exc}")
     references = [f"{v['title']}。{v['text']}" for v in made_videos(config)]
-    adopted = store.rows("SELECT id,title,body FROM topic_cards WHERE profile_id=? AND status='adopted'", (profile_id,))
-    references += [f"{r['title']}。{loads(r['body'], {}).get('angle', '')}" for r in adopted if r["id"] not in card_ids]
+    adopted = store.rows(
+        "SELECT id,title,body FROM topic_cards WHERE profile_id=? AND status='adopted'", (profile_id,)
+    )
+    references += [
+        f"{r['title']}。{loads(r['body'], {}).get('angle', '')}" for r in adopted if r["id"] not in card_ids
+    ]
     texts = [f"{c['title']}。{c.get('angle', '')}" for c in cards]
     novelty, warning = scoring.novelty_scores(texts, references, embedder)
     if warning:
@@ -204,19 +266,37 @@ def evaluate(config, store, profile_id: str, card_ids: list[str], *, llm, embedd
     gap_matcher = topic_gaps.Matcher(store, profile_id, embedder)
     for index, (row, body) in enumerate(zip(rows, bodies, strict=True)):
         if progress:
-            progress({"stage": "score", "message": f"打分与素材覆盖 {index + 1}/{len(rows)}", "done": index,
-                      "total": len(rows)})
-        report = topic_coverage.report(config, store, body.get("visuals") or [], embedder=embedder, filters=filters,
-                                       llm=llm, title=row["title"], angle=body.get("angle", ""),
-                                       limits=config.topics.coverage.model_copy(
-                                           update=profile.coverage.model_dump(exclude_none=True)))
+            progress(
+                {
+                    "stage": "score",
+                    "message": f"打分与素材覆盖 {index + 1}/{len(rows)}",
+                    "done": index,
+                    "total": len(rows),
+                }
+            )
+        report = topic_coverage.report(
+            config,
+            store,
+            body.get("visuals") or [],
+            embedder=embedder,
+            filters=filters,
+            llm=llm,
+            title=row["title"],
+            angle=body.get("angle", ""),
+            limits=config.topics.coverage.model_copy(update=profile.coverage.model_dump(exclude_none=True)),
+        )
         report["material_scope"] = profiles.material_signature(store, profile)
         report["coverage_overrides"] = profile.coverage.model_dump(exclude_none=True)
         if report["status"] != "ok" and report["reason"] and report["reason"] not in warnings:
             warnings.append(report["reason"])
         members = topic_items.items_by_id(store, body.get("item_ids") or [])
-        scores = {"timeliness": scoring.timeliness(members), "audience": audience[index],
-                  "coverage": report["ratio"], "novelty": novelty[index], "cost": scoring.cost(report)}
+        scores = {
+            "timeliness": scoring.timeliness(members),
+            "audience": audience[index],
+            "coverage": report["ratio"],
+            "novelty": novelty[index],
+            "cost": scoring.cost(report),
+        }
         body.update(scores=scores, coverage=report, scored_at=stamp)
         save_body(store, row["id"], body, total=scoring.total(scores, weights))
         if report["status"] == "ok":
@@ -238,10 +318,13 @@ def write_outline(config, store, card_id: str, *, llm) -> dict:
     row = _row(store, card_id)
     body = loads(row["body"], {})
     profile = profiles.body_of(store, row["profile_id"])
-    members = profiles.scoped_items(store, profile, topic_items.items_by_id(store, body.get("item_ids") or []))
+    members = profiles.scoped_items(
+        store, profile, topic_items.items_by_id(store, body.get("item_ids") or [])
+    )
     retries = (config.topics.llm or config.studio.writer).split_retries
-    text, template_id, warnings = topic_outline.draft(llm, store, config, profile, {"title": row["title"], **body},
-                                                      members, retries=retries)
+    text, template_id, warnings = topic_outline.draft(
+        llm, store, config, profile, {"title": row["title"], **body}, members, retries=retries
+    )
     body.update(outline=text, outline_origin="generated", template_id=template_id, outlined_at=now())
     body["warnings"] = [w for w in body.get("warnings", []) if "文案模板" not in w] + warnings
     save_body(store, card_id, body)

@@ -40,9 +40,13 @@ if IS_WINDOWS:  # 仅 Windows 导入；本模块必须能在 POSIX 上导入。
     _kernel32.GetExitCodeProcess.restype = wintypes.BOOL
     _kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
     _kernel32.GetProcessTimes.restype = wintypes.BOOL
-    _kernel32.GetProcessTimes.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.FILETIME),
-                                          ctypes.POINTER(wintypes.FILETIME), ctypes.POINTER(wintypes.FILETIME),
-                                          ctypes.POINTER(wintypes.FILETIME)]
+    _kernel32.GetProcessTimes.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+    ]
     _kernel32.CloseHandle.restype = wintypes.BOOL
     _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 
@@ -51,14 +55,29 @@ if IS_WINDOWS:  # 仅 Windows 导入；本模块必须能在 POSIX 上导入。
         return _kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
 
 
-def spawn_detached(argv: list[str], *, cwd: str | None = None, env: dict | None = None,
-                   stdin=subprocess.DEVNULL, stdout=None, stderr=None) -> subprocess.Popen:
+def spawn_detached(
+    argv: list[str],
+    *,
+    cwd: str | None = None,
+    env: dict | None = None,
+    stdin=subprocess.DEVNULL,
+    stdout=None,
+    stderr=None,
+) -> subprocess.Popen:
     """以脱离启动方进程组的方式运行 ``argv``（启动方退出后子进程继续运行）。"""
     if IS_WINDOWS:
-        return subprocess.Popen(argv, cwd=cwd, env=env, stdin=stdin, stdout=stdout, stderr=stderr,
-                                creationflags=_CREATE_NEW_PROCESS_GROUP | _CREATE_NO_WINDOW)
-    return subprocess.Popen(argv, cwd=cwd, env=env, stdin=stdin, stdout=stdout, stderr=stderr,
-                            start_new_session=True)
+        return subprocess.Popen(
+            argv,
+            cwd=cwd,
+            env=env,
+            stdin=stdin,
+            stdout=stdout,
+            stderr=stderr,
+            creationflags=_CREATE_NEW_PROCESS_GROUP | _CREATE_NO_WINDOW,
+        )
+    return subprocess.Popen(
+        argv, cwd=cwd, env=env, stdin=stdin, stdout=stdout, stderr=stderr, start_new_session=True
+    )
 
 
 def alive(pid: int) -> bool:
@@ -96,8 +115,11 @@ def process_start(pid: int) -> str | None:
         try:
             creation, exit_time, kernel, user = (wintypes.FILETIME() for _ in range(4))
             if not _kernel32.GetProcessTimes(
-                handle, ctypes.byref(creation), ctypes.byref(exit_time),
-                ctypes.byref(kernel), ctypes.byref(user),
+                handle,
+                ctypes.byref(creation),
+                ctypes.byref(exit_time),
+                ctypes.byref(kernel),
+                ctypes.byref(user),
             ):
                 return None
             # FILETIME（100ns 刻度，双 DWORD 拼接），同平台重启间比较。
@@ -105,8 +127,9 @@ def process_start(pid: int) -> str | None:
         finally:
             _kernel32.CloseHandle(handle)
     try:
-        value = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True,
-                               timeout=5, check=False).stdout.strip()
+        value = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, timeout=5, check=False
+        ).stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
         return None
     return value or None
@@ -138,7 +161,9 @@ def stop_tree(pid: int, *, grace: float, child: subprocess.Popen | None = None) 
             if _exited(pid, child):
                 return False
             time.sleep(0.1)
-        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, check=False, timeout=30)
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, check=False, timeout=30
+        )
         if child is not None:
             child.wait(5)
         return True

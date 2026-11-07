@@ -1,20 +1,20 @@
 import json
 
 import pytest
-from conftest import FixtureEmbedder
 from fastapi.testclient import TestClient
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from mindex.admin.curation import CurationPatch, EntityNotFound, Library
-from mindex.api import create_app
-from mindex.models.adapters import ModelError
-from mindex.processing.indexing import IndexBuilder, VectorIndex
-from mindex.processing.pipeline import Pipeline
-from mindex.search.search import SearchEngine, SimilarUnavailable
-from mindex.shared.config import Config
-from mindex.shared.media import command, cut
-from mindex.shared.types import Filters, TextSearch
+from admin.curation import CurationPatch, EntityNotFound, Library
+from api import create_app
+from conftest import FixtureEmbedder
+from models.adapters import ModelError
+from processing.indexing import IndexBuilder, VectorIndex
+from processing.pipeline import Pipeline
+from search.search import SearchEngine, SimilarUnavailable
+from shared.config import Config
+from shared.media import command, cut
+from shared.types import Filters, TextSearch
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
@@ -38,8 +38,10 @@ def test_similar_smoke_excludes_seed_and_never_embeds(config, video_file):
     assert result["results"], "fixture has several non-overlapping shots"
     for hit in result["results"]:
         assert hit["id"] != seed["id"] and hit["kind"] == "shot"
-        assert not (hit["source_id"] == seed["source_id"]
-                    and min(hit["end"], seed["end"]) - max(hit["start"], seed["start"]) > 0)
+        assert not (
+            hit["source_id"] == seed["source_id"]
+            and min(hit["end"], seed["end"]) - max(hit["start"], seed["start"]) > 0
+        )
         assert {m["route"] for m in hit["matches"]} == {"video"}
     with pytest.raises(EntityNotFound):
         engine.similar("missing-segment")
@@ -49,7 +51,9 @@ def test_similar_endpoint_returns_seed_and_maps_missing_to_404(config, video_fil
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
     IndexBuilder(config, FixtureEmbedder(config)).build(source_id=sid, channels=["visual"], activate=True)
-    seed = next(s for s in pipeline.store.snapshots(pipeline.store.active_index()["id"]) if s["kind"] == "shot")
+    seed = next(
+        s for s in pipeline.store.snapshots(pipeline.store.active_index()["id"]) if s["kind"] == "shot"
+    )
     client = TestClient(create_app(config, FixtureEmbedder(config)))
     response = client.post("/api/search/similar", json={"segment_id": seed["id"], "limit": 5})
     assert response.status_code == 200
@@ -65,8 +69,17 @@ def _color_video(path, colors):
     for color, seconds in colors:
         args += ["-f", "lavfi", "-i", f"color=c={color}:s=160x120:r=25:d={seconds}"]
     inputs = "".join(f"[{i}:v]" for i in range(len(colors)))
-    args += ["-filter_complex", f"{inputs}concat=n={len(colors)}:v=1:a=0[v]", "-map", "[v]",
-             "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path)]
+    args += [
+        "-filter_complex",
+        f"{inputs}concat=n={len(colors)}:v=1:a=0[v]",
+        "-map",
+        "[v]",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        str(path),
+    ]
     command(args)
     return path
 
@@ -98,7 +111,7 @@ def _apply_hidden(library_state, wanted: dict) -> None:
     """把隐藏标记同步为 wanted（未列出的视为不隐藏），只改有变化的实体。"""
     library = Library(library_state["store"])
     current = library_state["hidden"]
-    for (kind, identifier) in set(current) | set(wanted):
+    for kind, identifier in set(current) | set(wanted):
         value = wanted.get((kind, identifier), False)
         if current.get((kind, identifier), False) != value:
             library.patch(kind, identifier, CurationPatch(hidden=value))
@@ -110,7 +123,9 @@ def similar_cases(draw, snapshots, sources):
     seed = draw(st.sampled_from(snapshots))
     granularity = draw(st.sampled_from([None, "shot", "moment"]))
     min_duration = draw(st.sampled_from([0, 0.5, 1, 2, 3]))
-    max_duration = draw(st.sampled_from([None, 1, 2, 3, 4, 8]).filter(lambda v: v is None or v >= min_duration))
+    max_duration = draw(
+        st.sampled_from([None, 1, 2, 3, 4, 8]).filter(lambda v: v is None or v >= min_duration)
+    )
     source_ids = draw(st.sets(st.sampled_from(sources)).map(sorted))
     hidden = {}
     for source in sources:
@@ -141,17 +156,22 @@ def test_similar_exclusion_property(similar_library):
         wanted_kind = granularity or seed["kind"]
 
         def is_hidden(segment):
-            return any(hidden.get(key, False) for key in [
-                ("source", segment["source_id"]),
-                ("segment", segment["id"]),
-                ("segment", segment.get("parent_id")),
-            ])
+            return any(
+                hidden.get(key, False)
+                for key in [
+                    ("source", segment["source_id"]),
+                    ("segment", segment["id"]),
+                    ("segment", segment.get("parent_id")),
+                ]
+            )
 
         for hit in result["results"]:
             stored = by_id[hit["id"]]
             assert hit["id"] != seed["id"]
-            assert not (stored["source_id"] == seed["source_id"]
-                        and min(stored["end"], seed["end"]) - max(stored["start"], seed["start"]) > 0)
+            assert not (
+                stored["source_id"] == seed["source_id"]
+                and min(stored["end"], seed["end"]) - max(stored["start"], seed["start"]) > 0
+            )
             assert hit["kind"] == stored["kind"] == wanted_kind
             assert not is_hidden(stored) and not hit["effective_hidden"]
             duration = stored["end"] - stored["start"]
@@ -247,7 +267,8 @@ def test_similar_drops_hidden_segment_and_source(similar_library):
     # 测试素材的红色镜头（0-1s）为种子；第二素材的红色镜头（2-4s）画面完全相同，应排第一。
     seed = next(s for s in snapshots if s["kind"] == "shot" and s["start"] == 0 and s["end"] < 1.5)
     twin = next(
-        s for s in snapshots
+        s
+        for s in snapshots
         if s["kind"] == "shot" and s["source_id"] != seed["source_id"] and abs(s["start"] - 2) < 0.2
     )
     try:

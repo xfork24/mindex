@@ -10,7 +10,6 @@ import time
 import pytest
 from fastapi import HTTPException
 from filelock import Timeout
-
 from mindex.shared.background_tasks import BackgroundTaskRunner, public_task
 from mindex.shared.storage import Store
 from mindex.shared.task_cancel import registry_for
@@ -123,7 +122,9 @@ def test_long_error_is_truncated(store):
 
 def test_cancel_queued_never_executes(store):
     manager = FakeTasks(store, lambda task_id, save: None)
-    store.execute("INSERT INTO dialogue_tasks(id,source_id,status,config,options) VALUES('q','s','queued','{}','{}')")
+    store.execute(
+        "INSERT INTO dialogue_tasks(id,source_id,status,config,options) VALUES('q','s','queued','{}','{}')"
+    )
     assert manager.cancel("q")["status"] == "cancelled"
     lock = manager.lock("s").acquire()
     manager.run("q", {}, lock)
@@ -179,7 +180,9 @@ def test_retry_and_cancel_conflicts(store):
         assert missing.value.status_code == 404 and missing.value.detail == "找不到示例任务"
 
     # 检索更新失败的已完成任务可以重试；锁被占用时 409。
-    store.execute("UPDATE dialogue_tasks SET publication=? WHERE id='t5'", (json.dumps({"status": "failed"}),))
+    store.execute(
+        "UPDATE dialogue_tasks SET publication=? WHERE id='t5'", (json.dumps({"status": "failed"}),)
+    )
     HELD.add("s")
     with pytest.raises(HTTPException) as busy:
         manager.retry("t5")
@@ -190,13 +193,28 @@ def test_retry_and_cancel_conflicts(store):
 
 
 def test_init_recovers_live_rows(store):
-    store.execute("INSERT INTO dialogue_tasks(id,source_id,status,config,options) VALUES('r','s','running','{}','{}')")
+    store.execute(
+        "INSERT INTO dialogue_tasks(id,source_id,status,config,options) VALUES('r','s','running','{}','{}')"
+    )
     manager = FakeTasks(store, lambda task_id, save: None)
     assert manager.get("r")["status"] == "interrupted"
 
 
 def test_public_task_drops_config_and_decodes_json():
-    row = {"id": "a", "config": "{}", "options": '{"x": 1}', "progress": "{}", "result": None,
-           "publication": '{"status": "not_requested"}', "error": None}
-    assert public_task(row) == {"id": "a", "options": {"x": 1}, "progress": {}, "result": None,
-                                "publication": {"status": "not_requested"}, "error": None}
+    row = {
+        "id": "a",
+        "config": "{}",
+        "options": '{"x": 1}',
+        "progress": "{}",
+        "result": None,
+        "publication": '{"status": "not_requested"}',
+        "error": None,
+    }
+    assert public_task(row) == {
+        "id": "a",
+        "options": {"x": 1},
+        "progress": {},
+        "result": None,
+        "publication": {"status": "not_requested"},
+        "error": None,
+    }

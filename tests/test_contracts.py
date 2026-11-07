@@ -3,20 +3,20 @@ from __future__ import annotations
 import math
 
 import pytest
-from conftest import FixtureEmbedder
 from fastapi.testclient import TestClient
 
-from mindex.diagnostics.evaluation import metrics
-from mindex.models import adapters
-from mindex.models.adapters import ModelError, parse_json
-from mindex.models.embedders import HTTPEmbedder
-from mindex.models.model_server import create_model_app
-from mindex.models.qwen import QwenAnalyzer
-from mindex.processing.indexing import IndexBuilder, check_index
-from mindex.processing.pipeline import Pipeline
-from mindex.search.search import SearchEngine
-from mindex.shared.config import fingerprint
-from mindex.shared.types import TextSearch
+from conftest import FixtureEmbedder
+from diagnostics.evaluation import metrics
+from models import adapters
+from models.adapters import ModelError, parse_json
+from models.embedders import HTTPEmbedder
+from models.model_server import create_model_app
+from models.qwen import QwenAnalyzer
+from processing.indexing import IndexBuilder, check_index
+from processing.pipeline import Pipeline
+from search.search import SearchEngine
+from shared.config import fingerprint
+from shared.types import TextSearch
 
 
 def test_embedding_identity_and_output_validation(config, monkeypatch):
@@ -46,7 +46,9 @@ def test_json_fences_and_invalid_scene_grouping(config, monkeypatch):
     analyzer = QwenAnalyzer(config)
     config.analyzer.response_retries = 0
     monkeypatch.setattr(
-        adapters, "request", lambda *a, **kw: {"choices": [{"message": {"content": '{"groups":[[0,0]]}'}}]},
+        adapters,
+        "request",
+        lambda *a, **kw: {"choices": [{"message": {"content": '{"groups":[[0,0]]}'}}]},
     )
     with pytest.raises(ModelError, match="重试已耗尽.*连续、完整且无重复"):
         analyzer.group_scenes([{"start": 0, "end": 1}])

@@ -37,8 +37,11 @@ function shellCommand(url) {
 
 function isLocalPage(url, localPages = []) {
   const parsed = parse(url);
-  return Boolean(parsed && parsed.protocol === "file:" &&
-    localPages.some((page) => parsed.pathname === new URL(`file://${page}`).pathname));
+  return Boolean(
+    parsed &&
+    parsed.protocol === "file:" &&
+    localPages.some((page) => parsed.pathname === new URL(`file://${page}`).pathname),
+  );
 }
 
 // 页面内导航（will-navigate）：本 origin 与外壳本地页面放行；其余一律阻止（http/https 改由系统浏览器打开）。
@@ -55,4 +58,12 @@ function permissionAllowed(permission, requestingUrl, origin) {
   return ALLOWED_PERMISSIONS.has(permission) && isAppUrl(requestingUrl, origin);
 }
 
-module.exports = { isAppUrl, isExternalAllowed, isLocalPage, windowOpenAction, navigationAction, shellCommand, permissionAllowed };
+module.exports = {
+  isAppUrl,
+  isExternalAllowed,
+  isLocalPage,
+  windowOpenAction,
+  navigationAction,
+  shellCommand,
+  permissionAllowed,
+};

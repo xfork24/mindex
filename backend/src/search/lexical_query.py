@@ -22,10 +22,10 @@ import logging
 import math
 from typing import TYPE_CHECKING
 
-from mindex.shared.tokenizer import document_terms
+from shared.tokenizer import document_terms
 
 if TYPE_CHECKING:
-    from mindex.shared.storage import Store
+    from shared.storage import Store
 
 log = logging.getLogger(__name__)
 
@@ -37,8 +37,10 @@ _CHUNK = 400
 
 _HIDDEN = {
     "sqlite": "(COALESCE(c.hidden,0) OR COALESCE(sc.hidden,0) OR COALESCE(pc.hidden,0))",
-    "pg": ("(CASE WHEN COALESCE(c.hidden,0)<>0 OR COALESCE(sc.hidden,0)<>0 OR COALESCE(pc.hidden,0)<>0"
-           " THEN 1 ELSE 0 END)"),
+    "pg": (
+        "(CASE WHEN COALESCE(c.hidden,0)<>0 OR COALESCE(sc.hidden,0)<>0 OR COALESCE(pc.hidden,0)<>0"
+        " THEN 1 ELSE 0 END)"
+    ),
 }
 
 
@@ -60,10 +62,13 @@ def eligible_sql(store, index_id, granularity, filters, selected_sources):
         else:
             clauses.append("g.source_id IN (" + ",".join("?" for _ in sources) + ")")
             args.extend(sources)
-    return ("FROM search_segments g JOIN sources s ON s.id=g.source_id "
-            "LEFT JOIN segment_curation c ON c.id=g.segment_id "
-            "LEFT JOIN source_curation sc ON sc.id=g.source_id "
-            "LEFT JOIN segment_curation pc ON pc.id=g.parent_id WHERE " + " AND ".join(clauses), args)
+    return (
+        "FROM search_segments g JOIN sources s ON s.id=g.source_id "
+        "LEFT JOIN segment_curation c ON c.id=g.segment_id "
+        "LEFT JOIN source_curation sc ON sc.id=g.source_id "
+        "LEFT JOIN segment_curation pc ON pc.id=g.parent_id WHERE " + " AND ".join(clauses),
+        args,
+    )
 
 
 def projected_row(row, filters):
@@ -72,8 +77,14 @@ def projected_row(row, filters):
         item["annotation"] = json.loads(item["annotation_projection"])
         item["indexed_views"] = json.loads(item["indexed_views"])
     annotation = item["annotation"]
-    if any(value and not any(value.casefold() in entry.casefold() for entry in annotation.get(field) or [])
-           for field, value in [("scene", filters.scene), ("emotions", filters.emotion), ("shot_size", filters.shot_size)]):
+    if any(
+        value and not any(value.casefold() in entry.casefold() for entry in annotation.get(field) or [])
+        for field, value in [
+            ("scene", filters.scene),
+            ("emotions", filters.emotion),
+            ("shot_size", filters.shot_size),
+        ]
+    ):
         return None
     return item
 
@@ -81,8 +92,11 @@ def projected_row(row, filters):
 def eligible_projection(store, index_id, granularity, filters, selected_sources) -> list[dict]:
     """本地参考路径；集群使用相同定义的 EligibleSet 分页 SQL 关系。"""
     query, args = eligible_sql(store, index_id, granularity, filters, selected_sources)
-    rows = store.rows("SELECT g.segment_id AS id,g.source_id,g.parent_id,g.kind,g.start,g.end,"
-                      "g.annotation_projection,g.indexed_views " + query, args)
+    rows = store.rows(
+        "SELECT g.segment_id AS id,g.source_id,g.parent_id,g.kind,g.start,g.end,"
+        "g.annotation_projection,g.indexed_views " + query,
+        args,
+    )
     return [item for row in rows if (item := projected_row(row, filters)) is not None]
 
 
@@ -101,11 +115,13 @@ def sql_bm25(
 
         def execute(sql, args=()):
             return db.execute(sql.replace("_eligible", table), args)
+
         stats = execute(
             "SELECT count(*) AS n, CASE WHEN COALESCE(avg(d.doc_length),0)>0 "
             "THEN avg(d.doc_length) ELSE 1 END AS mean_length "
             "FROM lexical_docs d JOIN _eligible e ON e.segment_id=d.segment_id "
-            "WHERE d.index_id=? AND d.channel=?", (index_id, channel)
+            "WHERE d.index_id=? AND d.channel=?",
+            (index_id, channel),
         ).fetchone()
         total, mean_length = int(stats["n"]), float(stats["mean_length"])
         if total == 0:
@@ -125,7 +141,8 @@ def sql_bm25(
             f"  * t.tf * 2.5 / (t.tf + 1.5*(0.25 + 0.75*d.doc_length/{mean_length!r}))"
             " ) AS score"
             " FROM lexical_terms t"
-            " JOIN lexical_docs d ON d.index_id=t.index_id AND d.segment_id=t.segment_id AND d.channel=t.channel"
+            " JOIN lexical_docs d ON d.index_id=t.index_id AND d.segment_id=t.segment_id AND "
+            "d.channel=t.channel"
             " JOIN _eligible e ON e.segment_id=t.segment_id"
             " JOIN dfs ON dfs.term=t.term"
             " WHERE t.index_id=? AND t.channel=?"
@@ -149,7 +166,8 @@ def sql_bm25(
         postings: dict[str, dict] = {}
         for row in execute(
             "SELECT t.segment_id AS id, t.term, t.tf, d.doc_length FROM lexical_terms t "
-            "JOIN lexical_docs d ON d.index_id=t.index_id AND d.segment_id=t.segment_id AND d.channel=t.channel "
+            "JOIN lexical_docs d ON d.index_id=t.index_id AND d.segment_id=t.segment_id AND "
+            "d.channel=t.channel "
             f"WHERE t.index_id=? AND t.channel=? AND t.term IN ({query_terms_sql}) "
             f"AND t.segment_id IN ({id_sql})",
             (index_id, channel, *terms, *candidate_ids),
@@ -175,11 +193,13 @@ def dialogue_projection(store: Store, index_id: str, identifiers: list[str]) -> 
     """姓名提及匹配只读对白文本，保持 Unicode/词边界的参考语义。"""
     result = {}
     for offset in range(0, len(identifiers), _CHUNK):
-        batch = identifiers[offset:offset + _CHUNK]
+        batch = identifiers[offset : offset + _CHUNK]
         marks = ",".join("?" * len(batch))
         for row in store.rows(
             "SELECT segment_id,json_extract(snapshot,'$.views.dialogue') AS dialogue "
-            f"FROM index_members WHERE index_id=? AND segment_id IN ({marks})", [index_id, *batch]):
+            f"FROM index_members WHERE index_id=? AND segment_id IN ({marks})",
+            [index_id, *batch],
+        ):
             result[row["segment_id"]] = row["dialogue"] or ""
     return result
 
@@ -187,9 +207,11 @@ def dialogue_projection(store: Store, index_id: str, identifiers: list[str]) -> 
 def _populate_eligible(db, store: Store, eligible_ids: list[str]) -> None:
     """请求级临时表：同一事务内建、灌、查、消亡（PG 用 ON COMMIT DROP 归还池连接）。"""
     db.execute("DROP TABLE IF EXISTS _eligible")
-    db.execute("CREATE TEMP TABLE _eligible(segment_id TEXT PRIMARY KEY)"
-               + (" ON COMMIT DROP" if store.pg else ""))
+    db.execute(
+        "CREATE TEMP TABLE _eligible(segment_id TEXT PRIMARY KEY)" + (" ON COMMIT DROP" if store.pg else "")
+    )
     for offset in range(0, len(eligible_ids), _CHUNK):
         db.executemany(
             "INSERT OR IGNORE INTO _eligible(segment_id) VALUES(?)",
-            [(identifier,) for identifier in eligible_ids[offset:offset + _CHUNK]])
+            [(identifier,) for identifier in eligible_ids[offset : offset + _CHUNK]],
+        )

@@ -50,11 +50,11 @@ from urllib.parse import urlencode
 
 import httpx
 
-from mindex.models import adapters
-from mindex.models.adapters import ModelError
-from mindex.shared.comfyui import MAPPING_FIELDS, parse_target, validate_workflow, workflow_hash
-from mindex.shared.config import Config
-from mindex.shared.jsonio import save_bytes
+from models import adapters
+from models.adapters import ModelError
+from shared.comfyui import MAPPING_FIELDS, parse_target, validate_workflow, workflow_hash
+from shared.config import Config
+from shared.jsonio import save_bytes
 
 VideoState = Literal["queued", "running", "succeeded", "failed"]
 VIDEO_SUFFIXES = (".mp4", ".webm", ".mov", ".mkv", ".avi", ".gif", ".webp")

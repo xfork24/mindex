@@ -8,7 +8,8 @@ payload/inputs 与参数增补，保证与历史版本逐字节一致。具体�
 每个分镜的阶段序列由镜头来源决定（``shot_stages``）：recall（缺省）走 ``STAGES``；上传片段 clip 没有召回，
 只取配音、在片段内选窗与渲染；静态图片 image 只有配音与渲染（渲染按配音时长生成推拉画面）；AIGC 生成 aigc
 先配音，再按配音时长生成画面（generate），然后在生成片段内选窗并渲染；AI 动画 animation 先配音，再由动画生成
-LLM 写 HTML/JS 动画源码（animate），渲染阶段在沙箱里逐帧录制成画面（没有选片）；AI 生成图片 aigc_image 先配音，
+LLM 写 HTML/JS 动画源码（animate），渲染阶段在沙箱里逐帧录制成画面（没有选片）；AI 生成图片 aigc_image
+先配音，
 再由图片生成模型生成图片（draw），之后按静态图片渲染。分镜带背景音乐提示点（生成/翻唱）时在配音后多一个
 背景音乐阶段（music），成片合成时把各段背景音乐按分镜顺延铺在配音下面。
 """
@@ -18,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from mindex.studio import studio
+from studio import studio
 
 from .versions import STAGES, version
 
@@ -208,8 +209,11 @@ def shot_stages(content) -> tuple[str, ...]:
 def html_overlays(content) -> list[tuple[int, dict]]:
     """content 中用 HTML 方式（engine=html）的文字层：``[(在 overlays 中的序号, 文字层)]``。"""
     layers = (content or {}).get("overlays") or []
-    return [(index, layer) for index, layer in enumerate(layers)
-            if isinstance(layer, dict) and layer.get("engine") == "html"]
+    return [
+        (index, layer)
+        for index, layer in enumerate(layers)
+        if isinstance(layer, dict) and layer.get("engine") == "html"
+    ]
 
 
 def music_cue(content) -> dict | None:

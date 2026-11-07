@@ -7,11 +7,11 @@ import re
 from collections.abc import Sequence
 from typing import Literal, NamedTuple
 
-from mindex.models import adapters
-from mindex.models.adapters import ModelError, parse_json
-from mindex.shared.config import Config
-from mindex.shared.trace import record
-from mindex.shared.types import ShotDraft, StoryboardDraft
+from models import adapters
+from models.adapters import ModelError, parse_json
+from shared.config import Config
+from shared.trace import record
+from shared.types import ShotDraft, StoryboardDraft
 
 
 def coverage_warning(original: str, shot_texts: list[str]) -> str | None:

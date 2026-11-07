@@ -6,9 +6,9 @@ from typing import Literal
 
 from pydantic import Field
 
-from mindex.agent.registry import Preview, ToolContext, ToolOutput, ToolSpec
-from mindex.agent.tools.common import check
-from mindex.shared.config import StrictModel
+from agent.registry import Preview, ToolContext, ToolOutput, ToolSpec
+from agent.tools.common import check
+from shared.config import StrictModel
 
 RULES = "多选组成员取并集，与手动素材、任务范围及其他筛选取交集；不选组不限，空组无候选；删除组不删除媒体。"
 

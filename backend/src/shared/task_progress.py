@@ -2,12 +2,14 @@
 
 import json
 
-from mindex.shared.storage import dumps
-from mindex.shared.task_cancel import CANCEL_MESSAGE, TaskCancelled, registry_for
+from shared.storage import dumps
+from shared.task_cancel import CANCEL_MESSAGE, TaskCancelled, registry_for
 
 # 索引已激活（或已就绪）后的进度事件；此后取消已无回退意义。
 POST_COMMIT_STAGES = frozenset({"published", "indexed"})
-TASK_TABLES = frozenset({"source_tasks", "dialogue_tasks", "person_tasks", "topic_runs", "index_tasks", "studio_tasks"})
+TASK_TABLES = frozenset(
+    {"source_tasks", "dialogue_tasks", "person_tasks", "topic_runs", "index_tasks", "studio_tasks"}
+)
 CANCELLABLE = frozenset({"queued", "running"})
 # 可重试的任务终态；cancelled 与失败、中断一样复用已有检查点。
 RETRYABLE = frozenset({"failed", "interrupted", "cancelled"})
@@ -54,17 +56,20 @@ def request_task_cancel(store, table, task_id):
         registry_for(store.root).request(task_id)
         with store.connect() as db:
             if getattr(store, "queue_backend", "inline") == "postgres":
-                from mindex.shared.db.queue_pg import PgTaskQueue
+                from shared.db.queue_pg import PgTaskQueue
 
                 queue = PgTaskQueue(store.library_id)
                 queued = db.execute(
                     "SELECT id FROM task_queue WHERE library_id=? AND ledger_table=? AND ledger_id=?",
-                    (store.library_id, table, task_id)).fetchone()
+                    (store.library_id, table, task_id),
+                ).fetchone()
                 if queued:
                     queue.cancel(db, queued["id"])
             db.execute(
                 f"UPDATE {table} SET status='cancelled',error=?,updated_at=CURRENT_TIMESTAMP "
-                "WHERE id=? AND status='queued'", (CANCEL_MESSAGE, task_id))
+                "WHERE id=? AND status='queued'",
+                (CANCEL_MESSAGE, task_id),
+            )
     return row["status"]
 
 
@@ -108,7 +113,9 @@ def task_logs(table):
                             return
                         progress = json.loads(row["progress"] or "{}")
                         lines = record.getMessage().splitlines()
-                        progress["latest_log"] = next((line.strip() for line in reversed(lines) if line.strip()), "")[:2000]
+                        progress["latest_log"] = next(
+                            (line.strip() for line in reversed(lines) if line.strip()), ""
+                        )[:2000]
                         manager.store.execute(
                             f"UPDATE {table} SET progress=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
                             (dumps(progress), task_id),
@@ -134,17 +141,22 @@ def reset_task_attempt(store, table, task_id):
     _table(table)
     # 上一次尝试遗留的取消标记会立即中断新的执行。
     registry_for(store.root).clear(task_id)
-    row = store.one(f'SELECT progress,result FROM {table} WHERE id=?', (task_id,))
-    old = json.loads(row['progress'] or '{}') if row else {}
-    processing = old.get('processing_progress') if row and row['result'] else None
+    row = store.one(f"SELECT progress,result FROM {table} WHERE id=?", (task_id,))
+    old = json.loads(row["progress"] or "{}") if row else {}
+    processing = old.get("processing_progress") if row and row["result"] else None
     progress = {}
     if processing:
-        clean = {key: value for key, value in processing.items()
-                 if key not in {'latest_log', 'message', 'message_key', 'message_params', 'error', 'error_message'}}
-        progress = {'phase': 'publish', 'processing_progress': clean}
-    from mindex.shared.queue_dispatch import ledger_transaction
+        clean = {
+            key: value
+            for key, value in processing.items()
+            if key not in {"latest_log", "message", "message_key", "message_params", "error", "error_message"}
+        }
+        progress = {"phase": "publish", "processing_progress": clean}
+    from shared.queue_dispatch import ledger_transaction
 
     with ledger_transaction(store, table, task_id, restart=True) as db:
         db.execute(
             f"UPDATE {table} SET status='queued',error=NULL,progress=?,publication='{{}}',"
-            "queue_attempt_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?", (dumps(progress), task_id))
+            "queue_attempt_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (dumps(progress), task_id),
+        )

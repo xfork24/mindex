@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import json
 
-from mindex.admin.curation import Library, segment_public
-from mindex.processing.dialogue import relative_dialogue
-from mindex.shared.media import MediaError
+from admin.curation import Library, segment_public
+from processing.dialogue import relative_dialogue
+from shared.media import MediaError
 
 
 def person_section(store, segment):
     """Read processing coverage and overlapping evidence independently of publications."""
-    from mindex.persons.person_names import KIND_LABELS
+    from persons.person_names import KIND_LABELS
 
     start, end = segment["start"], segment["end"]
     intervals = []
@@ -119,11 +119,17 @@ def segment_details(store, segment_id):
             }.get(asr_result["status"], "ASR 未处理")
     subtitle_result = {"status": "complete", "tracks": [], "message": "字幕轨道结果"}
     try:
-        from mindex.processing.subtitle_archive import load_archive
+        from processing.subtitle_archive import load_archive
+
         archive = load_archive(store, source["id"])
-        cached = [{**track, "utterances": archive["utterances"].get(str(track["index"]), []),
-                   "status": "complete" if track["text"] else "bitmap"}
-                  for track in archive["tracks"]]
+        cached = [
+            {
+                **track,
+                "utterances": archive["utterances"].get(str(track["index"]), []),
+                "status": "complete" if track["text"] else "bitmap",
+            }
+            for track in archive["tracks"]
+        ]
         for track in cached:
             rows = relative_dialogue(track, start, end)
             message = (
@@ -142,12 +148,17 @@ def segment_details(store, segment_id):
         subtitle_result.update(status="failed", message="字幕轨道读取失败", error=str(exc))
     if dialogue.get("source") == "subtitle" and dialogue.get("subtitle_file"):
         rows = relative_dialogue(dialogue, start, end)
-        subtitle_result["tracks"].append({
-            "index": "file", "title": dialogue["subtitle_file"]["name"],
-            "language": dialogue.get("language", "und"), "codec": dialogue["subtitle_file"]["format"],
-            "status": "complete", "utterances": rows,
-            "message": "字幕轨道结果" if rows else "此镜头无字幕",
-        })
+        subtitle_result["tracks"].append(
+            {
+                "index": "file",
+                "title": dialogue["subtitle_file"]["name"],
+                "language": dialogue.get("language", "und"),
+                "codec": dialogue["subtitle_file"]["format"],
+                "status": "complete",
+                "utterances": rows,
+                "message": "字幕轨道结果" if rows else "此镜头无字幕",
+            }
+        )
         subtitle_result.update(status="complete", message="字幕轨道结果")
     row = store.one("SELECT * FROM annotations WHERE segment_id=? ORDER BY rowid DESC LIMIT 1", (segment_id,))
     llm = (

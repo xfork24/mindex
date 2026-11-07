@@ -5,14 +5,14 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
+
+from agent.mcp_server import exported
+from agent.registry import ToolError
+from agent.tools import build_registry
+from api import create_app
 from test_agent_studio_recall import attachment, run
 from test_studio_brands import png
 from test_studio_sources import setup, shot, small  # noqa: F401 — small 是夹具
-
-from mindex.agent.mcp_server import exported
-from mindex.agent.registry import ToolError
-from mindex.agent.tools import build_registry
-from mindex.api import create_app
 
 
 @pytest.fixture
@@ -37,20 +37,38 @@ def test_copy_upload_update_select_and_delete(agent):
     ref = attachment(client, png(), "logo.png", "image/png")
     uploaded = run(client, config, "upload_brand_asset", {"attachment": ref, "purpose": "watermark"})[1].value
     assert uploaded["asset"]["kind"] == "image"
-    preview, output, _ = run(client, config, "update_brand", {
-        "brand_id": copied["id"], "watermark": {"asset": uploaded["asset"], "position": "bottom-left"}})
+    preview, output, _ = run(
+        client,
+        config,
+        "update_brand",
+        {"brand_id": copied["id"], "watermark": {"asset": uploaded["asset"], "position": "bottom-left"}},
+    )
     assert "左下" in preview.changes[0]["after"] and "重新合成成片" in preview.warnings[0]
     assert output.value["watermark"]["position"] == "bottom-left"
     with pytest.raises(ToolError, match="只读"):
         run(client, config, "update_brand", {"brand_id": "news", "name": "改"})
-    preview, output, _ = run(client, config, "update_plan_options", {"job_id": job_id, "changes": {
-        "brand_id": copied["id"], "brand_overrides": {"disable": ["watermark"]}}})
+    preview, output, _ = run(
+        client,
+        config,
+        "update_plan_options",
+        {
+            "job_id": job_id,
+            "changes": {"brand_id": copied["id"], "brand_overrides": {"disable": ["watermark"]}},
+        },
+    )
     assert any("频道" in str(change["after"]) for change in preview.changes)
     assert output.value["options"]["brand_id"] == copied["id"]
     assert output.value["options"]["brand_overrides"]["disable"] == ["watermark"]
     with pytest.raises(ToolError, match="409|引用"):
         run(client, config, "delete_brand", {"brand_id": copied["id"]})
-    _, output, _ = run(client, config, "update_plan_options", {"job_id": job_id, "changes": {
-        "brand_id": "none", "brand_overrides": {}}})
-    assert output.value["options"].get("brand_id") is None and output.value["options"].get("brand_overrides") is None
+    _, output, _ = run(
+        client,
+        config,
+        "update_plan_options",
+        {"job_id": job_id, "changes": {"brand_id": "none", "brand_overrides": {}}},
+    )
+    assert (
+        output.value["options"].get("brand_id") is None
+        and output.value["options"].get("brand_overrides") is None
+    )
     run(client, config, "delete_brand", {"brand_id": copied["id"]})

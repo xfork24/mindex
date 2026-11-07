@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from mindex.agent.runtime import AgentRuntime
+from agent.runtime import AgentRuntime
 
 
 class RuntimeManager:

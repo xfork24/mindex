@@ -38,6 +38,7 @@ def mcp_decide(spec, policy: str) -> Decision:
         return Decision("allow")
     return Decision(
         "deny",
-        f"工具 {spec.name} 属于 {spec.risk} 级操作，需要确认；当前 MCP 策略 agent.mcp.policy={policy} 不允许执行。"
+        f"工具 {spec.name} 属于 {spec.risk} 级操作，需要确认；当前 MCP 策略 agent.mcp.policy={policy} "
+        f"不允许执行。"
         "请在 Mindex 页面的智能助手中操作，或由管理员调整策略。",
     )

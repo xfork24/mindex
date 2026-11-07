@@ -4,19 +4,19 @@ import csv
 import json
 
 import pytest
-from conftest import FixtureEmbedder
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
-from mindex.api import create_app
-from mindex.cli import app
-from mindex.diagnostics.film import export_source, source_report
-from mindex.processing.indexing import IndexBuilder, VectorIndex, check_index
-from mindex.processing.pipeline import Pipeline
-from mindex.search.search import SearchEngine
-from mindex.shared import media
-from mindex.shared.media import command, probe
-from mindex.shared.types import TextSearch
+from api import create_app
+from cli import app
+from conftest import FixtureEmbedder
+from diagnostics.film import export_source, source_report
+from processing.indexing import IndexBuilder, VectorIndex, check_index
+from processing.pipeline import Pipeline
+from search.search import SearchEngine
+from shared import media
+from shared.media import command, probe
+from shared.types import TextSearch
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 

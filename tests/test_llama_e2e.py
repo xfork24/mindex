@@ -9,15 +9,15 @@ import numpy as np
 import pytest
 from typer.testing import CliRunner
 
-from mindex.cli import app
-from mindex.diagnostics import e2e
-from mindex.models import adapters, llama_cpp
-from mindex.models.llama_cpp import PREFIX, SUFFIX, LlamaEmbedder, LlamaTranscriber, inspect_service
-from mindex.processing.pipeline import Pipeline
-from mindex.search.search import lexical_search
-from mindex.shared.config import fingerprint
-from mindex.shared.jsonio import save
-from mindex.shared.media import MediaError, atomic_media, command, content_hash, cut, frame_timestamps, probe
+from cli import app
+from diagnostics import e2e
+from models import adapters, llama_cpp
+from models.llama_cpp import PREFIX, SUFFIX, LlamaEmbedder, LlamaTranscriber, inspect_service
+from processing.pipeline import Pipeline
+from search.search import lexical_search
+from shared.config import fingerprint
+from shared.jsonio import save
+from shared.media import MediaError, atomic_media, command, content_hash, cut, frame_timestamps, probe
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
@@ -40,8 +40,22 @@ def llama(config, monkeypatch, tmp_path):
         if url.endswith("/props"):
             return props
         if url.endswith("/v1/models"):
-            return {"data": [{"id": "wemm", "meta": {"vocab_type": 2, "n_vocab": 100, "n_ctx_train": 32768,
-                                                     "n_embd": 8, "n_params": 1000, "size": 2000, "ftype": "Q8_0"}}]}
+            return {
+                "data": [
+                    {
+                        "id": "wemm",
+                        "meta": {
+                            "vocab_type": 2,
+                            "n_vocab": 100,
+                            "n_ctx_train": 32768,
+                            "n_embd": 8,
+                            "n_params": 1000,
+                            "size": 2000,
+                            "ftype": "Q8_0",
+                        },
+                    }
+                ]
+            }
         seen.append(kwargs["json"])
         return reply
 
@@ -102,9 +116,7 @@ def test_native_embedding_template_media_and_normalization(llama, video_file, tm
     with pytest.raises(adapters.ModelError, match="六片段"):
         client.require_gate()
     space = client.identity()
-    save(
-        config.data_dir / "capabilities" / (fingerprint(space) + ".json"), {"passed": True, "space": space}
-    )
+    save(config.data_dir / "capabilities" / (fingerprint(space) + ".json"), {"passed": True, "space": space})
     client.require_gate()
 
 
@@ -114,9 +126,21 @@ def test_native_video_short_samples_and_existing_payloads(llama, tmp_path, durat
     source = tmp_path / "short.mp4"
     atomic_media(
         [
-            "-f", "lavfi", "-i", f"testsrc2=s=160x120:r=50:d={duration}",
-            "-f", "lavfi", "-i", f"sine=frequency=400:duration={duration}",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest",
+            "-f",
+            "lavfi",
+            "-i",
+            f"testsrc2=s=160x120:r=50:d={duration}",
+            "-f",
+            "lavfi",
+            "-i",
+            f"sine=frequency=400:duration={duration}",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-shortest",
         ],
         source,
     )
@@ -124,10 +148,23 @@ def test_native_video_short_samples_and_existing_payloads(llama, tmp_path, durat
     previous = tmp_path / "previous.mp4"
     atomic_media(
         [
-            "-i", str(source), "-map", "0:v:0", "-an", "-vf",
+            "-i",
+            str(source),
+            "-map",
+            "0:v:0",
+            "-an",
+            "-vf",
             "fps=fps=4.0:start_time=0,scale=160:120",
-            "-frames:v", "24", "-c:v", "libx264", "-crf", "18",
-            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+            "-frames:v",
+            "24",
+            "-c:v",
+            "libx264",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
         ],
         previous,
     )
@@ -156,9 +193,7 @@ def test_native_video_respects_reduced_frame_and_pixel_limits(config, tmp_path, 
     config.video.max_frames = max_frames
     config.video.max_pixels = 8192
     source = tmp_path / "input.mp4"
-    atomic_media(
-        ["-f", "lavfi", "-i", "testsrc2=s=160x120:r=50:d=6", "-c:v", "libx264"], source
-    )
+    atomic_media(["-f", "lavfi", "-i", "testsrc2=s=160x120:r=50:d=6", "-c:v", "libx264"], source)
     output = tmp_path / "sample.mp4"
     llama_cpp.prepare_video(source, output, config)
     assert len(frame_timestamps(output)) == max_frames
@@ -170,9 +205,7 @@ def test_native_video_respects_reduced_frame_and_pixel_limits(config, tmp_path, 
 def test_native_video_rejects_empty_preprocessing_before_http(llama, tmp_path, monkeypatch):
     config, _props, seen, _reply, _pinned = llama
     source = tmp_path / "input.mp4"
-    atomic_media(
-        ["-f", "lavfi", "-i", "testsrc2=s=160x120:r=50:d=0.08", "-c:v", "libx264"], source
-    )
+    atomic_media(["-f", "lavfi", "-i", "testsrc2=s=160x120:r=50:d=0.08", "-c:v", "libx264"], source)
     attempts = []
 
     def empty_sample(args, output):
@@ -367,16 +400,16 @@ def test_probe_cli_reports_failure_without_traceback(tmp_path, monkeypatch):
 def test_alignment_worker_isolated_from_package_types_module():
     import sys
 
-    import mindex.processing.align_worker
+    import processing.align_worker as _align_worker
 
-    help_text = command([sys.executable, "-I", mindex.processing.align_worker.__file__, "--help"]).decode()
+    help_text = command([sys.executable, "-I", _align_worker.__file__, "--help"]).decode()
     assert "--cache-dir" in help_text
 
 
 def test_loading_full_default_yaml_preserves_existing_layout(tmp_path):
     import yaml
 
-    from mindex.shared.config import Config, load_config
+    from shared.config import Config, load_config
 
     minimal = tmp_path / "minimal.yaml"
     full = tmp_path / "full.yaml"
@@ -396,7 +429,7 @@ def test_native_asr_without_audio_requires_no_running_service(config, video_file
 
 
 def test_zero_duration_alignment_tokens_preserve_text_and_observed_bounds():
-    from mindex.processing.align_worker import coalesce_alignment
+    from processing.align_worker import coalesce_alignment
 
     rows = [
         {"start": 0.72, "end": 0.72, "text": "先"},

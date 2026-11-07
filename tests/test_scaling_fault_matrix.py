@@ -4,6 +4,7 @@
 worker kill -9、SIGSTOP 超租约、旧进程恢复、取消竞争、发布边界崩溃，以及
 双 API 真实 PG/S3 目录修订 CAS。仍不代表双机、容量或真实模型验收。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -47,7 +48,7 @@ def stop(process):
             process.wait()
 
 
-def wait_until(predicate, timeout, interval=.1, message="条件未在期限内满足"):
+def wait_until(predicate, timeout, interval=0.1, message="条件未在期限内满足"):
     deadline = time.monotonic() + timeout
     while True:
         value = predicate()
@@ -104,8 +105,11 @@ class SseReader:
         return self.errors
 
     def seen(self, marker):
-        return [event for event in self.events
-                if (event.get("data") or {}).get("data", {}).get("marker") == marker]
+        return [
+            event
+            for event in self.events
+            if (event.get("data") or {}).get("data", {}).get("marker") == marker
+        ]
 
 
 class DrillEmbedder:
@@ -119,14 +123,19 @@ class DrillEmbedder:
 
         from fastapi import FastAPI
 
-        from mindex.shared.config import Config, fingerprint
+        from shared.config import Config, fingerprint
 
         self.config = Config(embedding={"base_url": "http://127.0.0.1:1", "dimensions": 8})
         self.identity = {
-            "model": self.config.embedding.model, "revision": "fault-matrix-drill",
-            "quantization": self.config.embedding.quantization, "dimensions": 8, "normalized": True,
-            "fps": self.config.video.fps, "max_frames": self.config.video.max_frames,
-            "max_pixels": self.config.video.max_pixels, "implementation": "fault-matrix-drill",
+            "model": self.config.embedding.model,
+            "revision": "fault-matrix-drill",
+            "quantization": self.config.embedding.quantization,
+            "dimensions": 8,
+            "normalized": True,
+            "fps": self.config.video.fps,
+            "max_frames": self.config.video.max_frames,
+            "max_pixels": self.config.video.max_pixels,
+            "implementation": "fault-matrix-drill",
         }
         self.space_id = fingerprint(self.identity)
         app = FastAPI()
@@ -135,13 +144,12 @@ class DrillEmbedder:
         def vector(seed: bytes) -> list[float]:
             digest = hashlib.sha256(seed).digest()
             values = [1.0 + (digest[index % len(digest)] / 255.0) for index in range(8)]
-            norm = sum(value * value for value in values) ** .5
+            norm = sum(value * value for value in values) ** 0.5
             return [value / norm for value in values]
 
         @app.post("/embed/text")
         def text(body: dict):
-            return {"space_id": self.space_id,
-                    "vectors": [vector(value.encode()) for value in body["texts"]]}
+            return {"space_id": self.space_id, "vectors": [vector(value.encode()) for value in body["texts"]]}
 
         @app.post("/embed/video")
         async def video(file: UploadFile):
@@ -154,14 +162,18 @@ class DrillEmbedder:
         import uvicorn
 
         self.port = free_port()
-        self._server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=self.port, log_level="error"))
+        self._server = uvicorn.Server(
+            uvicorn.Config(app, host="127.0.0.1", port=self.port, log_level="error")
+        )
         self._thread = threading.Thread(target=self._server.run, daemon=True, name="drill-embedder")
         self.url = f"http://127.0.0.1:{self.port}"
 
     def start(self):
         self._thread.start()
         with httpx.Client(timeout=5, trust_env=False) as client:
-            wait_until(lambda: client.get(self.url + "/health").status_code == 200, 30, .2, "工程嵌入服务未就绪")
+            wait_until(
+                lambda: client.get(self.url + "/health").status_code == 200, 30, 0.2, "工程嵌入服务未就绪"
+            )
         return self
 
     def stop(self):
@@ -171,7 +183,7 @@ class DrillEmbedder:
     def vector_of(self, seed: bytes) -> list[float]:
         digest = hashlib.sha256(seed).digest()
         values = [1.0 + (digest[index % len(digest)] / 255.0) for index in range(8)]
-        norm = sum(value * value for value in values) ** .5
+        norm = sum(value * value for value in values) ** 0.5
         return [value / norm for value in values]
 
 
@@ -182,7 +194,7 @@ class FaultCluster:
         import boto3
         import psycopg
 
-        from mindex.shared.db.migrate_pg import migrate_pg
+        from shared.db.migrate_pg import migrate_pg
 
         self.root, self.video, self.logs = root, video, []
         self.dsn = os.environ["MINDEX_TEST_POSTGRES_DSN"]
@@ -192,42 +204,71 @@ class FaultCluster:
         self.secret = os.environ.get("MINDEX_TEST_S3_SECRET_KEY", "mindex-test")
         self.web_token = uuid4().hex
         self.mcp_token = uuid4().hex
-        self.s3 = boto3.client("s3", endpoint_url=self.endpoint, aws_access_key_id=self.access,
-                               aws_secret_access_key=self.secret, region_name="us-east-1")
+        self.s3 = boto3.client(
+            "s3",
+            endpoint_url=self.endpoint,
+            aws_access_key_id=self.access,
+            aws_secret_access_key=self.secret,
+            region_name="us-east-1",
+        )
         self.bucket = f"mindex-fault-{uuid4().hex[:12]}"
         self.s3.create_bucket(Bucket=self.bucket)
         with psycopg.connect(self.dsn, autocommit=True) as db:
             db.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public")
         with psycopg.connect(self.dsn) as db:
             migrate_pg(db)
-        self.env = {key: value for key, value in os.environ.items()
-                    if not key.startswith(("MINDEX_", "MINIO_"))}
-        self.env.update(MINDEX_DATABASE_DSN=self.dsn, MINDEX_S3_ACCESS_KEY=self.access,
-                        MINDEX_S3_SECRET_KEY=self.secret, MINDEX_WEB_TOKEN=self.web_token,
-                        MINDEX_MCP_TOKEN=self.mcp_token, OMP_NUM_THREADS="1",
-                        OPENBLAS_NUM_THREADS="1")
+        self.env = {
+            key: value for key, value in os.environ.items() if not key.startswith(("MINDEX_", "MINIO_"))
+        }
+        self.env.update(
+            MINDEX_DATABASE_DSN=self.dsn,
+            MINDEX_S3_ACCESS_KEY=self.access,
+            MINDEX_S3_SECRET_KEY=self.secret,
+            MINDEX_WEB_TOKEN=self.web_token,
+            MINDEX_MCP_TOKEN=self.mcp_token,
+            OMP_NUM_THREADS="1",
+            OPENBLAS_NUM_THREADS="1",
+        )
         self.embedder = DrillEmbedder().start()
         self.gateway_port = free_port()
         self.configs: list[Path] = []
         for index in range(5):
             node = root / f"node-{index}"
             config = root / f"node-{index}.yaml"
-            config.write_text(yaml.safe_dump({
-                "data_dir": str(node), "runtime_overrides": False,
-                "gpu": {"cpu_queues": ["source", "index"]},
-                "agent": {"gateway_url": f"http://127.0.0.1:{self.gateway_port}",
-                          "mcp": {"http_enabled": True}},
-                "server": {"form": "cluster", "role": "agent-gateway" if index == 4 else "api"},
-                "database": {"backend": "postgres"}, "queue": {"backend": "postgres"},
-                "locks": {"backend": "postgres"},
-                "vector": {"backend": "chroma_server", "chroma_server": {"url": self.chroma}},
-                "storage": {"backend": "s3", "s3": {"endpoint_url": self.endpoint, "bucket": self.bucket,
-                            "prefix": "library/", "min_free_gb": 0, "staging_quota_gb": 1}},
-                "topics": {"scheduler": {"enabled": False}}, "local_services": {"enabled": False},
-                "embedding": {"base_url": self.embedder.url, "dimensions": 8},
-                # 后台标题生成指向本机拒绝端口：立即失败保留占位标题，不触达局域网。
-                "studio": {"generator": {"base_url": "http://127.0.0.1:9"}},
-            }), encoding="utf-8")
+            config.write_text(
+                yaml.safe_dump(
+                    {
+                        "data_dir": str(node),
+                        "runtime_overrides": False,
+                        "gpu": {"cpu_queues": ["source", "index"]},
+                        "agent": {
+                            "gateway_url": f"http://127.0.0.1:{self.gateway_port}",
+                            "mcp": {"http_enabled": True},
+                        },
+                        "server": {"form": "cluster", "role": "agent-gateway" if index == 4 else "api"},
+                        "database": {"backend": "postgres"},
+                        "queue": {"backend": "postgres"},
+                        "locks": {"backend": "postgres"},
+                        "vector": {"backend": "chroma_server", "chroma_server": {"url": self.chroma}},
+                        "storage": {
+                            "backend": "s3",
+                            "s3": {
+                                "endpoint_url": self.endpoint,
+                                "bucket": self.bucket,
+                                "prefix": "library/",
+                                "min_free_gb": 0,
+                                "staging_quota_gb": 1,
+                            },
+                        },
+                        "topics": {"scheduler": {"enabled": False}},
+                        "local_services": {"enabled": False},
+                        "embedding": {"base_url": self.embedder.url, "dimensions": 8},
+                        # 后台标题生成指向本机拒绝端口：立即失败保留占位标题，不触达局域网。
+                        "studio": {"generator": {"base_url": "http://127.0.0.1:9"}},
+                    }
+                ),
+                encoding="utf-8",
+            )
             self.configs.append(config)
         self.urls: list[str] = []
         self.gateway_process = None
@@ -236,9 +277,12 @@ class FaultCluster:
     def launch(self, config, role, *args):
         log = (self.root / f"{config.stem}-{role}-{uuid4().hex[:6]}.log").open("w+")
         self.logs.append(log)
-        process = subprocess.Popen([sys.executable, "-c", "from mindex.cli import app; app()",
-                                    "--config", str(config), role, *args], env=self.env,
-                                   stdout=log, stderr=subprocess.STDOUT)
+        process = subprocess.Popen(
+            [sys.executable, "-c", "from mindex.cli import app; app()", "--config", str(config), role, *args],
+            env=self.env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        )
         return process, log
 
     def launch_worker(self, index, queues="source", once=False):
@@ -248,13 +292,18 @@ class FaultCluster:
         return self.launch(self.configs[index], "worker", *args)
 
     def client(self, index=0, token=None):
-        return httpx.Client(base_url=self.urls[index], timeout=30, trust_env=False, headers={
-            "Authorization": f"Bearer {token or self.web_token}"})
+        return httpx.Client(
+            base_url=self.urls[index],
+            timeout=30,
+            trust_env=False,
+            headers={"Authorization": f"Bearer {token or self.web_token}"},
+        )
 
     def wait_ready(self, process, url, timeout=45):
-        with httpx.Client(timeout=2, trust_env=False,
-                          headers={"Authorization": f"Bearer {self.web_token}"}) as probe:
-            wait_until(lambda: _alive(probe, url), timeout, .2, f"{url} 未就绪")
+        with httpx.Client(
+            timeout=2, trust_env=False, headers={"Authorization": f"Bearer {self.web_token}"}
+        ) as probe:
+            wait_until(lambda: _alive(probe, url), timeout, 0.2, f"{url} 未就绪")
         assert process.poll() is None, "服务进程提前退出"
 
     def start_apis(self, stack: ExitStack):
@@ -286,8 +335,7 @@ class FaultCluster:
     def upload_source(self, index, name):
         payload = self.video.read_bytes() + uuid4().hex.encode()
         with self.client(index) as client:
-            uploaded = client.post("/api/admin/sources/upload",
-                                   files={"file": (name, payload, "video/mp4")})
+            uploaded = client.post("/api/admin/sources/upload", files={"file": (name, payload, "video/mp4")})
             assert uploaded.status_code == 201, uploaded.text
             return uploaded.json()["source_id"]
 
@@ -302,9 +350,11 @@ class FaultCluster:
         import psycopg
 
         with psycopg.connect(self.dsn) as db:
-            return db.execute("SELECT status,owner,attempt_id,attempts,fencing_token,cancel_requested"
-                              " FROM task_queue WHERE ledger_table=%s AND ledger_id=%s",
-                              (ledger_table, task_id)).fetchone()
+            return db.execute(
+                "SELECT status,owner,attempt_id,attempts,fencing_token,cancel_requested"
+                " FROM task_queue WHERE ledger_table=%s AND ledger_id=%s",
+                (ledger_table, task_id),
+            ).fetchone()
 
     def ledger_row(self, task_id):
         import psycopg
@@ -316,8 +366,11 @@ class FaultCluster:
         import psycopg
 
         with psycopg.connect(self.dsn) as db:
-            return db.execute("SELECT s.id, f.sha256 FROM segments s JOIN shared_files f ON f.path=s.path"
-                              " WHERE s.source_id=%s AND s.kind='shot' ORDER BY s.start", (source_id,)).fetchall()
+            return db.execute(
+                "SELECT s.id, f.sha256 FROM segments s JOIN shared_files f ON f.path=s.path"
+                " WHERE s.source_id=%s AND s.kind='shot' ORDER BY s.start",
+                (source_id,),
+            ).fetchall()
 
     def index_task_status(self, task_id):
         import psycopg
@@ -370,8 +423,10 @@ def _alive(client, url):
 
 @pytest.fixture(scope="module")
 def cluster(tmp_path_factory, video_file):
-    if not all(os.environ.get(name) for name in
-               ("MINDEX_TEST_POSTGRES_DSN", "MINDEX_TEST_S3_ENDPOINT", "MINDEX_TEST_CHROMA_SERVER")):
+    if not all(
+        os.environ.get(name)
+        for name in ("MINDEX_TEST_POSTGRES_DSN", "MINDEX_TEST_S3_ENDPOINT", "MINDEX_TEST_CHROMA_SERVER")
+    ):
         pytest.skip("需要隔离的 PostgreSQL、MinIO 和 Chroma 服务")
     cluster = FaultCluster(tmp_path_factory.mktemp("fault-matrix"), video_file)
     try:
@@ -387,8 +442,10 @@ def cluster(tmp_path_factory, video_file):
         cluster.embedder.stop()
         for page in cluster.s3.get_paginator("list_objects_v2").paginate(Bucket=cluster.bucket):
             if page.get("Contents"):
-                cluster.s3.delete_objects(Bucket=cluster.bucket,
-                                          Delete={"Objects": [{"Key": item["Key"]} for item in page["Contents"]]})
+                cluster.s3.delete_objects(
+                    Bucket=cluster.bucket,
+                    Delete={"Objects": [{"Key": item["Key"]} for item in page["Contents"]]},
+                )
         cluster.s3.delete_bucket(Bucket=cluster.bucket)
 
 
@@ -400,18 +457,25 @@ def test_gateway_sse_events_last_event_id_and_auth(cluster):
     try:
         cluster.publish_change(0, "sse-first")
         cluster.publish_change(1, "sse-second")
-        wait_until(lambda: len(reader.seen("sse-first")) + len(reader.seen("sse-second")) >= 2,
-                   30, .2, "网关未在期限内转入两条改动")
+        wait_until(
+            lambda: len(reader.seen("sse-first")) + len(reader.seen("sse-second")) >= 2,
+            30,
+            0.2,
+            "网关未在期限内转入两条改动",
+        )
         ids = [event["id"] for event in reader.events]
         assert ids == sorted(ids) and len(set(ids)) == len(ids)
         # 未带令牌的请求被业务 API 与网关同时拒绝；错误令牌同样拒绝。
         with httpx.Client(base_url=cluster.urls[0], timeout=10, trust_env=False) as anonymous:
             assert anonymous.get("/api/agent/sessions").status_code == 401
-        with httpx.Client(base_url=f"http://127.0.0.1:{cluster.gateway_port}", timeout=10,
-                          trust_env=False) as direct:
+        with httpx.Client(
+            base_url=f"http://127.0.0.1:{cluster.gateway_port}", timeout=10, trust_env=False
+        ) as direct:
             assert direct.get("/api/agent/sessions").status_code == 401
-            assert direct.get("/api/agent/sessions",
-                              headers={"Authorization": "Bearer wrong"}).status_code == 401
+            assert (
+                direct.get("/api/agent/sessions", headers={"Authorization": "Bearer wrong"}).status_code
+                == 401
+            )
             assert direct.get("/api/agent/sessions", headers=headers).status_code == 200
     finally:
         assert not reader.stop()
@@ -420,15 +484,22 @@ def test_gateway_sse_events_last_event_id_and_auth(cluster):
     cluster.publish_change(0, "sse-after-reconnect")
 
     def replay_markers():
-        with httpx.Client(base_url=cluster.urls[1], timeout=10, trust_env=False,
-                          headers={**headers, "Last-Event-ID": str(last), "Accept": "text/event-stream"}) as client:
+        with httpx.Client(
+            base_url=cluster.urls[1],
+            timeout=10,
+            trust_env=False,
+            headers={**headers, "Last-Event-ID": str(last), "Accept": "text/event-stream"},
+        ) as client:
             replay = client.get("/api/agent/changes?follow=false")
             assert replay.status_code == 200, replay.text
-            return [json.loads(line[6:]).get("data", {}).get("marker") for line in replay.text.splitlines()
-                    if line.startswith("data: ") and '"marker"' in line]
+            return [
+                json.loads(line[6:]).get("data", {}).get("marker")
+                for line in replay.text.splitlines()
+                if line.startswith("data: ") and '"marker"' in line
+            ]
 
     # 网关桥按固定周期把 outbox 转入本地事件流：等待送达后断言，只收到此事件、不回放历史。
-    markers = wait_until(lambda: replay_markers() or None, 30, .5, "续传未见新事件")
+    markers = wait_until(lambda: replay_markers() or None, 30, 0.5, "续传未见新事件")
     assert markers == ["sse-after-reconnect"], markers
 
 
@@ -438,7 +509,7 @@ def test_gateway_restart_replays_outbox_without_loss_or_duplicate(cluster):
     reader = SseReader(cluster.urls[0] + "/api/agent/changes?follow=true", headers).start()
     try:
         cluster.publish_change(0, "crash-before")
-        wait_until(lambda: bool(reader.seen("crash-before")), 30, .2, "网关未转入首条改动")
+        wait_until(lambda: bool(reader.seen("crash-before")), 30, 0.2, "网关未转入首条改动")
         identity_before = reader.seen("crash-before")[0]["id"]
         # 崩溃可能发生在本地落盘后、PG 确认前：回执保证重放不重复。
         cluster.kill_gateway()
@@ -454,8 +525,9 @@ def test_gateway_restart_replays_outbox_without_loss_or_duplicate(cluster):
     # 重启的网关登记到模块级清理：后续附件/MCP 用例继续使用它。
     cluster.restart_gateway(cluster.stack)
     with cluster.client() as client:
-        wait_until(lambda: client.get("/api/agent/status").status_code == 200,
-                   30, .2, "网关重启后助手未恢复")
+        wait_until(
+            lambda: client.get("/api/agent/status").status_code == 200, 30, 0.2, "网关重启后助手未恢复"
+        )
         log = client.get("/api/agent/changes/log?after=0").json()["items"]
         seqs = [item["seq"] for item in log]
         assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs)
@@ -463,12 +535,17 @@ def test_gateway_restart_replays_outbox_without_loss_or_duplicate(cluster):
         assert by_marker["crash-before"] == identity_before, "重启后已见事件的可见身份变化"
     # 客户端按崩溃前的最后事件 id 续传：无论网关桥何时补齐停机期间的事件，都不丢不重。
     resumed = SseReader(
-        cluster.urls[0] + f"/api/agent/changes?after={identity_before}&follow=true", headers).start()
+        cluster.urls[0] + f"/api/agent/changes?after={identity_before}&follow=true", headers
+    ).start()
     try:
-        wait_until(lambda: len(resumed.seen("during-1")) + len(resumed.seen("during-2")) >= 2,
-                   30, .2, "重启后未重放停机期间的改动")
+        wait_until(
+            lambda: len(resumed.seen("during-1")) + len(resumed.seen("during-2")) >= 2,
+            30,
+            0.2,
+            "重启后未重放停机期间的改动",
+        )
         cluster.publish_change(1, "after-restart")
-        wait_until(lambda: bool(resumed.seen("after-restart")), 30, .2, "重启后新改动未送达")
+        wait_until(lambda: bool(resumed.seen("after-restart")), 30, 0.2, "重启后新改动未送达")
         markers = [event["data"]["data"]["marker"] for event in resumed.events]
         assert markers.count("during-1") == 1 and markers.count("during-2") == 1
         assert markers.count("after-restart") == 1 and "crash-before" not in markers
@@ -486,20 +563,30 @@ def test_gateway_restart_replays_outbox_without_loss_or_duplicate(cluster):
 def test_attachment_interrupt_and_mcp_stream_break_through_gateway(cluster):
     """附件与 MCP 流经网关：中途断开后资源可复用、内容一致，MCP 断流后可立即重建。"""
     payload = os.urandom(512 * 1024)
-    mcp_headers = {"Authorization": f"Bearer {cluster.mcp_token}",
-                   "Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+    mcp_headers = {
+        "Authorization": f"Bearer {cluster.mcp_token}",
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+    }
     with cluster.client(1, token=cluster.mcp_token) as client:
-        uploaded = client.post("/api/agent/attachments",
-                               files={"file": ("fault.bin", payload, "application/octet-stream")})
+        uploaded = client.post(
+            "/api/agent/attachments", files={"file": ("fault.bin", payload, "application/octet-stream")}
+        )
         assert uploaded.status_code == 201, uploaded.text
         meta = uploaded.json()
         assert meta["sha256"] == hashlib.sha256(payload).hexdigest(), "转发上传的内容已损坏"
         token = meta["id"].removeprefix("attachment://")  # 端点路径取裸 token
-        assert hashlib.sha256(client.get(f"/api/agent/attachments/{token}/content").content).hexdigest() == \
-            hashlib.sha256(payload).hexdigest()
+        assert (
+            hashlib.sha256(client.get(f"/api/agent/attachments/{token}/content").content).hexdigest()
+            == hashlib.sha256(payload).hexdigest()
+        )
     # 下载读到首个分块即断开：网关与附件随后仍可完整读取并删除。
-    with httpx.Client(base_url=cluster.urls[0], timeout=10, trust_env=False,
-                      headers={"Authorization": f"Bearer {cluster.mcp_token}"}) as client:
+    with httpx.Client(
+        base_url=cluster.urls[0],
+        timeout=10,
+        trust_env=False,
+        headers={"Authorization": f"Bearer {cluster.mcp_token}"},
+    ) as client:
         with client.stream("GET", f"/api/agent/attachments/{token}/content") as stream:
             for _ in stream.iter_bytes():
                 break  # 故意只读第一块，随后关闭连接
@@ -508,21 +595,30 @@ def test_attachment_interrupt_and_mcp_stream_break_through_gateway(cluster):
         assert hashlib.sha256(body).hexdigest() == hashlib.sha256(payload).hexdigest()
         assert client.delete(f"/api/agent/attachments/{token}").status_code == 204
     # MCP：初始化与工具列举经网关正常；通知流断开后立刻可用；未带令牌拒绝。
-    initialize = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
-        "protocolVersion": "2025-06-18", "capabilities": {},
-        "clientInfo": {"name": "fault-matrix", "version": "0"}}}
+    initialize = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "fault-matrix", "version": "0"},
+        },
+    }
     with cluster.client(0) as client:
         response = client.post("/mcp", json=initialize, headers=mcp_headers)
         assert response.status_code == 200, response.text
-        listing = client.post("/mcp", json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
-                              headers=mcp_headers)
+        listing = client.post(
+            "/mcp", json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, headers=mcp_headers
+        )
         assert listing.status_code == 200
         tools = next(json.loads(line[5:]) for line in listing.text.splitlines() if line.startswith("data:"))
         assert tools["result"]["tools"]
         assert client.post("/mcp", json=initialize).status_code == 401
     stream_headers = {**mcp_headers, "Accept": "text/event-stream"}
-    with httpx.Client(base_url=cluster.urls[1], timeout=httpx.Timeout(10, read=None),
-                      trust_env=False) as client:
+    with httpx.Client(
+        base_url=cluster.urls[1], timeout=httpx.Timeout(10, read=None), trust_env=False
+    ) as client:
         opened = client.send(client.build_request("GET", "/mcp", headers=stream_headers), stream=True)
         if opened.status_code == 200:
             opened.close()  # 通知流立即断开
@@ -537,15 +633,23 @@ def test_worker_sigkill_reclaims_and_restarts_consistently(cluster):
     task_id = cluster.enqueue_shots(0, source_id)
     first, _ = cluster.launch_worker(2)
     try:
-        wait_until(lambda: (row := cluster.queue_row("source_tasks", task_id)) and row[0] == "running",
-                   30, .05, "任务未被领取")
+        wait_until(
+            lambda: (row := cluster.queue_row("source_tasks", task_id)) and row[0] == "running",
+            30,
+            0.05,
+            "任务未被领取",
+        )
         victim_owner = cluster.queue_row("source_tasks", task_id)[1]
         first.send_signal(signal.SIGKILL)
         first.wait(timeout=10)
         second, _ = cluster.launch_worker(3)
         # 重复领取互斥：同一时刻只有一个 owner；回收后由另一 worker 完成。
-        wait_until(lambda: cluster.queue_row("source_tasks", task_id)[0] == "succeeded",
-                   DRILL_TTL + 120, .2, "任务未在崩溃后完成")
+        wait_until(
+            lambda: cluster.queue_row("source_tasks", task_id)[0] == "succeeded",
+            DRILL_TTL + 120,
+            0.2,
+            "任务未在崩溃后完成",
+        )
         row = cluster.queue_row("source_tasks", task_id)
         assert row[3] == 2 and row[4] == 2, row  # attempts 与 fencing_token 均推进
         assert row[1] != victim_owner and row[2], row
@@ -568,15 +672,22 @@ def test_worker_sigstop_past_ttl_old_process_cannot_commit(cluster):
     task_id = cluster.enqueue_shots(1, source_id)
     stopped, _ = cluster.launch_worker(2)
     try:
-        wait_until(lambda: (row := cluster.queue_row("source_tasks", task_id)) and row[0] == "running",
-                   30, .05, "任务未被领取")
+        wait_until(
+            lambda: (row := cluster.queue_row("source_tasks", task_id)) and row[0] == "running",
+            30,
+            0.05,
+            "任务未被领取",
+        )
         stopped_owner = cluster.queue_row("source_tasks", task_id)[1]
         stopped.send_signal(signal.SIGSTOP)
         takeover, _ = cluster.launch_worker(3)
-        wait_until(lambda: cluster.queue_row("source_tasks", task_id)[0] == "succeeded",
-                   DRILL_TTL + 300, .2,
-                   f"任务未被回收重派完成；现场 {cluster.queue_row('source_tasks', task_id)}，"
-                   f"账本 {cluster.ledger_row(task_id)}")
+        wait_until(
+            lambda: cluster.queue_row("source_tasks", task_id)[0] == "succeeded",
+            DRILL_TTL + 300,
+            0.2,
+            f"任务未被回收重派完成；现场 {cluster.queue_row('source_tasks', task_id)}，"
+            f"账本 {cluster.ledger_row(task_id)}",
+        )
         row = cluster.queue_row("source_tasks", task_id)
         assert row[3] == 2 and row[1] != stopped_owner, row
         shots = cluster.source_shots(source_id)
@@ -599,13 +710,18 @@ def test_cancel_race_during_running_marks_cancelled_everywhere(cluster):
     task_id = cluster.enqueue_shots(0, source_id)
     worker, _ = cluster.launch_worker(2)
     try:
-        wait_until(lambda: (row := cluster.queue_row("source_tasks", task_id)) and row[0] == "running",
-                   30, .05, "任务未被领取")
+        wait_until(
+            lambda: (row := cluster.queue_row("source_tasks", task_id)) and row[0] == "running",
+            30,
+            0.05,
+            "任务未被领取",
+        )
         with cluster.client(1) as client:
             cancelled = client.post(f"/api/admin/source-tasks/{task_id}/cancel")
             assert cancelled.status_code == 200, cancelled.text
-        wait_until(lambda: cluster.queue_row("source_tasks", task_id)[0] == "cancelled",
-                   90, .2, "取消未传播到终态")
+        wait_until(
+            lambda: cluster.queue_row("source_tasks", task_id)[0] == "cancelled", 90, 0.2, "取消未传播到终态"
+        )
         assert cluster.ledger_row(task_id)[0] == "cancelled"
         assert worker.poll() is None, "取消导致 worker 进程退出"
     finally:
@@ -619,31 +735,37 @@ def test_publish_boundary_crash_keeps_pointer_atomic(cluster):
         shots = client.post(f"/api/admin/sources/{source_id}/shots", json={"publish": False})
         assert shots.status_code == 202, shots.text
         shots_task = shots.json()["id"]
-        build = client.post("/api/index-tasks",
-                            json={"action": "build", "source_id": source_id, "channels": ["visual"]})
+        build = client.post(
+            "/api/index-tasks", json={"action": "build", "source_id": source_id, "channels": ["visual"]}
+        )
         assert build.status_code == 202, build.text
         build_id = build.json()["id"]
     worker, _ = cluster.launch_worker(2, queues="source,index")
     try:
-        wait_until(lambda: cluster.source_task_status(shots_task) == "complete", 180, .3, "前置镜头任务未完成")
-        wait_until(lambda: cluster.index_task_status(build_id) == "complete", 240, .3, "真实索引构建未完成")
+        wait_until(
+            lambda: cluster.source_task_status(shots_task) == "complete", 180, 0.3, "前置镜头任务未完成"
+        )
+        wait_until(lambda: cluster.index_task_status(build_id) == "complete", 240, 0.3, "真实索引构建未完成")
         with cluster.client(0) as client:
             built = client.get(f"/api/index-tasks/{build_id}").json()
             index_id = built["result"]["index_id"]
             activate = client.post("/api/index-tasks", json={"action": "activate", "index_id": index_id})
             assert activate.status_code == 202, activate.text
             activate_id = activate.json()["id"]
-        wait_until(lambda: cluster.index_task_status(activate_id) == "running", 30, .02,
-                   "激活任务未被领取")
+        wait_until(lambda: cluster.index_task_status(activate_id) == "running", 30, 0.02, "激活任务未被领取")
         # 冻结在发布路径内，再 kill -9：崩溃点可能位于指针提交前或提交后、终态事务前。
         worker.send_signal(signal.SIGSTOP)
-        time.sleep(.5)
+        time.sleep(0.5)
         worker.send_signal(signal.SIGKILL)
         worker.wait(timeout=10)
         assert cluster.active_index() in (None, index_id), "崩溃留下半发布状态"
         retry, _ = cluster.launch_worker(3, queues="source,index")
-        wait_until(lambda: cluster.index_task_status(activate_id) == "complete", DRILL_TTL + 90, .2,
-                   "激活任务未在崩溃后完成")
+        wait_until(
+            lambda: cluster.index_task_status(activate_id) == "complete",
+            DRILL_TTL + 90,
+            0.2,
+            "激活任务未在崩溃后完成",
+        )
         assert cluster.active_index() == index_id
         with cluster.client(1) as client:
             versions = client.get("/api/indexes").json()
@@ -671,7 +793,7 @@ def test_dual_api_real_directory_revision_cas(cluster):
             return body
 
         # 后台标题生成会发布新目录修订：等它收敛后再取修订并发起竞争。
-        settled = wait_until(settled_workspace, 30, .3, "后台标题生成未收敛")
+        settled = wait_until(settled_workspace, 30, 0.3, "后台标题生成未收敛")
         plan_id = settled["active_plan"]
         plan_revision = settled["revision"]  # 活动方案的输入修订
         # If-Match 必须是目录修订（X-Studio-Revision），与工作区内容指纹是两个值。
@@ -689,8 +811,9 @@ def test_dual_api_real_directory_revision_cas(cluster):
     def save(index):
         with cluster.client(index) as client:
             barrier.wait(timeout=5)
-            response = client.patch(f"/api/studio/jobs/{job_id}/plans/{plan_id}", json=patch,
-                                    headers={"If-Match": revision})
+            response = client.patch(
+                f"/api/studio/jobs/{job_id}/plans/{plan_id}", json=patch, headers={"If-Match": revision}
+            )
             outcomes.append(response.status_code)
 
     threads = [threading.Thread(target=save, args=(index,)) for index in (0, 1)]
@@ -704,9 +827,11 @@ def test_dual_api_real_directory_revision_cas(cluster):
         refreshed = client.get(f"/api/studio/jobs/{job_id}/workspace")
         latest = refreshed.headers.get("x-studio-revision")
         assert latest and latest != revision
-        retry = client.patch(f"/api/studio/jobs/{job_id}/plans/{plan_id}",
-                             json={"revision": refreshed.json()["revision"], "name": "冲突后重试"},
-                             headers={"If-Match": latest})
+        retry = client.patch(
+            f"/api/studio/jobs/{job_id}/plans/{plan_id}",
+            json={"revision": refreshed.json()["revision"], "name": "冲突后重试"},
+            headers={"If-Match": latest},
+        )
         assert retry.status_code == 200, retry.text
     with cluster.client(0) as client:
         final = client.get(f"/api/studio/jobs/{job_id}/workspace").json()

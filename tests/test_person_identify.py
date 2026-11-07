@@ -9,13 +9,13 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from mindex.api import create_app
-from mindex.models.adapters import ModelError
-from mindex.persons.person_api import identify_faces
-from mindex.persons.person_models import Entity
-from mindex.persons.persons import Persons
-from mindex.shared.config import fingerprint
-from mindex.shared.storage import Store, dumps
+from api import create_app
+from models.adapters import ModelError
+from persons.person_api import identify_faces
+from persons.person_models import Entity
+from persons.persons import Persons
+from shared.config import fingerprint
+from shared.storage import Store, dumps
 
 SPACE = {"model": "cheetah_l", "weights": "fixture-identify"}
 
@@ -69,7 +69,7 @@ def library(config, monkeypatch):
 
 def seed_library(config, monkeypatch):
     """两名演员、三个角色、五张参考图（四张有当前空间特征缓存）；人物服务替换为确定性桩。"""
-    monkeypatch.setattr("mindex.persons.person_api.PersonClient", StubPersonClient)
+    monkeypatch.setattr("persons.person_api.PersonClient", StubPersonClient)
     StubPersonClient.observations, StubPersonClient.fail, StubPersonClient.seen = [], None, []
     store = Store(config.data_dir)
     store.execute(
@@ -107,8 +107,13 @@ def seed_library(config, monkeypatch):
     cached(refs["old"], [0.6, 0.8, 0])
     cached(refs["villain"], [0, 0, 1])
     cached(refs["bob"], [0, 0.6, 0.8])
-    ids = {"alice": alice["id"], "bob": bob["id"], "young": young["id"], "old": old["id"],
-           "villain": villain["id"]}
+    ids = {
+        "alice": alice["id"],
+        "bob": bob["id"],
+        "young": young["id"],
+        "old": old["id"],
+        "villain": villain["id"],
+    }
     return TestClient(create_app(config)), ids, refs
 
 
@@ -123,9 +128,9 @@ def post(client, data=None, raw=None, name="q.png"):
 def test_identify_ranks_roles_and_actors_and_counts_uncovered(library, config):
     client, ids, refs = library
     StubPersonClient.observations = [
-        face([1, 0, 0]),                         # 明确是青年叶淑柔
+        face([1, 0, 0]),  # 明确是青年叶淑柔
         face([0.85, 0.5, 0], box=(50, 10, 80, 40)),  # 在两个角色之间，领先不足
-        {**face(None), "face_bbox": None},       # 只有人体，没有人脸 → 跳过
+        {**face(None), "face_bbox": None},  # 只有人体，没有人脸 → 跳过
     ]
     response = post(client)
     assert response.status_code == 200, response.text
@@ -137,7 +142,11 @@ def test_identify_ranks_roles_and_actors_and_counts_uncovered(library, config):
     clear, ambiguous = body["faces"]
     assert [r["id"] for r in clear["roles"]] == [ids["young"], ids["old"], ids["villain"]]
     assert clear["roles"][0] == {
-        "id": ids["young"], "name": "青年叶淑柔", "kind": "role", "score": 1.0, "accepted": True,
+        "id": ids["young"],
+        "name": "青年叶淑柔",
+        "kind": "role",
+        "score": 1.0,
+        "accepted": True,
         "reference_id": refs["young"]["id"],
         "reference_url": f"/api/persons/references/{refs['young']['id']}/image",
     }
@@ -190,8 +199,14 @@ def test_identify_errors(library):
 
 
 def reference(identifier, feature, *, role=None, actor="actor", quality=0.9):
-    return {"id": identifier, "role_id": role, "actor_id": actor, "face_feature": feature,
-            "face_quality": quality, "face_bbox": [0, 0, 10, 10]}
+    return {
+        "id": identifier,
+        "role_id": role,
+        "actor_id": actor,
+        "face_feature": feature,
+        "face_quality": quality,
+        "face_bbox": [0, 0, 10, 10],
+    }
 
 
 def test_identify_faces_ranking_rules(config):
@@ -202,16 +217,22 @@ def test_identify_faces_ranking_rules(config):
         reference("ra2", [0, 1, 0], role="A", actor="x"),
         reference("rb", [0.8, 0.6, 0], role="B", actor="y"),
         reference("rc", [1, 0, 0], role="C", actor="y", quality=0.1),  # 低于参考图门槛
-        reference("ry", [0, 0, 1], actor="y"),                         # 只有演员、没有角色
+        reference("ry", [0, 0, 1], actor="y"),  # 只有演员、没有角色
     ]
-    entities = {"A": {"name": "甲角色", "kind": "role"}, "B": {"name": "乙角色", "kind": "role"},
-                "x": {"name": "演员X", "kind": "actor"}}
+    entities = {
+        "A": {"name": "甲角色", "kind": "role"},
+        "B": {"name": "乙角色", "kind": "role"},
+        "x": {"name": "演员X", "kind": "actor"},
+    }
 
     def run(feature, quality=0.95, top_k=5):
         return identify_faces([face(feature, quality)], references, entities, person, top_k)[0]
 
     clear = run([1, 0, 0])
-    assert [(r["id"], r["score"], r["accepted"]) for r in clear["roles"]] == [("A", 1.0, True), ("B", 0.8, False)]
+    assert [(r["id"], r["score"], r["accepted"]) for r in clear["roles"]] == [
+        ("A", 1.0, True),
+        ("B", 0.8, False),
+    ]
     assert clear["roles"][0]["reference_id"] == "ra1" and clear["accepted_role"]["id"] == "A"
     # 演员 y 的最高分来自角色 B 的照片（rc 被质量门槛挡下，ry 正交）。
     assert [(a["id"], a["reference_id"]) for a in clear["actors"]] == [("x", "ra1"), ("y", "rb")]
@@ -229,7 +250,9 @@ def test_identify_faces_ranking_rules(config):
 
     # 人脸质量低于 min_face_quality：分数最高也不接受。
     blurry = run([1, 0, 0], quality=0.3)
-    assert blurry["roles"][0]["score"] == 1.0 and not any(r["accepted"] for r in blurry["roles"] + blurry["actors"])
+    assert blurry["roles"][0]["score"] == 1.0 and not any(
+        r["accepted"] for r in blurry["roles"] + blurry["actors"]
+    )
     assert blurry["accepted_role"] is None
 
 
@@ -241,8 +264,13 @@ def test_identify_ignores_references_cached_in_other_space(library, config):
     other = {"model": "cheetah_l", "weights": "previous"}
     store.execute(
         "INSERT INTO person_features VALUES(?,?,?,?,?)",
-        (fingerprint(["reference-v1", stale["digest"], other]), None, dumps(other), "reference",
-         dumps({"space": other, "observations": [face([0, 1, 0])]})),
+        (
+            fingerprint(["reference-v1", stale["digest"], other]),
+            None,
+            dumps(other),
+            "reference",
+            dumps({"space": other, "observations": [face([0, 1, 0])]}),
+        ),
     )
     StubPersonClient.observations = [face([0, 1, 0])]
     body = post(client).json()

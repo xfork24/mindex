@@ -17,26 +17,72 @@
 
 from __future__ import annotations
 
-__all__ = ["BASELINE_DDL", "BASELINE_TABLES", "DELIVERY_PLATFORMS_SEED"]
+__all__ = ["BASELINE_DDL", "BASELINE_TABLES", "delivery_platforms_seed"]
 
 # 时间戳默认值：与 SQLite CURRENT_TIMESTAMP 完全一致的 UTC 文本。
 _NOW = "to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS')"
 
 # 业务表全集（含 person/topics/studio 扩展表）；迁移校验与往返装载按它对账。
 BASELINE_TABLES = (
-    "sources", "segments", "source_curation", "segment_curation", "transcripts", "annotations",
-    "scene_plans", "index_versions", "index_members", "representations", "channel_data",
-    "dialogue_tasks", "source_tasks", "settings", "model_profiles", "voices", "runs",
-    "clip_migration_files", "media_references", "script_templates", "topic_profiles",
-    "topic_sources", "topic_items", "topic_runs", "topic_cards", "topic_gaps",
-    "topic_calendar_events", "brand_templates", "music_tracks", "tool_sources",
-    "delivery_templates", "delivery_platforms", "media_groups", "media_group_members",
-    "person_entities", "person_sources", "person_references", "person_imports",
-    "person_features", "person_evidence", "person_coverage", "person_tasks",
-    "person_versions", "search_releases",
-    "search_segments", "lexical_docs", "lexical_terms", "lexical_index_meta",
-    "shared_files", "index_tasks", "scheduled_runs", "directory_manifests", "directory_heads", "studio_tasks", "external_calls",
-    "upload_sessions", "upload_parts", "uploaded_assets", "studio_events",
+    "sources",
+    "segments",
+    "source_curation",
+    "segment_curation",
+    "transcripts",
+    "annotations",
+    "scene_plans",
+    "index_versions",
+    "index_members",
+    "representations",
+    "channel_data",
+    "dialogue_tasks",
+    "source_tasks",
+    "settings",
+    "model_profiles",
+    "voices",
+    "runs",
+    "clip_migration_files",
+    "media_references",
+    "script_templates",
+    "topic_profiles",
+    "topic_sources",
+    "topic_items",
+    "topic_runs",
+    "topic_cards",
+    "topic_gaps",
+    "topic_calendar_events",
+    "brand_templates",
+    "music_tracks",
+    "tool_sources",
+    "delivery_templates",
+    "delivery_platforms",
+    "media_groups",
+    "media_group_members",
+    "person_entities",
+    "person_sources",
+    "person_references",
+    "person_imports",
+    "person_features",
+    "person_evidence",
+    "person_coverage",
+    "person_tasks",
+    "person_versions",
+    "search_releases",
+    "search_segments",
+    "lexical_docs",
+    "lexical_terms",
+    "lexical_index_meta",
+    "shared_files",
+    "index_tasks",
+    "scheduled_runs",
+    "directory_manifests",
+    "directory_heads",
+    "studio_tasks",
+    "external_calls",
+    "upload_sessions",
+    "upload_parts",
+    "uploaded_assets",
+    "studio_events",
 )
 
 BASELINE_DDL = f"""
@@ -408,8 +454,9 @@ CREATE TABLE IF NOT EXISTS agent_outbox (
 CREATE INDEX IF NOT EXISTS agent_outbox_pending ON agent_outbox(id) WHERE consumed_at IS NULL;
 """
 
+
 # delivery_platforms 的种子数据沿用 _metadata_v8：只在基线迁移时写入（幂等）。
-def DELIVERY_PLATFORMS_SEED(dumps):  # pragma: no cover - 与 SQLite 迁移共用同一份 YAML
+def delivery_platforms_seed(dumps):  # pragma: no cover - 与 SQLite 迁移共用同一份 YAML
     from pathlib import Path
 
     import yaml

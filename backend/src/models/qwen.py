@@ -15,21 +15,13 @@ from urllib.parse import urlparse
 import httpx
 from pydantic import ValidationError
 
-from mindex.models import adapters
-from mindex.models.adapters import (
-    AnalysisContentRejected,
-    InvalidAnalysisResponse,
-    InvalidAnalysisStructure,
-    ModelError,
-    TruncatedAnalysisResponse,
-    analysis_content_rejection,
-    parse_json,
-)
-from mindex.shared.analysis_text import select_analysis
-from mindex.shared.config import Config
-from mindex.shared.media import frame_data
-from mindex.shared.trace import record
-from mindex.shared.types import Annotation
+from models import adapters
+from models.adapters import AnalysisContentRejected, InvalidAnalysisResponse, InvalidAnalysisStructure, ModelError, TruncatedAnalysisResponse, analysis_content_rejection, parse_json
+from shared.analysis_text import select_analysis
+from shared.config import Config
+from shared.media import frame_data
+from shared.trace import record
+from shared.types import Annotation
 
 log = logging.getLogger(__name__)
 

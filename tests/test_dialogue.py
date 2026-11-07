@@ -1,8 +1,8 @@
 import pytest
 
-from mindex.models.adapters import ModelError
-from mindex.models.transcribers import parse_minimax_words
-from mindex.processing.dialogue import (
+from models.adapters import ModelError
+from models.transcribers import parse_minimax_words
+from processing.dialogue import (
     DialogueProcessor,
     choose_subtitle,
     coalesce_words,
@@ -11,8 +11,8 @@ from mindex.processing.dialogue import (
     relative_dialogue,
     subtitle_tracks,
 )
-from mindex.processing.pipeline import Pipeline
-from mindex.shared.media import command
+from processing.pipeline import Pipeline
+from shared.media import command
 
 
 def test_minimax_word_timestamps_silence_invalid_and_speaker():
@@ -183,7 +183,7 @@ def test_minimax_overlap_checkpoints_recovery(config, tmp_path):
 def test_no_audio_does_not_initialize_models(config, video_file, monkeypatch):
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
-    monkeypatch.setattr("mindex.processing.dialogue.make_transcriber", lambda *_: pytest.fail("no audio"))
+    monkeypatch.setattr("processing.dialogue.make_transcriber", lambda *_: pytest.fail("no audio"))
     result = pipeline.enrich_dialogue(sid)["sources"][0]
     assert result["status"] == "no_audio" and result["words"] == []
 
@@ -191,7 +191,7 @@ def test_no_audio_does_not_initialize_models(config, video_file, monkeypatch):
 def test_minimax_rate_limit_rewinds_upload_and_requests_words(config, tmp_path, monkeypatch):
     import httpx
 
-    from mindex.models import adapters, transcribers
+    from models import adapters, transcribers
 
     audio = tmp_path / "audio.wav"
     audio.write_bytes(b"RIFF-test-audio")
@@ -258,8 +258,10 @@ def test_subtitle_fallback_and_silent_audio_are_explicit(config, tmp_path, monke
         "default": True,
         "forced": False,
     }
-    monkeypatch.setattr("mindex.processing.subtitle_archive.load_archive", lambda *_: {
-        "tracks": [track], "utterances": {"2": []}, "files": {}})
+    monkeypatch.setattr(
+        "processing.subtitle_archive.load_archive",
+        lambda *_: {"tracks": [track], "utterances": {"2": []}, "files": {}},
+    )
 
     class Silence:
         calls = 0

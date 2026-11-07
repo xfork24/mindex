@@ -15,10 +15,10 @@ from pathlib import Path
 from fastapi import HTTPException
 from filelock import Timeout
 
-from mindex.shared.processing_lock import recover_tasks
-from mindex.shared.storage import dumps
-from mindex.shared.task_cancel import TaskCancelled, registry_for
-from mindex.shared.task_progress import (
+from shared.processing_lock import recover_tasks
+from shared.storage import dumps
+from shared.task_cancel import TaskCancelled, registry_for
+from shared.task_progress import (
     CANCELLABLE,
     RETRYABLE,
     begin_task,
@@ -28,7 +28,7 @@ from mindex.shared.task_progress import (
     save_task_progress,
     task_logs,
 )
-from mindex.shared.work_budget import budgeted
+from shared.work_budget import budgeted
 
 JSON_COLUMNS = frozenset({"options", "progress", "result", "publication"})
 # 进程内全部 runner（弱引用）：健康接口据此报告哪些类别的后台任务在运行。
@@ -40,7 +40,9 @@ def busy_categories(data_dir) -> list[str]:
     target = Path(data_dir).resolve()
     found = set()
     for runner in list(_RUNNERS):
-        if Path(runner.store.root).resolve() == target and any(t.is_alive() for t in list(runner.threads.values())):
+        if Path(runner.store.root).resolve() == target and any(
+            t.is_alive() for t in list(runner.threads.values())
+        ):
             found.add(runner.thread_prefix)
     return sorted(found)
 
@@ -56,8 +58,11 @@ def close_runners(store):
 
 def public_task(row):
     """任务行 → 接口形状：去掉冻结配置，解码 JSON 列。"""
-    return {k: json.loads(v) if v and k in JSON_COLUMNS else v for k, v in row.items()
-            if k not in {"config", "queue_attempt_id", "queue_fencing_token"}}
+    return {
+        k: json.loads(v) if v and k in JSON_COLUMNS else v
+        for k, v in row.items()
+        if k not in {"config", "queue_attempt_id", "queue_fencing_token"}
+    }
 
 
 class BackgroundTaskRunner:
@@ -163,13 +168,15 @@ class BackgroundTaskRunner:
         return self.get(task_id)
 
     def launch(self, task_id, config, lock):
-        from mindex.shared.queue_dispatch import queue_backend
+        from shared.queue_dispatch import queue_backend
 
         if queue_backend(self.runtime) == "postgres":
             self._enqueue(task_id, lock)
             return
         thread = threading.Thread(
-            target=self.run, args=(task_id, config, lock), daemon=True,
+            target=self.run,
+            args=(task_id, config, lock),
+            daemon=True,
             name=f"{self.thread_prefix}-{task_id[:8]}",
         )
         self.threads[task_id] = thread
@@ -181,7 +188,7 @@ class BackgroundTaskRunner:
         正常创建/重试已在 ledger_transaction 中原子入队；这里幂等确认后释放锁。
         enqueue_backlog 仅修复历史数据和异常滞留。
         """
-        from mindex.shared.queue_dispatch import enqueue_task
+        from shared.queue_dispatch import enqueue_task
 
         try:
             enqueue_task(self.runtime, self.table, task_id)
@@ -194,7 +201,8 @@ class BackgroundTaskRunner:
         if field not in {"result", "publication"}:
             raise ValueError("无效的任务字段")
         self.store.execute(
-            f"UPDATE {self.table} SET {field}=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", (dumps(value), task_id)
+            f"UPDATE {self.table} SET {field}=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (dumps(value), task_id),
         )
 
     def run(self, task_id, config, lock):
@@ -203,7 +211,7 @@ class BackgroundTaskRunner:
 
     @budgeted
     def _run(self, task_id, config, lock):
-        from mindex.shared.db.fencing import current_attempt
+        from shared.db.fencing import current_attempt
 
         attempt = current_attempt()
         cancels = registry_for(self.store.root)
@@ -214,7 +222,8 @@ class BackgroundTaskRunner:
             self.execute(task_id, row, config, lambda field, value: self.save(task_id, field, value))
             if attempt is None:
                 self.store.execute(
-                    f"UPDATE {self.table} SET status='complete',updated_at=CURRENT_TIMESTAMP WHERE id=?", (task_id,)
+                    f"UPDATE {self.table} SET status='complete',updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (task_id,),
                 )
         except TaskCancelled:
             if attempt is not None:

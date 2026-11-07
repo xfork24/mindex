@@ -5,16 +5,16 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
+
+from api import create_app
+from shared.migrations import migrate, user_version
+from shared.storage import METADATA_STEPS, Store
+from studio import music_library, studio
+from studio import workspace as ws
+from studio.workspace.handlers.publish import music_credits
 from test_studio_ai_media import FakeImageGenerator, media, run, shot  # noqa: F401 — media 是夹具
 from test_studio_beats import metronome
 from test_studio_sources import setup
-
-from mindex.api import create_app
-from mindex.shared.migrations import migrate, user_version
-from mindex.shared.storage import METADATA_STEPS, Store
-from mindex.studio import music_library, studio
-from mindex.studio import workspace as ws
-from mindex.studio.workspace.handlers.publish import music_credits
 
 LICENSE = {"source": "自制", "license": "CC0", "attribution": "测试作者 - 节拍"}
 
@@ -41,17 +41,27 @@ def client(media):  # noqa: F811
 
 def upload(client, bpm, seconds=8.0, **fields):
     data = {**LICENSE, **fields}
-    return client.post("/api/studio/music-library", data=data,
-                       files={"file": (f"m{bpm}.wav", metronome(bpm, seconds), "audio/wav")})
+    return client.post(
+        "/api/studio/music-library",
+        data=data,
+        files={"file": (f"m{bpm}.wav", metronome(bpm, seconds), "audio/wav")},
+    )
 
 
 def test_import_requires_license_and_deduplicates(client):
     config, client, _ = client
-    missing = client.post("/api/studio/music-library", data={"source": "x"},
-                          files={"file": ("m.wav", metronome(120, 4), "audio/wav")})
+    missing = client.post(
+        "/api/studio/music-library",
+        data={"source": "x"},
+        files={"file": ("m.wav", metronome(120, 4), "audio/wav")},
+    )
     assert missing.status_code == 422
-    assert client.post("/api/studio/music-library", data=LICENSE,
-                       files={"file": ("m.txt", b"hello", "text/plain")}).status_code == 422
+    assert (
+        client.post(
+            "/api/studio/music-library", data=LICENSE, files={"file": ("m.txt", b"hello", "text/plain")}
+        ).status_code
+        == 422
+    )
     first = upload(client, 120, title="节拍 120", tags="电子, 测试")
     assert first.status_code == 201, first.text
     item = first.json()
@@ -92,8 +102,10 @@ def test_recommend_by_mood_bpm_and_license(client):
     fast = upload(client, 150, seconds=12).json()
     client.put(f"/api/studio/music-library/{slow['id']}", json={"moods": ["calm"]})
     client.put(f"/api/studio/music-library/{fast['id']}", json={"moods": ["energetic"]})
-    result = client.post("/api/studio/music-library/recommend",
-                         json={"text": "健身运动，燃起来的比赛", "seconds": 10, "ai": False}).json()
+    result = client.post(
+        "/api/studio/music-library/recommend",
+        json={"text": "健身运动，燃起来的比赛", "seconds": 10, "ai": False},
+    ).json()
     assert result["source"] == "keywords" and result["moods"][0] == "energetic"
     assert [item["id"] for item in result["items"]] == [fast["id"], slow["id"]]
     assert result["items"][0]["reasons"]
@@ -124,9 +136,15 @@ def test_library_cue_model_and_identity_compat():
 def test_library_music_build_credits_and_protection(client):
     config, client, _ = client
     track = upload(client, 120, seconds=4).json()
-    shots = [shot("a", "红色开场。", source={"kind": "aigc_image"},
-                  music={"kind": "library", "track_id": track["id"], "volume": 0.4}),
-             shot("b", "蓝色结尾。", source={"kind": "aigc_image"})]
+    shots = [
+        shot(
+            "a",
+            "红色开场。",
+            source={"kind": "aigc_image"},
+            music={"kind": "library", "track_id": track["id"], "volume": 0.4},
+        ),
+        shot("b", "蓝色结尾。", source={"kind": "aigc_image"}),
+    ]
     job_id, w, p = setup(config, shots)
     # 段落推荐：按提示点分镜取本段旁白与预估时长。
     text, seconds = music_library.segment_text(config, job_id, p["id"], "a")
@@ -135,8 +153,10 @@ def test_library_music_build_credits_and_protection(client):
     assert w["builds"][-1]["status"] == "complete", w["builds"][-1]
     music = ws.version(w, p["shots"]["a"]["music"])
     assert music["data"]["attribution"] == LICENSE["attribution"] and music["parameters"] == {}
-    assert ws.file_path(config, job_id, music, "music").read_bytes() == \
-        music_library.track_path(config, track["id"], ".wav").read_bytes()
+    assert (
+        ws.file_path(config, job_id, music, "music").read_bytes()
+        == music_library.track_path(config, track["id"], ".wav").read_bytes()
+    )
     final = ws.version(w, p["final"])
     report = final["data"]["music"]
     assert report[0]["kind"] == "library" and report[0]["shots"] == ["a", "b"]
@@ -157,8 +177,10 @@ def test_library_music_build_credits_and_protection(client):
 
 
 def test_preflight_blocks_missing_track(media):  # noqa: F811
-    job_id, w, p = setup(media, [shot("a", "开场。", source={"kind": "aigc_image"},
-                                      music={"kind": "library", "track_id": "b" * 64})])
+    job_id, w, p = setup(
+        media,
+        [shot("a", "开场。", source={"kind": "aigc_image"}, music={"kind": "library", "track_id": "b" * 64})],
+    )
     node = next(n for n in ws.preflight(media, job_id, w, p)["nodes"] if n["key"] == "music:a")
     assert node["action"] == "blocked" and "找不到" in node["reason"]
 

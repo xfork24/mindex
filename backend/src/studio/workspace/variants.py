@@ -10,7 +10,7 @@ from __future__ import annotations
 import copy
 from uuid import uuid4
 
-from mindex.studio import studio
+from studio import studio
 
 SYNCED = ("board", "board_script", "script", "ranges", "anchors")
 # 与画幅无关的逐镜阶段：沿用主方案的选用；画面生成、叠加层与渲染与画幅有关，保留子方案自己的（签名决定复用）。
@@ -30,7 +30,9 @@ def children(w, p) -> list[dict]:
 
 
 def wanted(p) -> dict[str, dict]:
-    return {item["canvas"]: item for item in p["options"].get("exports") or [] if item.get("mode") == "rerender"}
+    return {
+        item["canvas"]: item for item in p["options"].get("exports") or [] if item.get("mode") == "rerender"
+    }
 
 
 def child_options(p, item) -> dict:
@@ -47,8 +49,12 @@ def sync(w, p) -> list[str]:
         child = child_plan(w, p, canvas)
         if child is None:
             child = {
-                "id": uuid4().hex[:12], "name": f"{p['name']} · {canvas}", "created_at": studio.now(), "shots": {},
-                "final": None, "variant_of": {"plan": p["id"], "canvas": canvas},
+                "id": uuid4().hex[:12],
+                "name": f"{p['name']} · {canvas}",
+                "created_at": studio.now(),
+                "shots": {},
+                "final": None,
+                "variant_of": {"plan": p["id"], "canvas": canvas},
             }
             w["plans"][child["id"]] = child
         child["options"] = child_options(p, item)
@@ -57,8 +63,10 @@ def sync(w, p) -> list[str]:
         shots = {}
         for sid, selected in p["shots"].items():
             mine = child["shots"].get(sid) or {}
-            shots[sid] = {**{k: v for k, v in mine.items() if k not in SHARED_STAGES},
-                          **{k: v for k, v in selected.items() if k in SHARED_STAGES}}
+            shots[sid] = {
+                **{k: v for k, v in mine.items() if k not in SHARED_STAGES},
+                **{k: v for k, v in selected.items() if k in SHARED_STAGES},
+            }
         child["shots"] = shots
         found.append(child["id"])
     for child in children(w, p):
@@ -71,7 +79,7 @@ def sync(w, p) -> list[str]:
 def preflight_all(config, job_id, w, p, *, force=False) -> dict:
     """构建全部画幅的预检：先是各关联子方案的逐镜与成片节点（键加 ``子方案ID/`` 前缀、带 ``plan_id``），
     再是主方案自己的节点；主方案的重新渲染导出不再因子方案尚无成片而阻塞（同一次构建里先构建子方案）。"""
-    from mindex.shared.config import fingerprint
+    from shared.config import fingerprint
 
     from .preflight import preflight
     from .stages import names
@@ -92,6 +100,12 @@ def preflight_all(config, job_id, w, p, *, force=False) -> dict:
         if node["stage"] == "export" and node["action"] == "blocked" and node["shot_id"] in wanted(p):
             node = {**node, "action": "rebuild", "reason": "子方案在本次构建中先完成"}
         nodes.append(node)
-    result = {"plan_id": p["id"], "revision": revision(p), "force": force, "all_canvases": True, "nodes": nodes}
+    result = {
+        "plan_id": p["id"],
+        "revision": revision(p),
+        "force": force,
+        "all_canvases": True,
+        "nodes": nodes,
+    }
     result["token"] = fingerprint(result)
     return result

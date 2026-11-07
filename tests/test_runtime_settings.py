@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from mindex.settings.runtime_settings import (
+from settings.runtime_settings import (
     CLEAR_KEY,
     PROFILE_FIELDS,
     PROVIDER_PRESETS,
@@ -20,7 +20,7 @@ from mindex.settings.runtime_settings import (
     mask_key,
     save_profile,
 )
-from mindex.shared.storage import Store
+from shared.storage import Store
 
 
 @pytest.fixture
@@ -64,7 +64,12 @@ def test_profile_crud_and_mask(store):
         role="embedding",
         provider="tencent",
         name="腾讯TokenHub",
-        config={"backend": "tokenhub", "base_url": "https://x/v1", "model": "kinfra-vl-embedding-2b", "dimensions": 2048},
+        config={
+            "backend": "tokenhub",
+            "base_url": "https://x/v1",
+            "model": "kinfra-vl-embedding-2b",
+            "dimensions": 2048,
+        },
         api_key=None,
         profile_id=profile["id"],
     )
@@ -77,7 +82,12 @@ def test_profile_crud_and_mask(store):
         role="embedding",
         provider="tencent",
         name="腾讯TokenHub",
-        config={"backend": "tokenhub", "base_url": "https://x/v1", "model": "kinfra-vl-embedding-2b", "dimensions": 2048},
+        config={
+            "backend": "tokenhub",
+            "base_url": "https://x/v1",
+            "model": "kinfra-vl-embedding-2b",
+            "dimensions": 2048,
+        },
         api_key=CLEAR_KEY,
         profile_id=profile["id"],
     )
@@ -95,15 +105,26 @@ def test_profile_unique_name_per_role(store):
 
 
 def test_agent_context_capacity_profile_roundtrip(store, config):
-    profile = save_profile(store, role="agent", provider="custom", name="百万上下文",
-                           config={"context_window": 1048576, "max_tokens": 4096})
+    profile = save_profile(
+        store,
+        role="agent",
+        provider="custom",
+        name="百万上下文",
+        config={"context_window": 1048576, "max_tokens": 4096},
+    )
     activate_profile(store, profile["id"])
     current = RuntimeConfig(config, store).current()
     assert current.agent.llm.context_window == 1048576
     assert current.agent.llm.max_tokens == 4096
     assert current.agent.max_context_tokens == config.agent.max_context_tokens
-    profile = save_profile(store, profile_id=profile["id"], role="agent", provider="custom", name="百万上下文",
-                           config={"context_window": None, "max_tokens": 4096})
+    profile = save_profile(
+        store,
+        profile_id=profile["id"],
+        role="agent",
+        provider="custom",
+        name="百万上下文",
+        config={"context_window": None, "max_tokens": 4096},
+    )
     assert RuntimeConfig(config, store).current().agent.llm.context_window is None
     with pytest.raises(ValueError):
         save_profile(store, role="agent", provider="custom", name="无效上下文", config={"context_window": 0})
@@ -140,8 +161,16 @@ def test_profile_fields_whitelist(store):
 
 def test_analyzer_retry_profile_changes_do_not_invalidate_analysis_cache(store, config):
     profile = save_profile(
-        store, role="analyzer", provider="minimax", name="分析自动重试",
-        config={"response_retries": 10, "initial_output_tokens": 8000, "max_output_tokens": 32768, "thinking_mode": "low"}
+        store,
+        role="analyzer",
+        provider="minimax",
+        name="分析自动重试",
+        config={
+            "response_retries": 10,
+            "initial_output_tokens": 8000,
+            "max_output_tokens": 32768,
+            "thinking_mode": "low",
+        },
     )
     activate_profile(store, profile["id"])
     current = RuntimeConfig(config, store).current()
@@ -155,11 +184,18 @@ def test_analyzer_retry_profile_changes_do_not_invalidate_analysis_cache(store, 
     assert config.analyzer.max_output_tokens == 131072
     for invalid in (-1, 21):
         with pytest.raises(ValueError):
-            save_profile(store, role="analyzer", provider="minimax", name="越界", config={"response_retries": invalid})
+            save_profile(
+                store, role="analyzer", provider="minimax", name="越界", config={"response_retries": invalid}
+            )
     for invalid in (63, 131073):
         with pytest.raises(ValueError):
-            save_profile(store, role="analyzer", provider="minimax", name="越界",
-                         config={"initial_output_tokens": invalid})
+            save_profile(
+                store,
+                role="analyzer",
+                provider="minimax",
+                name="越界",
+                config={"initial_output_tokens": invalid},
+            )
 
 
 def test_apply_overrides_replaces_section_and_keeps_base(store, config):
@@ -203,7 +239,11 @@ def test_dangling_active_pointer_falls_back(store, config):
         role="asr",
         provider="aliyun",
         name="qwen3-asr",
-        config={"backend": "openai", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "model": "qwen3-asr-flash"},
+        config={
+            "backend": "openai",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "model": "qwen3-asr-flash",
+        },
     )
     activate_profile(store, profile["id"])
     store.execute("DELETE FROM model_profiles WHERE id=?", (profile["id"],))
@@ -214,7 +254,14 @@ def test_dangling_active_pointer_falls_back(store, config):
 def test_search_and_voice_overrides(store, config):
     store.execute(
         "INSERT OR REPLACE INTO settings(key,value) VALUES('override.search',?)",
-        (json.dumps({"weights": {"video": 2, "description": 1, "style": 1, "dialogue": 0.7, "lexical": 0.5}, "rrf_k": 40}),),
+        (
+            json.dumps(
+                {
+                    "weights": {"video": 2, "description": 1, "style": 1, "dialogue": 0.7, "lexical": 0.5},
+                    "rrf_k": 40,
+                }
+            ),
+        ),
     )
     store.execute(
         "INSERT OR REPLACE INTO settings(key,value) VALUES('override.studio.voice',?)", ("克隆音色A",)
@@ -293,7 +340,7 @@ def test_fingerprints_exclude_api_key(config):
 
 def test_provider_presets_validate():
     """预设里的 config 必须能通过对应配置段的 pydantic 校验，防止手滑。"""
-    from mindex.settings.runtime_settings import SECTION_TYPES
+    from settings.runtime_settings import SECTION_TYPES
 
     for roles in PROVIDER_PRESETS.values():
         for role, preset in roles.items():
@@ -308,35 +355,56 @@ def test_minimax_presets_use_cn_domain():
 
 
 def test_roles_cover_all_sections():
-    assert set(ROLES) == {"analyzer", "writer", "generator", "embedding", "asr", "tts", "video_generator",
-                          "image_generator", "music_generator", "animator", "person", "agent"}
+    assert set(ROLES) == {
+        "analyzer",
+        "writer",
+        "generator",
+        "embedding",
+        "asr",
+        "tts",
+        "video_generator",
+        "image_generator",
+        "music_generator",
+        "animator",
+        "person",
+        "agent",
+    }
 
 
 def test_writer_config_defaults_to_generator():
     """yaml 只配了 generator 时，文案创作沿用同一服务；显式配置时各自独立。"""
-    from mindex.shared.config import Config
+    from shared.config import Config
 
     copied = Config.model_validate({"studio": {"generator": {"base_url": "http://g/v1", "model": "gen-a"}}})
     assert copied.studio.writer.model_dump() == copied.studio.generator.model_dump()
-    separate = Config.model_validate({"studio": {
-        "generator": {"base_url": "http://g/v1", "model": "gen-a"},
-        "writer": {"base_url": "http://w/v1", "model": "write-b"},
-    }})
+    separate = Config.model_validate(
+        {
+            "studio": {
+                "generator": {"base_url": "http://g/v1", "model": "gen-a"},
+                "writer": {"base_url": "http://w/v1", "model": "write-b"},
+            }
+        }
+    )
     assert separate.studio.writer.model == "write-b"
     assert separate.studio.generator.model == "gen-a"
     assert separate.studio_key != copied.studio_key
 
 
 def test_writer_profile_migration_copies_active_generator_once(store, config):
-    from mindex.settings.runtime_settings import ensure_writer_profile, get_setting
+    from settings.runtime_settings import ensure_writer_profile, get_setting
 
     generator = save_profile(
         store,
         role="generator",
         provider="deepseek",
         name="deepseek-chat",
-        config={"backend": "openai", "base_url": "https://api.deepseek.com/v1",
-                "model": "deepseek-chat", "llama_template": False, "max_tokens": 6000},
+        config={
+            "backend": "openai",
+            "base_url": "https://api.deepseek.com/v1",
+            "model": "deepseek-chat",
+            "llama_template": False,
+            "max_tokens": 6000,
+        },
         api_key="sk-writer-copy-1234",
     )
     activate_profile(store, generator["id"])
@@ -359,7 +427,7 @@ def test_writer_profile_migration_copies_active_generator_once(store, config):
 
 
 def test_writer_profile_migration_without_generator_profile(store, config):
-    from mindex.settings.runtime_settings import ensure_writer_profile
+    from settings.runtime_settings import ensure_writer_profile
 
     assert ensure_writer_profile(store) is None
     assert list_profiles(store, "writer") == []
@@ -375,13 +443,15 @@ def test_voices_table_roundtrip(store):
         ("旁白A", "clone", "minimax", "narrator-a"),
     )
     rows = store.rows("SELECT name,kind,provider,voice_id,status FROM voices")
-    assert rows == [{"name": "旁白A", "kind": "clone", "provider": "minimax", "voice_id": "narrator-a", "status": "ready"}]
+    assert rows == [
+        {"name": "旁白A", "kind": "clone", "provider": "minimax", "voice_id": "narrator-a", "status": "ready"}
+    ]
 
 
 def test_person_frame_interval_validation_and_profile_snapshot(store):
     from pydantic import ValidationError
 
-    from mindex.shared.config import PersonConfig
+    from shared.config import PersonConfig
 
     assert PersonConfig().frame_interval == 15
     for value in (0, -1, 1.5, 5.0, True):

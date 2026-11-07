@@ -8,7 +8,7 @@ chroma 的元数据段每笔提交，HNSW 段仅在累计 sync_threshold（默�
 
 import pickle
 
-from mindex.processing.indexing import VectorIndex
+from processing.indexing import VectorIndex
 
 
 def make_index(root, name="ix-vector-index-test"):

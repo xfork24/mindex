@@ -8,8 +8,8 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-from mindex.models.adapters import ModelError
-from mindex.shared.config import Config, fingerprint
+from models.adapters import ModelError
+from shared.config import Config, fingerprint
 
 ADAPTER_VERSION = "llama-native-wemm-2"
 PREFIX = "<|im_start|>user\n"

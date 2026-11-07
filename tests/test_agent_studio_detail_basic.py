@@ -6,20 +6,26 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-import test_studio_window
-from conftest import FixtureSpeaker, FixtureStoryboarder
 from fastapi.testclient import TestClient
+
+import test_studio_window
+from agent.loopback import MindexClient
+from agent.registry import ToolContext, ToolError
+from agent.tools import build_registry
+from api import create_app
+from conftest import FixtureSpeaker, FixtureStoryboarder
+from studio import workspace as ws
 from test_agent_studio_cancel import call_tool
 from test_studio_window import speech
 from test_studio_workspace import setup_workspace, wait_build
 
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext, ToolError
-from mindex.agent.tools import build_registry
-from mindex.api import create_app
-from mindex.studio import workspace as ws
-
-READ = ("diagnose_plan", "get_version_lineage", "suggest_shot_query", "get_material_digest", "preview_version")
+READ = (
+    "diagnose_plan",
+    "get_version_lineage",
+    "suggest_shot_query",
+    "get_material_digest",
+    "preview_version",
+)
 selection_job = test_studio_window.refinement  # 复用选片窗口测试的真实素材与召回候选 fixture
 
 
@@ -42,13 +48,19 @@ def test_diagnose_lineage_and_suggestion(config):
     assert "缺少画面意象" in output.text  # 两个分镜都没有 visual：软性建议
 
     content = p["shots"]["a"]["content"]
-    [lineage] = call_tool(app, "get_version_lineage", {"job_id": jid, "version": content[:8]}, steps=("execute",))
+    [lineage] = call_tool(
+        app, "get_version_lineage", {"job_id": jid, "version": content[:8]}, steps=("execute",)
+    )
     assert lineage.value["root"] == content and "【当前选用】" in lineage.text
     with pytest.raises(ToolError, match="找不到版本"):
         call_tool(app, "get_version_lineage", {"job_id": jid, "version": "zzzzzzzz"}, steps=("execute",))
 
-    [suggestion] = call_tool(app, "suggest_shot_query", {"job_id": jid, "shot": "#1", "visual": "红色 幕布 拉开"},
-                             steps=("execute",))
+    [suggestion] = call_tool(
+        app,
+        "suggest_shot_query",
+        {"job_id": jid, "shot": "#1", "visual": "红色 幕布 拉开"},
+        steps=("execute",),
+    )
     assert suggestion.value == {"shot_id": "a", "query": "红色 幕布 画面", "current_query": "红色"}
     assert "edit_shots" in suggestion.text
     # 只是建议：分镜未被修改。
@@ -144,10 +156,17 @@ def test_selection_requires_speech(selection_job):
     app = create_app(config)
     [listing] = call_tool(app, "get_selection_candidates", {"job_id": jid, "shot": "#1"}, steps=("execute",))
     assert listing.value["ready"] is False and "先为该分镜配音" in listing.value["reason"]
-    assert [row["candidate_id"] for row in listing.value["candidates"]] == ["shot-0", "shot-1", "shot-2", "shot-8"]
+    assert [row["candidate_id"] for row in listing.value["candidates"]] == [
+        "shot-0",
+        "shot-1",
+        "shot-2",
+        "shot-8",
+    ]
     assert listing.value["tts"] is None and "#2 shot-1" in listing.text
     with pytest.raises(ToolError, match="尚无成功的配音") as exc:
-        call_tool(app, "preview_selection", {"job_id": jid, "shot": "a", "candidate": "#2"}, steps=("execute",))
+        call_tool(
+            app, "preview_selection", {"job_id": jid, "shot": "a", "candidate": "#2"}, steps=("execute",)
+        )
     assert exc.value.code == "tts_missing"
 
 
@@ -162,8 +181,9 @@ def test_window_selection_preview_and_confirm(selection_job):
     assert listing.value["ready"] is True and listing.value["window"]["duration"] > 0
     assert listing.images and listing.images[0] == "/api/admin/segments/shot-0/thumbnail"
 
-    [preview] = call_tool(app, "preview_selection", {"job_id": jid, "shot": "a", "candidate": "#2"},
-                          steps=("execute",))
+    [preview] = call_tool(
+        app, "preview_selection", {"job_id": jid, "shot": "a", "candidate": "#2"}, steps=("execute",)
+    )
     assert preview.value["anchor_changed"] and preview.mutation["job_id"] == jid
     assert preview.value["anchor_ref"]["candidate_id"] == "shot-1"
     fresh = ws.load(config, jid)
@@ -198,9 +218,12 @@ def test_range_selection_rejects_after_plan_change(selection_job):
     ws.persist(config, jid, w)
     app = create_app(config)
     source = store.one("SELECT id FROM sources")["id"]
-    [preview] = call_tool(app, "preview_selection",
-                          {"job_id": jid, "shot": "a", "source_id": source, "start": 3, "end": 5},
-                          steps=("execute",))
+    [preview] = call_tool(
+        app,
+        "preview_selection",
+        {"job_id": jid, "shot": "a", "source_id": source, "start": 3, "end": 5},
+        steps=("execute",),
+    )
     assert preview.value["mode"] == "range" and preview.value["range"]["source_id"] == source
     assert not preview.value["anchor_changed"] and preview.mutation is None
 

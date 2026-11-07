@@ -38,7 +38,7 @@ class CancelRegistry:
         return self.directory / _safe_key(key)
 
     def request(self, key: str) -> None:
-        from mindex.shared.db.fencing import current_attempt
+        from shared.db.fencing import current_attempt
 
         attempt = current_attempt()
         if attempt is not None and getattr(attempt.task, "ledger_id", None) == key:
@@ -49,7 +49,7 @@ class CancelRegistry:
         path.touch()
 
     def requested(self, key: str) -> bool:
-        from mindex.shared.db.fencing import current_attempt
+        from shared.db.fencing import current_attempt
 
         attempt = current_attempt()
         if attempt is not None and getattr(attempt.task, "ledger_id", None) == key:
@@ -61,7 +61,7 @@ class CancelRegistry:
         return bool(event and event.is_set()) or path.exists()
 
     def check(self, key: str) -> None:
-        from mindex.shared.db.fencing import current_attempt
+        from shared.db.fencing import current_attempt
 
         attempt = current_attempt()
         if attempt is not None:

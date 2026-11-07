@@ -8,9 +8,9 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from mindex.api import app_version, create_app
-from mindex.shared.background_tasks import _RUNNERS
-from mindex.studio.executor import _EXECUTORS
+from api import app_version, create_app
+from shared.background_tasks import _RUNNERS
+from studio.executor import _EXECUTORS
 
 TOKEN = "desktop-health-token"
 

@@ -1,4 +1,5 @@
 """上下文退出、失败清理与共享资源的所有权边界。"""
+
 from __future__ import annotations
 
 import gc
@@ -8,11 +9,11 @@ import pytest
 from fastapi.testclient import TestClient
 from filelock import FileLock
 
-from mindex.shared.backends import open_context
-from mindex.shared.backends.context import resource_scope
-from mindex.shared.config import Config
-from mindex.shared.db.pg_backend import PgBackend
-from mindex.shared.storage import Store
+from shared.backends import open_context
+from shared.backends.context import resource_scope
+from shared.config import Config
+from shared.db.pg_backend import PgBackend
+from shared.storage import Store
 
 
 def test_store_owns_context_and_close_is_idempotent(tmp_path):
@@ -51,18 +52,23 @@ def test_scope_cleans_up_on_failure(tmp_path):
 
 
 def test_failed_context_open_releases_pg_backend(tmp_path, monkeypatch):
-    from mindex.shared import storage
+    from shared import storage
 
     fake = Mock(library_id="actual-library", root=tmp_path)
     monkeypatch.setattr(storage, "PgStore", Mock(return_value=fake))
     with pytest.raises(RuntimeError, match="library_id"):
-        open_context(Config(data_dir=tmp_path, database={"backend": "postgres"},
-                            server={"library_id": "00000000-0000-0000-0000-000000000001"}))
+        open_context(
+            Config(
+                data_dir=tmp_path,
+                database={"backend": "postgres"},
+                server={"library_id": "00000000-0000-0000-0000-000000000001"},
+            )
+        )
     fake.backend.close.assert_called_once()
 
 
 def test_shared_pg_pools_survive_other_owner_close(monkeypatch):
-    from mindex.shared.db import pg_backend
+    from shared.db import pg_backend
 
     dsn = "lifecycle-isolated-test"
     pool = Mock()
@@ -81,7 +87,7 @@ def test_shared_pg_pools_survive_other_owner_close(monkeypatch):
 
 
 def test_api_shutdown_closes_after_inner_lifespan(tmp_path):
-    from mindex.api import create_app
+    from api import create_app
 
     app = create_app(Config(data_dir=tmp_path))
     with TestClient(app) as client:
@@ -93,8 +99,8 @@ def test_api_shutdown_closes_after_inner_lifespan(tmp_path):
 def test_cli_scope_closes_opened_stores(tmp_path, monkeypatch):
     from typer.testing import CliRunner
 
-    import mindex.settings.runtime_settings as settings
-    from mindex.cli import app
+    import settings.runtime_settings as settings
+    from cli import app
 
     opened = []
 
@@ -111,7 +117,7 @@ def test_cli_scope_closes_opened_stores(tmp_path, monkeypatch):
 
 
 def test_worker_closes_context_even_on_failure():
-    from mindex.worker_runtime import Worker
+    from worker.runtime import Worker
 
     worker = Worker.__new__(Worker)
     worker.context = Mock()
@@ -156,7 +162,7 @@ def test_gc_during_other_staging_accounting_never_reenters_ledger(tmp_path):
 
 
 def test_api_construction_failure_closes_opened_context(tmp_path, monkeypatch):
-    import mindex.api as api
+    import api as api
 
     contexts = []
 

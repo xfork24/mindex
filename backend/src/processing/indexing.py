@@ -1,3 +1,5 @@
+"""发布索引构建与校验:倒排表、向量空间与索引快照的写入检查。"""
+
 from __future__ import annotations
 
 import json
@@ -10,11 +12,11 @@ from pathlib import Path
 import chromadb
 from chromadb.config import Settings
 
-from mindex.models.adapters import ModelError, MultimodalEmbedder, make_embedder
-from mindex.processing.pipeline import Pipeline
-from mindex.shared.config import Config, fingerprint
-from mindex.shared.media import windows
-from mindex.shared.storage import Store, dumps
+from models.adapters import ModelError, MultimodalEmbedder, make_embedder
+from processing.pipeline import Pipeline
+from shared.config import Config, fingerprint
+from shared.media import windows
+from shared.storage import Store, dumps
 
 log = logging.getLogger(__name__)
 
@@ -52,7 +54,7 @@ def vector_client(config, *, library_id: str | None = None):
     返回进程内共享的 HttpClient（显式配置选择，不做路径发现；plans §6.2）。"""
     if getattr(config, "vector", None) is None or config.vector.backend != "chroma_server":
         return None
-    from mindex.shared.backends.vectors import ChromaServerVectorStores
+    from shared.backends.vectors import ChromaServerVectorStores
 
     if library_id is None:
         library_id = Store.open(config).library_id
@@ -109,8 +111,11 @@ class VectorIndex:
         except Exception as exc:
             if "Error finding id" not in str(exc):
                 raise
-            return {identifier: vector for identifier in identifiers
-                    if (vector := self.vector(identifier)) is not None}
+            return {
+                identifier: vector
+                for identifier in identifiers
+                if (vector := self.vector(identifier)) is not None
+            }
         return {identifier: vector.tolist() for identifier, vector in zip(raw["ids"], raw["embeddings"])}
 
     def upsert_many(self, entries):
@@ -118,9 +123,10 @@ class VectorIndex:
             ids=[entry[0] for entry in entries],
             embeddings=[entry[1] for entry in entries],
             documents=[entry[4] or entry[3] for entry in entries],
-            metadatas=[{"segment_id": s["id"], "source_id": s["source_id"],
-                        "granularity": s["kind"], "view": view}
-                       for _, _, s, view, _ in entries],
+            metadatas=[
+                {"segment_id": s["id"], "source_id": s["source_id"], "granularity": s["kind"], "view": view}
+                for _, _, s, view, _ in entries
+            ],
         )
 
     def flush(self) -> None:
@@ -185,7 +191,7 @@ class VectorIndex:
         return self._best_per_segment(hits, count)
 
     def _query_relation(self, vector, view, eligible, count):
-        from mindex.shared.query_budget import check
+        from shared.query_budget import check
 
         if not eligible:
             return []
@@ -197,12 +203,15 @@ class VectorIndex:
         size = min(total, max(count * 4, 64))
         while size <= POSTFILTER_MAX_CANDIDATES:
             check()
-            raw = self.collection.query(query_embeddings=[vector], n_results=size, where=where,
-                                        include=["metadatas", "distances"])
+            raw = self.collection.query(
+                query_embeddings=[vector], n_results=size, where=where, include=["metadatas", "distances"]
+            )
             allowed = eligible.matching([item["segment_id"] for item in raw["metadatas"][0]])
-            hits = [{"id": metadata["segment_id"], "distance": distance}
-                    for metadata, distance in zip(raw["metadatas"][0], raw["distances"][0])
-                    if metadata["segment_id"] in allowed]
+            hits = [
+                {"id": metadata["segment_id"], "distance": distance}
+                for metadata, distance in zip(raw["metadatas"][0], raw["distances"][0])
+                if metadata["segment_id"] in allowed
+            ]
             if len({item["id"] for item in hits}) >= count or size >= total or len(raw["ids"][0]) < size:
                 return self._best_per_segment(hits, count)
             size = min(size * POSTFILTER_GROWTH, total)
@@ -243,7 +252,8 @@ class VectorIndex:
                     mapping = {
                         row[0]: (row[1], row[2])
                         for row in db.execute(
-                            "SELECT id,segment_id,view FROM representations WHERE index_id=?", (self.index_id,)
+                            "SELECT id,segment_id,view FROM representations WHERE index_id=?",
+                            (self.index_id,),
                         )
                     }
             except sqlite3.Error as exc:
@@ -267,7 +277,8 @@ class VectorIndex:
             self._raw_memo.move_to_end(key)
             return self._raw_memo[key]
         raw = self.collection.query(
-            query_embeddings=[vector], n_results=size,
+            query_embeddings=[vector],
+            n_results=size,
             include=["distances"] if mapping else ["metadatas", "distances"],
         )
         ids, distances = raw["ids"][0], raw["distances"][0]
@@ -287,7 +298,9 @@ class VectorIndex:
             self._raw_memo.popitem(last=False)
         return value
 
-    def _query_postfiltered(self, vector, view, allowed: set[str], count: int, total: int) -> list[dict] | None:
+    def _query_postfiltered(
+        self, vector, view, allowed: set[str], count: int, total: int
+    ) -> list[dict] | None:
         size = min(total, max(count * POSTFILTER_OVERFETCH, POSTFILTER_MIN_CANDIDATES))
         mapping = self._representation_map()
         while size <= POSTFILTER_MAX_CANDIDATES:
@@ -318,12 +331,23 @@ class VectorIndex:
                     query_embeddings=[vector], n_results=size, where=where, include=["metadatas", "distances"]
                 )
                 unique = {m["segment_id"] for m in raw["metadatas"][0]}
-                if len(unique) >= min(count, len(eligible[offset:offset + 500])) or len(raw["ids"][0]) < size or size == total:
+                if (
+                    len(unique) >= min(count, len(eligible[offset : offset + 500]))
+                    or len(raw["ids"][0]) < size
+                    or size == total
+                ):
                     break
                 size = min(size * 2, total)
-            hits = self._best_per_segment([*hits, *(
-                {"id": metadata["segment_id"], "distance": distance}
-                for metadata, distance in zip(raw["metadatas"][0], raw["distances"][0]))], count)
+            hits = self._best_per_segment(
+                [
+                    *hits,
+                    *(
+                        {"id": metadata["segment_id"], "distance": distance}
+                        for metadata, distance in zip(raw["metadatas"][0], raw["distances"][0])
+                    ),
+                ],
+                count,
+            )
         return hits
 
     @staticmethod
@@ -348,16 +372,25 @@ class IndexBuilder:
         return self._embedder
 
     def build(self, *, activate=False, mode="auto", source_id=None, kinds=None, channels=None, progress=None):
-        from mindex.shared.db.fencing import current_attempt, publication_scope
+        from shared.db.fencing import current_attempt, publication_scope
 
         if self.config.queue.backend == "postgres" and current_attempt() is None:
-            from mindex.shared.queue_dispatch import run_index_task
+            from shared.queue_dispatch import run_index_task
 
             if self._embedder is not None:
                 raise RuntimeError("持久索引任务不能传递进程内嵌入适配器；请在 worker 中注入")
-            return run_index_task(self.config, self.store,
-                {"activate": activate, "mode": mode, "source_id": source_id,
-                 "kinds": kinds, "channels": channels}, progress=progress)["index_id"]
+            return run_index_task(
+                self.config,
+                self.store,
+                {
+                    "activate": activate,
+                    "mode": mode,
+                    "source_id": source_id,
+                    "kinds": kinds,
+                    "channels": channels,
+                },
+                progress=progress,
+            )["index_id"]
 
         if progress:
             progress({"stage": "index_wait", "phase": "publish"})
@@ -369,10 +402,15 @@ class IndexBuilder:
                 if channels is not None:
                     raise ValueError("enriched 兼容模式不支持 channels，请使用 auto")
                 return self._legacy_build(activate=activate, mode=mode, source_id=source_id, kinds=kinds)
-            from mindex.processing.channel_index import build_channels
+            from processing.channel_index import build_channels
 
             return build_channels(
-                self, activate=activate, mode=mode, source_id=source_id, kinds=kinds, channels=channels,
+                self,
+                activate=activate,
+                mode=mode,
+                source_id=source_id,
+                kinds=kinds,
+                channels=channels,
                 progress=progress,
             )
 
@@ -416,8 +454,12 @@ class IndexBuilder:
             "INSERT OR IGNORE INTO index_versions(id,spec,status) VALUES(?,?,'building')",
             (index_id, dumps(spec)),
         )
-        vectors = VectorIndex(self.store.root, index_id, create=True,
-                              client=vector_client(self.config, library_id=self.store.library_id))
+        vectors = VectorIndex(
+            self.store.root,
+            index_id,
+            create=True,
+            client=vector_client(self.config, library_id=self.store.library_id),
+        )
         existing = vectors.ids()
         with self.store.run("index"):
             for number, segment in enumerate(snapshots, 1):
@@ -439,7 +481,7 @@ class IndexBuilder:
                     rep_id = fingerprint([index_id, rep_id])
                     if rep_id not in existing:
                         if view == "video":
-                            from mindex.shared.shot_media import ShotMedia
+                            from shared.shot_media import ShotMedia
 
                             a, b = bounds or (0, segment["end"] - segment["start"])
                             with ShotMedia(self.store, cache_probes=False).inference_video(
@@ -502,50 +544,62 @@ def check_index(store: Store, index_id: str, *, config=None) -> list[str]:
         return ["找不到索引版本"]
     from collections import defaultdict
 
-    representations = store.rows('SELECT id,segment_id,view FROM representations WHERE index_id=?', (index_id,))
-    expected = {r['id'] for r in representations}
+    representations = store.rows(
+        "SELECT id,segment_id,view FROM representations WHERE index_id=?", (index_id,)
+    )
+    expected = {r["id"] for r in representations}
     member_views, member_ids = defaultdict(set), defaultdict(set)
     for representation in representations:
-        member_views[representation['segment_id']].add(representation['view'])
-        member_ids[representation['segment_id']].add(representation['id'])
+        member_views[representation["segment_id"]].add(representation["view"])
+        member_ids[representation["segment_id"]].add(representation["id"])
     actual = VectorIndex(store.root, index_id, client=client).ids()
     if expected != actual:
         issues.append(f"向量与元数据不一致：缺少 {len(expected - actual)}，多出 {len(actual - expected)}")
     members = store.rows("SELECT * FROM index_members WHERE index_id=?", (index_id,))
-    from mindex.shared.shot_media import ShotMedia
+    from shared.shot_media import ShotMedia
+
     # 探测缓存绑定文件路径、大小及纳秒 mtime；有效文件不必每次启动 ffprobe。
     media = ShotMedia(store, reuse_checks=True)
     archives = {}
     # SELECT 列里的 json_extract 不在受控改写范围（plans §5），按后端显式双方言。
     source_id_probe = (
         "(SELECT DISTINCT snapshot::jsonb->>'source_id' FROM index_members WHERE index_id=%s)"
-        if store.pg else
-        "(SELECT DISTINCT json_extract(snapshot,'$.source_id') FROM index_members WHERE index_id=?)")
-    references = {r['path']: r for r in store.rows(
-        "SELECT path,source_id,start,end FROM media_references WHERE source_id IN " + source_id_probe,
-        (index_id,))}
+        if store.pg
+        else "(SELECT DISTINCT json_extract(snapshot,'$.source_id') FROM index_members WHERE index_id=?)"
+    )
+    references = {
+        r["path"]: r
+        for r in store.rows(
+            "SELECT path,source_id,start,end FROM media_references WHERE source_id IN " + source_id_probe,
+            (index_id,),
+        )
+    }
     for member in members:
         if not member["complete"]:
             issues.append(f"片段未完成：{member['segment_id']}")
         snapshot = json.loads(member["snapshot"])
         # Validate references against physical shots without materializing media.
-        reference = references.get(snapshot['path'])
+        reference = references.get(snapshot["path"])
         thumbnail = (store.root / snapshot["thumbnail"]).resolve()
         # 集群形态下本节点可能只有元数据：缩略图按权威登记判断存在，不强制本地缓存。
-        from mindex.shared import files
+        from shared import files
 
         record = None if thumbnail.is_file() else files.pointer(store, snapshot["thumbnail"])
-        if (not thumbnail.is_relative_to(store.root)
-                or not (thumbnail.is_file() or (record is not None and record.get("size", 0) > 0))):
+        if not thumbnail.is_relative_to(store.root) or not (
+            thumbnail.is_file() or (record is not None and record.get("size", 0) > 0)
+        ):
             issues.append(f"文件缺失：{snapshot['thumbnail']}")
-        if reference and (reference['source_id'] != snapshot['source_id'] or
-                          abs(reference['start'] - snapshot['start']) > 1e-6 or
-                          abs(reference['end'] - snapshot['end']) > 1e-6):
+        if reference and (
+            reference["source_id"] != snapshot["source_id"]
+            or abs(reference["start"] - snapshot["start"]) > 1e-6
+            or abs(reference["end"] - snapshot["end"]) > 1e-6
+        ):
             issues.append(f"媒体引用区间不一致：{member['segment_id']}")
-        from mindex.processing.subtitle_archive import load_archive
+        from processing.subtitle_archive import load_archive
+
         try:
             media.references(snapshot["source_id"], snapshot["start"], snapshot["end"])
-            sid = snapshot['source_id']
+            sid = snapshot["source_id"]
             if sid not in archives:
                 try:
                     load_archive(store, sid)
@@ -556,10 +610,10 @@ def check_index(store: Store, index_id: str, *, config=None) -> list[str]:
                 raise ValueError(archives[sid])
         except (ValueError, OSError) as exc:
             issues.append(f"Shot/subtitle dependency failure: {exc}")
-        views = member_views[member['segment_id']]
+        views = member_views[member["segment_id"]]
         if "representation_ids" in snapshot:
             manifest_ids = {fingerprint([index_id, rep]) for rep in snapshot["representation_ids"]}
-            stored_ids = member_ids[member['segment_id']]
+            stored_ids = member_ids[member["segment_id"]]
             if manifest_ids != stored_ids:
                 issues.append(f"片段表示清单不一致：{member['segment_id']}")
         expected_views = set(snapshot.get("indexed_views", {"video", *snapshot["views"]}))

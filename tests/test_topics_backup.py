@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import yaml
-from test_backup import restore, seed
 
-from mindex.maintenance.backup import export_backup
-from mindex.maintenance.backup_db import store_at
-from mindex.topics import datasources, profiles
-from mindex.topics.models import ProfileBody
+from maintenance.backup import export_backup
+from maintenance.backup_db import store_at
+from test_backup import restore, seed
+from topics import datasources, profiles
+from topics.models import ProfileBody
 
 SECRET = "brave-secret-unique-98765"
 
@@ -19,12 +19,20 @@ def library(tmp_path, video_file):
     config_path.write_text(yaml.safe_dump({"data_dir": str(config.data_dir), "embedding": {"dimensions": 8}}))
     store = store_at(config.data_dir)
     pid = profiles.create_profile(store, ProfileBody(name="财经号", domain="金融", subtopics=["宏观"]))["id"]
-    sid = datasources.create_source(store, pid, datasources.SourceBody(kind="brave", name="搜索", secret=SECRET))["id"]
+    sid = datasources.create_source(
+        store, pid, datasources.SourceBody(kind="brave", name="搜索", secret=SECRET)
+    )["id"]
     # topic_items/topic_runs 的 source_id 指向选题数据源与档案，不是素材库 sources。
-    store.execute("INSERT INTO topic_items(id,profile_id,source_id,dedup_key,title,fetched_at) "
-                  "VALUES('ti_000000000001',?,?,'k','降息',CURRENT_TIMESTAMP)", (pid, sid))
-    store.execute("INSERT INTO topic_runs(id,source_id,status,config,options) "
-                  "VALUES('tr_000000000001',?,'running','{}','{}')", (pid,))
+    store.execute(
+        "INSERT INTO topic_items(id,profile_id,source_id,dedup_key,title,fetched_at) "
+        "VALUES('ti_000000000001',?,?,'k','降息',CURRENT_TIMESTAMP)",
+        (pid, sid),
+    )
+    store.execute(
+        "INSERT INTO topic_runs(id,source_id,status,config,options) "
+        "VALUES('tr_000000000001',?,'running','{}','{}')",
+        (pid,),
+    )
     return config, sources, config_path, pid, sid
 
 

@@ -1,7 +1,8 @@
 """检查点经不可变对象与数据库指针发布，本地模式保留原子文件语义。"""
+
 from pathlib import Path
 
-from mindex.shared import files
+from shared import files
 
 __all__ = ["key_of", "read_text", "save_text", "sync"]
 

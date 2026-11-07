@@ -1,7 +1,8 @@
 """素材采集清单（``topic_gaps``）：覆盖报告里没有命中的关键画面，按档案汇总，指导素材积累方向。
 
 - 合并：与本档案未完成缺口的描述相近（规范化后相同、文本向量余弦 ≥ ``MERGE_SIMILARITY``，或嵌入不可用时字符
-  二元组 Jaccard ≥ ``MERGE_JACCARD``）时并入，``card_ids`` 记录涉及的选题，出现次数为其长度（同一选题重复打分不重复计数）。
+  二元组 Jaccard ≥ ``MERGE_JACCARD``）时并入，``card_ids`` 记录涉及的选题，
+出现次数为其长度（同一选题重复打分不重复计数）。
 - 批量：``Matcher`` 让缺口向量持久化在 ``topic_gaps``（``embedding``/``embedding_space`` 列，按嵌入空间
   身份指纹失效），每次打分只嵌入没有可用向量的缺口；逐条登记的 ``record`` 是它的一次性包装。
   嵌入量是 O(新增缺口 + 新画面)，不随卡片数 × 历史缺口数相乘。
@@ -17,12 +18,12 @@ from typing import Literal
 
 import numpy as np
 
-from mindex.admin.curation import EntityNotFound
-from mindex.shared.config import StrictModel, fingerprint
-from mindex.topics import cluster, profiles
-from mindex.topics.common import check_id, dumps, loads, new_id, now
-from mindex.topics.items import normalize_title
-from mindex.topics.scoring import jaccard_max
+from admin.curation import EntityNotFound
+from shared.config import StrictModel, fingerprint
+from topics import cluster, profiles
+from topics.common import check_id, dumps, loads, new_id, now
+from topics.items import normalize_title
+from topics.scoring import jaccard_max
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +67,9 @@ class Matcher:
         if self._loaded:
             return
         self._loaded = True
-        self._rows = self.store.rows("SELECT * FROM topic_gaps WHERE profile_id=? AND status='open'", (self.profile_id,))
+        self._rows = self.store.rows(
+            "SELECT * FROM topic_gaps WHERE profile_id=? AND status='open'", (self.profile_id,)
+        )
         space = self._identity()
         if not space:
             return
@@ -98,8 +101,10 @@ class Matcher:
             self._vectors[gap["id"]] = vector
             self._matrix = None
             if space:
-                self.store.execute("UPDATE topic_gaps SET embedding=?,embedding_space=? WHERE id=?",
-                                   (np.asarray(vector, dtype=np.float32).tobytes(), space, gap["id"]))
+                self.store.execute(
+                    "UPDATE topic_gaps SET embedding=?,embedding_space=? WHERE id=?",
+                    (np.asarray(vector, dtype=np.float32).tobytes(), space, gap["id"]),
+                )
         return {text: batch[len(missing) + index] for index, text in enumerate(texts)}
 
     def _match(self, visual: str, vector) -> dict | None:
@@ -122,13 +127,36 @@ class Matcher:
         gap_id = new_id("tg")
         space = self._identity() if vector is not None else None
         blob = np.asarray(vector, dtype=np.float32).tobytes() if (vector is not None and space) else None
-        self.store.execute("INSERT INTO topic_gaps(id,profile_id,card_id,card_ids,visual,count,status,"
-                           "embedding,embedding_space,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                           (gap_id, self.profile_id, card_id, dumps([card_id]), visual, 1, "open",
-                            blob, space if blob else None, stamp, stamp))
-        row = {"id": gap_id, "profile_id": self.profile_id, "card_id": card_id, "card_ids": dumps([card_id]),
-               "visual": visual, "count": 1, "status": "open", "embedding": blob,
-               "embedding_space": space if blob else None, "created_at": stamp, "updated_at": stamp}
+        self.store.execute(
+            "INSERT INTO topic_gaps(id,profile_id,card_id,card_ids,visual,count,status,"
+            "embedding,embedding_space,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                gap_id,
+                self.profile_id,
+                card_id,
+                dumps([card_id]),
+                visual,
+                1,
+                "open",
+                blob,
+                space if blob else None,
+                stamp,
+                stamp,
+            ),
+        )
+        row = {
+            "id": gap_id,
+            "profile_id": self.profile_id,
+            "card_id": card_id,
+            "card_ids": dumps([card_id]),
+            "visual": visual,
+            "count": 1,
+            "status": "open",
+            "embedding": blob,
+            "embedding_space": space if blob else None,
+            "created_at": stamp,
+            "updated_at": stamp,
+        }
         self._rows.append(row)
         self._matrix = None  # 追加了行，矩阵按 _rows 顺序缓存必须失效
         if vector is not None:
@@ -146,8 +174,10 @@ class Matcher:
                 ids = loads(found["card_ids"], [])
                 if card_id not in ids:
                     ids.append(card_id)
-                self.store.execute("UPDATE topic_gaps SET card_id=?,card_ids=?,count=?,updated_at=? WHERE id=?",
-                                   (card_id, dumps(ids), len(ids), now(), found["id"]))
+                self.store.execute(
+                    "UPDATE topic_gaps SET card_id=?,card_ids=?,count=?,updated_at=? WHERE id=?",
+                    (card_id, dumps(ids), len(ids), now(), found["id"]),
+                )
                 # 同步缓存行，避免后续调用以过期的 card_ids 把计数写回旧值。
                 found.update(card_id=card_id, card_ids=dumps(ids), count=len(ids), updated_at=now())
                 continue
@@ -163,23 +193,39 @@ def record(store, profile_id: str, card_id: str, visuals: list[str], *, embedder
 
 def _view(row: dict, titles: dict[str, str]) -> dict:
     ids = loads(row["card_ids"], [])
-    return {"id": row["id"], "profile_id": row["profile_id"], "visual": row["visual"], "count": row["count"],
-            "status": row["status"], "card_ids": ids, "cards": [{"id": i, "title": titles.get(i)} for i in ids],
-            "created_at": row["created_at"], "updated_at": row["updated_at"]}
+    return {
+        "id": row["id"],
+        "profile_id": row["profile_id"],
+        "visual": row["visual"],
+        "count": row["count"],
+        "status": row["status"],
+        "card_ids": ids,
+        "cards": [{"id": i, "title": titles.get(i)} for i in ids],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
 
 
 def list_gaps(store, profile_id: str, *, status: str | None = "open", limit: int = 200) -> list[dict]:
     profiles.get_profile(store, profile_id)
     if status in (None, "all"):
-        rows = store.rows("SELECT * FROM topic_gaps WHERE profile_id=? ORDER BY status DESC, count DESC, created_at "
-                          "LIMIT ?", (profile_id, limit))
+        rows = store.rows(
+            "SELECT * FROM topic_gaps WHERE profile_id=? ORDER BY status DESC, count DESC, created_at "
+            "LIMIT ?",
+            (profile_id, limit),
+        )
     else:
         if status not in ("open", "done"):
             raise ValueError(f"未知的缺口状态：{status}")
-        rows = store.rows("SELECT * FROM topic_gaps WHERE profile_id=? AND status=? ORDER BY count DESC, created_at "
-                          "LIMIT ?", (profile_id, status, limit))
-    titles = {r["id"]: r["title"] for r in store.rows("SELECT id,title FROM topic_cards WHERE profile_id=?",
-                                                     (profile_id,))}
+        rows = store.rows(
+            "SELECT * FROM topic_gaps WHERE profile_id=? AND status=? ORDER BY count DESC, created_at "
+            "LIMIT ?",
+            (profile_id, status, limit),
+        )
+    titles = {
+        r["id"]: r["title"]
+        for r in store.rows("SELECT id,title FROM topic_cards WHERE profile_id=?", (profile_id,))
+    }
     return [_view(row, titles) for row in rows]
 
 
@@ -190,8 +236,10 @@ def update_gap(store, gap_id: str, changes: GapChanges) -> dict:
         raise EntityNotFound("找不到素材缺口")
     store.execute("UPDATE topic_gaps SET status=?,updated_at=? WHERE id=?", (changes.status, now(), gap_id))
     row = store.one("SELECT * FROM topic_gaps WHERE id=?", (gap_id,))
-    titles = {r["id"]: r["title"] for r in store.rows("SELECT id,title FROM topic_cards WHERE profile_id=?",
-                                                     (row["profile_id"],))}
+    titles = {
+        r["id"]: r["title"]
+        for r in store.rows("SELECT id,title FROM topic_cards WHERE profile_id=?", (row["profile_id"],))
+    }
     return _view(row, titles)
 
 
@@ -208,6 +256,13 @@ def export_csv(store, profile_id: str, *, status: str | None = "all") -> bytes:
     writer.writerow(["画面", "出现次数", "状态", "相关选题", "更新时间"])
     for gap in rows:
         titles = "；".join(c["title"] or c["id"] for c in gap["cards"])
-        writer.writerow([cell(gap["visual"]), gap["count"], "已采集" if gap["status"] == "done" else "待采集",
-                         cell(titles), gap["updated_at"]])
+        writer.writerow(
+            [
+                cell(gap["visual"]),
+                gap["count"],
+                "已采集" if gap["status"] == "done" else "待采集",
+                cell(titles),
+                gap["updated_at"],
+            ]
+        )
     return ("\ufeff" + buffer.getvalue()).encode("utf-8")

@@ -11,10 +11,10 @@ import logging
 import re
 from uuid import uuid4
 
-from mindex.shared.trace import current
-from mindex.studio import executor, studio
-from mindex.studio.studio_artifacts import safe_path, sanitized
-from mindex.studio.studio_logs import ExecutionLog, active_log, diagnostic_event
+from shared.trace import current
+from studio import executor, studio
+from studio.artifacts import safe_path, sanitized
+from studio.logs import ExecutionLog, active_log, diagnostic_event
 
 from . import signatures
 from .persistence import load
@@ -40,9 +40,26 @@ class VersionDiagnostics:
         diagnostic_event(kind, value)
 
 
-def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder=None, embedder=None,
-            writer=None, video_generator=None, animator=None, animation_capture=None, cancelled=None,
-            image_generator=None, music_generator=None, force=False):
+def execute(
+    config,
+    job_id,
+    w,
+    p,
+    stage,
+    sid=None,
+    *,
+    speaker=None,
+    storyboarder=None,
+    embedder=None,
+    writer=None,
+    video_generator=None,
+    animator=None,
+    animation_capture=None,
+    cancelled=None,
+    image_generator=None,
+    music_generator=None,
+    force=False,
+):
     stage_handler = handler(stage)
     stage_handler.prepare(config, w, p, sid)
     spec = signatures.specification(config, job_id, w, p, stage, sid)
@@ -52,28 +69,49 @@ def execute(config, job_id, w, p, stage, sid=None, *, speaker=None, storyboarder
     diagnostics = VersionDiagnostics(directory)
     diagnostics.record("inputs", {"stage": stage, "shot_id": sid, **spec})
     token = current.set(diagnostics)
-    from mindex.shared.external_calls import guard_service, scope
-    from mindex.shared.storage import Store
+    from shared.external_calls import guard_service, scope
+    from shared.storage import Store
 
-    services = {"speaker": speaker, "storyboarder": storyboarder, "embedder": embedder, "writer": writer,
-                "video_generator": video_generator, "animator": animator,
-                "image_generator": image_generator, "music_generator": music_generator}
+    services = {
+        "speaker": speaker,
+        "storyboarder": storyboarder,
+        "embedder": embedder,
+        "writer": writer,
+        "video_generator": video_generator,
+        "animator": animator,
+        "image_generator": image_generator,
+        "music_generator": music_generator,
+    }
     services = {name: guard_service(service, name) for name, service in services.items()}
     try:
         with scope(Store.open(config), [job_id, stage, sid, spec["signature"]]):
-            data, files = stage_handler.run(RunContext(
-            config=config, job_id=job_id, w=w, p=p, sid=sid, spec=spec, directory=directory,
-            version_id=vid, diagnostics=diagnostics,
-                services={**services, "animation_capture": animation_capture, "cancelled": cancelled, "force": force},
-            ))
+            data, files = stage_handler.run(
+                RunContext(
+                    config=config,
+                    job_id=job_id,
+                    w=w,
+                    p=p,
+                    sid=sid,
+                    spec=spec,
+                    directory=directory,
+                    version_id=vid,
+                    diagnostics=diagnostics,
+                    services={
+                        **services,
+                        "animation_capture": animation_capture,
+                        "cancelled": cancelled,
+                        "force": force,
+                    },
+                )
+            )
         add_version(config, job_id, w, stage, sid, data=data, files=files, version_id=vid, **spec)
         if stage_handler.selects:
             choose(w, p, stage, sid, vid)
         persist(config, job_id, w)
         return vid
     except Exception as exc:
-        from mindex.shared.db.locks_pg import LeaseLost
-        from mindex.shared.task_cancel import TaskCancelled
+        from shared.db.locks_pg import LeaseLost
+        from shared.task_cancel import TaskCancelled
 
         if isinstance(exc, (LeaseLost, TaskCancelled)):
             raise
@@ -115,13 +153,26 @@ def cancel_remaining(nodes):
     return count
 
 
-def run_build(config, job_id, build_id, *, speaker=None, storyboarder=None, embedder=None, writer=None,
-              video_generator=None, animator=None, animation_capture=None, cancel_event=None,
-              image_generator=None, music_generator=None):
-    from mindex.shared.db.fencing import current_attempt
+def run_build(
+    config,
+    job_id,
+    build_id,
+    *,
+    speaker=None,
+    storyboarder=None,
+    embedder=None,
+    writer=None,
+    video_generator=None,
+    animator=None,
+    animation_capture=None,
+    cancel_event=None,
+    image_generator=None,
+    music_generator=None,
+):
+    from shared.db.fencing import current_attempt
 
     if config.queue.backend == "postgres" and current_attempt() is None:
-        from mindex.studio.tasks import publication, submit, wait
+        from studio.tasks import publication, submit, wait
 
         with publication(config, job_id):
             task_id = submit(config, job_id, "build", {}, build_id=build_id)
@@ -130,18 +181,42 @@ def run_build(config, job_id, build_id, *, speaker=None, storyboarder=None, embe
     token = active_log.set(log)
     try:
         return _run_build(
-            config, job_id, build_id, log, speaker=speaker, storyboarder=storyboarder, embedder=embedder,
-            writer=writer, video_generator=video_generator, animator=animator,
-            animation_capture=animation_capture, cancel_event=cancel_event,
-            image_generator=image_generator, music_generator=music_generator,
+            config,
+            job_id,
+            build_id,
+            log,
+            speaker=speaker,
+            storyboarder=storyboarder,
+            embedder=embedder,
+            writer=writer,
+            video_generator=video_generator,
+            animator=animator,
+            animation_capture=animation_capture,
+            cancel_event=cancel_event,
+            image_generator=image_generator,
+            music_generator=music_generator,
         )
     finally:
         active_log.reset(token)
 
 
-def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None, embedder=None,
-               writer=None, video_generator=None, animator=None, animation_capture=None, cancel_event=None,
-               image_generator=None, music_generator=None):
+def _run_build(
+    config,
+    job_id,
+    build_id,
+    log,
+    *,
+    speaker=None,
+    storyboarder=None,
+    embedder=None,
+    writer=None,
+    video_generator=None,
+    animator=None,
+    animation_capture=None,
+    cancel_event=None,
+    image_generator=None,
+    music_generator=None,
+):
     w = load(config, job_id)
     build = next(b for b in w["builds"] if b["id"] == build_id)
     p = plan(w, build["plan_id"])
@@ -163,7 +238,8 @@ def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None
         stage, sid = node["stage"], node["shot_id"]
         node_plan = node.get("plan_id")
         p = plan(w, node_plan) if node_plan else main
-        # 在节点之间检查取消：已开始执行的节点照常完成（生成画面在轮询之间自行检查并以「已取消」失败）。auto_split 重新预检替换
+        # 在节点之间检查取消：已开始执行的节点照常完成（生成画面在轮询之间自行检查并以「已取消」失败）。
+        # auto_split 重新预检替换
         # 后续节点后，下一轮迭代立即在这里检查，新展开的节点同样会被取消。
         if cancel_check():
             cancelled = True
@@ -213,8 +289,8 @@ def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None
                     )
                     node.update(status="complete", version=vid)
             except Exception as exc:  # 失败节点不得阻断互不依赖的节点
-                from mindex.shared.db.locks_pg import LeaseLost
-                from mindex.shared.task_cancel import TaskCancelled
+                from shared.db.locks_pg import LeaseLost
+                from shared.task_cancel import TaskCancelled
 
                 if isinstance(exc, (LeaseLost, TaskCancelled)):
                     raise
@@ -239,13 +315,17 @@ def _run_build(config, job_id, build_id, log, *, speaker=None, storyboarder=None
                 failed.add(scoped(node_plan, node["key"].split("/", 1)[-1]))
         if build.get("auto_split") and stage in ("script", "split"):
             if node["status"] not in ("complete", "reused"):
-                for pending in build["nodes"][position + 1:]:
-                    pending.update(action="blocked", reason="生成文案失败" if stage == "script" else "拆分镜失败")
+                for pending in build["nodes"][position + 1 :]:
+                    pending.update(
+                        action="blocked", reason="生成文案失败" if stage == "script" else "拆分镜失败"
+                    )
             elif stage == "split":
                 # 分镜刚落定：按新分镜重新预检，替换其后全部节点（之前的节点保持原记录）。
                 checked = preflight(config, job_id, w, p, force=build["force"])
-                build["nodes"][position + 1:] = [
-                    {**n, "status": "pending"} for n in checked["nodes"] if n["stage"] not in ("script", "split")
+                build["nodes"][position + 1 :] = [
+                    {**n, "status": "pending"}
+                    for n in checked["nodes"]
+                    if n["stage"] not in ("script", "split")
                 ]
         node["finished_at"] = studio.now()
         persist(config, job_id, w)
@@ -332,10 +412,13 @@ def recover(config, job_id, w):
     for build in w["builds"]:
         if build["status"] == "running":
             if config.queue.backend == "postgres":
-                from mindex.shared.storage import Store
+                from shared.storage import Store
 
-                task = Store.open(config).one("SELECT status FROM studio_tasks WHERE job_id=? AND build_id=? "
-                                              "ORDER BY created_at DESC LIMIT 1", (job_id, build["id"]))
+                task = Store.open(config).one(
+                    "SELECT status FROM studio_tasks WHERE job_id=? AND build_id=? "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (job_id, build["id"]),
+                )
                 if task and task["status"] in {"queued", "running"}:
                     continue
             for node in build["nodes"]:

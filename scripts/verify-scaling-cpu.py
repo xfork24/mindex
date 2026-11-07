@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """独立创建后端执行真实 CPU source 吞吐闸门；不要与其他容量负载同时运行。"""
+
 from __future__ import annotations
 
 import importlib.util
@@ -20,7 +21,7 @@ def main():
     result = verifier.main(suite="cpu")
     # main 的 --output 显式指定时，将吞吐原始数据与后端环境证据放在同一目录。
     if "--output" in sys.argv:
-        output = Path(sys.argv[sys.argv.index("--output")+1])
+        output = Path(sys.argv[sys.argv.index("--output") + 1])
         measured = ROOT / "artifacts/scaling-cpu-throughput-result.json"
         if measured.is_file() and measured.stat().st_mtime >= started:
             shutil.copy2(measured, output / "cpu-result.json")
@@ -31,7 +32,7 @@ def main():
             report = json.loads(report_path.read_text())
             report["scope"] = "单机真实 CPU source 吞吐，固定每 worker 媒体线程预算；不替代双机或检索容量"
             report["cpu_result"] = json.loads(measured.read_text())
-            report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2)+"\n")
+            report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     return result
 
 

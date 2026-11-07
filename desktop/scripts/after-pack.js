@@ -29,7 +29,11 @@ function* files(dir) {
 }
 
 function sign(target, extra = []) {
-  childProcess.execFileSync("codesign", ["--force", "--sign", "-", "--timestamp=none", ...extra, target], { stdio: "pipe" });
+  childProcess.execFileSync(
+    "codesign",
+    ["--force", "--sign", "-", "--timestamp=none", ...extra, target],
+    { stdio: "pipe" },
+  );
 }
 
 exports.default = async function afterPack(context) {

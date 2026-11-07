@@ -8,19 +8,22 @@ import sys
 import pytest
 from fastapi.testclient import TestClient
 
-from mindex.api import create_app
-from mindex.settings import browser_install
-from mindex.settings.browser_install import BrowserInstaller
-from mindex.studio import animation_capture
+from api import create_app
+from settings import browser_install
+from settings.browser_install import BrowserInstaller
+from studio import animation_capture
 
-SUCCESS = [sys.executable, "-c",
-           "import os, pathlib, sys\n"
-           "root = pathlib.Path(os.environ['PLAYWRIGHT_BROWSERS_PATH'])\n"
-           "print('Downloading Chrome Headless Shell 10%\\r 50%\\r 100%', flush=True)\n"
-           "target = root / ('chromium_headless_shell-' + sys.argv[1])\n"
-           "target.mkdir(parents=True)\n"
-           "(target / 'INSTALLATION_COMPLETE').write_text('')\n"
-           "print('done', flush=True)\n"]
+SUCCESS = [
+    sys.executable,
+    "-c",
+    "import os, pathlib, sys\n"
+    "root = pathlib.Path(os.environ['PLAYWRIGHT_BROWSERS_PATH'])\n"
+    "print('Downloading Chrome Headless Shell 10%\\r 50%\\r 100%', flush=True)\n"
+    "target = root / ('chromium_headless_shell-' + sys.argv[1])\n"
+    "target.mkdir(parents=True)\n"
+    "(target / 'INSTALLATION_COMPLETE').write_text('')\n"
+    "print('done', flush=True)\n",
+]
 
 
 def test_progress_line_handles_windows_crlf_translation():
@@ -29,10 +32,10 @@ def test_progress_line_handles_windows_crlf_translation():
     （macOS/Linux 的管道输出无 \\r\\n 转换，原先的 rstrip("\\n") 恰好也能工作，
     因此这个差异只会在 Windows 上暴露。）
     """
-    from mindex.settings.browser_install import progress_line
+    from settings.browser_install import progress_line
 
     assert progress_line(b"Downloading 10%\r 50%\r 100%\r\n") == "100%"  # Windows 的 \r\n
-    assert progress_line(b"Downloading 10%\r 50%\r 100%\n") == "100%"    # POSIX 的 \n
+    assert progress_line(b"Downloading 10%\r 50%\r 100%\n") == "100%"  # POSIX 的 \n
     assert progress_line(b"done\r\n") == "done"
     assert progress_line(b"done\n") == "done"
     assert progress_line(b"\r\n") == ""
@@ -44,15 +47,26 @@ def test_install_success_reports_progress_and_installed(monkeypatch, tmp_path):
     monkeypatch.setattr(browser_install, "expected_revision", lambda: "9999")
     installer = BrowserInstaller([*SUCCESS, "9999"])
     before = installer.state()
-    assert (before["installed"], before["task"]["status"], before["path"]) == (False, "idle", str(tmp_path / "browsers"))
+    assert (before["installed"], before["task"]["status"], before["path"]) == (
+        False,
+        "idle",
+        str(tmp_path / "browsers"),
+    )
     assert installer.start()["task"]["status"] == "running"
     installer.wait(30)
     state = installer.state()
-    assert state["installed"] is True and state["task"]["status"] == "complete" and state["task"]["error"] is None
+    assert (
+        state["installed"] is True
+        and state["task"]["status"] == "complete"
+        and state["task"]["error"] is None
+    )
     # 探针：同一替身以 subprocess.run 读法对照（独立 revision 避免目录已存在），区分
     # 「替身 stdout 丢失」（trampoline/句柄传递问题）与「Popen 逐行读取丢失」。
     probe = subprocess.run([*SUCCESS, "9998"], capture_output=True, timeout=60, check=False)
-    detail = f"task.log={state['task']['log']!r} probe.returncode={probe.returncode} probe.stdout={probe.stdout!r} probe.stderr={probe.stderr[-400:]!r}"
+    detail = (
+        f"task.log={state['task']['log']!r} probe.returncode={probe.returncode} "
+        f"probe.stdout={probe.stdout!r} probe.stderr={probe.stderr[-400:]!r}"
+    )
     assert state["task"]["log"].splitlines() == ["100%", "done"], detail  # \r 进度只保留最后一段
     assert state["task"]["finished_at"]
 
@@ -60,7 +74,9 @@ def test_install_success_reports_progress_and_installed(monkeypatch, tmp_path):
 def test_install_failure_and_concurrency(monkeypatch, tmp_path):
     monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path / "browsers"))
     monkeypatch.setattr(browser_install, "expected_revision", lambda: "9999")
-    failing = BrowserInstaller([sys.executable, "-c", "import sys, time; print('network down'); time.sleep(0.5); sys.exit(7)"])
+    failing = BrowserInstaller(
+        [sys.executable, "-c", "import sys, time; print('network down'); time.sleep(0.5); sys.exit(7)"]
+    )
     failing.start()
     with pytest.raises(RuntimeError, match="正在安装"):
         failing.start()

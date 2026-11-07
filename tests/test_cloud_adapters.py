@@ -1,4 +1,7 @@
-"""线上厂商适配器契约：TokenHub 嵌入 / OpenAI-chat ASR / MiniMax TTS / DashScope TTS / llama_template 门控。"""
+(
+    """线上厂商适配器契约：TokenHub 嵌入 / OpenAI-chat ASR / MiniMax TTS / DashScope TTS / llama_template """
+    """门控。"""
+)
 
 from __future__ import annotations
 
@@ -8,19 +11,17 @@ import json
 import httpx
 import pytest
 
-from mindex.models import adapters, embedders, qwen
-from mindex.models.adapters import ModelError, make_embedder, make_speaker, make_transcriber
-from mindex.models.embedders import TokenHubEmbedder
-from mindex.models.qwen import QwenAnalyzer
-from mindex.models.speech import DashScopeSpeaker, MiniMaxSpeaker
-from mindex.models.storyboard import QwenStoryboarder
-from mindex.models.transcribers import MiniMaxTranscriber, OpenAIChatTranscriber
+from models import adapters, embedders, qwen
+from models.adapters import ModelError, make_embedder, make_speaker, make_transcriber
+from models.embedders import TokenHubEmbedder
+from models.qwen import QwenAnalyzer
+from models.speech import DashScopeSpeaker, MiniMaxSpeaker
+from models.storyboard import QwenStoryboarder
+from models.transcribers import MiniMaxTranscriber, OpenAIChatTranscriber
 
 
 def test_tokenhub_identity_is_pure_config(config, monkeypatch):
-    monkeypatch.setattr(
-        adapters, "request", lambda *a, **kw: pytest.fail("identity() 不应发起网络请求")
-    )
+    monkeypatch.setattr(adapters, "request", lambda *a, **kw: pytest.fail("identity() 不应发起网络请求"))
     embedder = TokenHubEmbedder(config)
     identity = embedder.identity()
     assert identity == {
@@ -51,9 +52,7 @@ def test_tokenhub_text_normalizes_and_validates(config, monkeypatch):
     assert captured["json"]["input"] == [{"type": "text", "text": "中文查询"}]
     assert captured["json"]["model"] == config.embedding.model
 
-    monkeypatch.setattr(
-        adapters, "request", lambda *a, **kw: {"data": [{"embedding": [1.0, 2.0, 3.0]}]}
-    )
+    monkeypatch.setattr(adapters, "request", lambda *a, **kw: {"data": [{"embedding": [1.0, 2.0, 3.0]}]})
     with pytest.raises(ModelError, match="维度"):
         TokenHubEmbedder(config).text(["再次"])
 
@@ -230,13 +229,15 @@ def test_analyzer_retries_invalid_json_empty_and_malformed_responses(config, mon
     config.analyzer.base_url = "https://api.minimax.cn/v1"
     config.analyzer.model = "MiniMax-M3.1-Flash-Preview"
     config.analyzer.llama_template = False
-    replies = iter([
-        {"choices": [{"message": {"content": '{"description":'}}]},
-        {"choices": [{"finish_reason": "length", "message": {"reasoning_content": "thinking"}}]},
-        {"choices": []},
-        {"choices": [{"message": {"content": ""}}]},
-        {"choices": [{"message": {"content": '```json\n{"description":"机场大厅"}\n```'}}]},
-    ])
+    replies = iter(
+        [
+            {"choices": [{"message": {"content": '{"description":'}}]},
+            {"choices": [{"finish_reason": "length", "message": {"reasoning_content": "thinking"}}]},
+            {"choices": []},
+            {"choices": [{"message": {"content": ""}}]},
+            {"choices": [{"message": {"content": '```json\n{"description":"机场大厅"}\n```'}}]},
+        ]
+    )
     calls, delays = [], []
 
     def reply(method, url, **kwargs):
@@ -260,7 +261,11 @@ def test_analysis_prompts_request_only_compact_required_json(config, monkeypatch
 
     def reply(method, url, **kwargs):
         bodies.append(kwargs["json"])
-        text = '{"description":"游客在机场花园拍照","actions":["拍照"]}' if len(bodies) == 1 else '{"groups":[[0],[1]]}'
+        text = (
+            '{"description":"游客在机场花园拍照","actions":["拍照"]}'
+            if len(bodies) == 1
+            else '{"groups":[[0],[1]]}'
+        )
         return {"choices": [{"finish_reason": "stop", "message": {"content": text}}]}
 
     monkeypatch.setattr(adapters, "request", reply)
@@ -283,20 +288,45 @@ def test_analysis_prompts_request_only_compact_required_json(config, monkeypatch
     assert all("JSON 之外的任何文字" in b["messages"][0]["content"] for b in bodies)
 
 
-@pytest.mark.parametrize("url,model,template,expected", [
-    ("https://open.bigmodel.cn/api/coding/paas/v4", "GLM-5.3-Flash", False,
-     {"reasoning_effort": "low", "response_format": {"type": "json_object"}}),
-    ("https://open.bigmodel.cn/api/paas/v4", "glm-4.5v", False,
-     {"thinking": {"type": "disabled"}, "response_format": {"type": "json_object"}}),
-    ("https://api.minimax.cn/v1", "MiniMax-M3.1-Flash-Preview", False,
-     {"reasoning_effort": "low", "reasoning_split": True}),
-    ("https://api.minimax.io/v1", "MiniMax-M3", False,
-     {"thinking": {"type": "disabled"}, "reasoning_split": True}),
-    ("http://127.0.0.1:4040/v1", "qwen", True,
-     {"chat_template_kwargs": {"enable_thinking": False}, "response_format": {"type": "json_object"}}),
-    ("https://custom.example.com/v1", "custom", False, {}),
-])
-def test_analysis_calls_apply_supported_low_thinking_controls(config, monkeypatch, url, model, template, expected):
+@pytest.mark.parametrize(
+    "url,model,template,expected",
+    [
+        (
+            "https://open.bigmodel.cn/api/coding/paas/v4",
+            "GLM-5.3-Flash",
+            False,
+            {"reasoning_effort": "low", "response_format": {"type": "json_object"}},
+        ),
+        (
+            "https://open.bigmodel.cn/api/paas/v4",
+            "glm-4.5v",
+            False,
+            {"thinking": {"type": "disabled"}, "response_format": {"type": "json_object"}},
+        ),
+        (
+            "https://api.minimax.cn/v1",
+            "MiniMax-M3.1-Flash-Preview",
+            False,
+            {"reasoning_effort": "low", "reasoning_split": True},
+        ),
+        (
+            "https://api.minimax.io/v1",
+            "MiniMax-M3",
+            False,
+            {"thinking": {"type": "disabled"}, "reasoning_split": True},
+        ),
+        (
+            "http://127.0.0.1:4040/v1",
+            "qwen",
+            True,
+            {"chat_template_kwargs": {"enable_thinking": False}, "response_format": {"type": "json_object"}},
+        ),
+        ("https://custom.example.com/v1", "custom", False, {}),
+    ],
+)
+def test_analysis_calls_apply_supported_low_thinking_controls(
+    config, monkeypatch, url, model, template, expected
+):
     config.analyzer.base_url, config.analyzer.model, config.analyzer.llama_template = url, model, template
     bodies = []
 
@@ -306,7 +336,9 @@ def test_analysis_calls_apply_supported_low_thinking_controls(config, monkeypatc
 
     monkeypatch.setattr(adapters, "request", reply)
     assert QwenAnalyzer(config).group_scenes([{"start": 0, "end": 1}]) == [[0]]
-    actual = {k: v for k, v in bodies[0].items() if k not in {"model", "temperature", "max_tokens", "messages"}}
+    actual = {
+        k: v for k, v in bodies[0].items() if k not in {"model", "temperature", "max_tokens", "messages"}
+    }
     assert actual == expected
 
 
@@ -337,8 +369,15 @@ def test_scene_grouping_compacts_historical_descriptions(config, monkeypatch):
         return {"choices": [{"message": {"content": '{"groups":[[0]]}'}}]}
 
     monkeypatch.setattr(adapters, "request", reply)
-    units = [{"start": 0.123456, "end": 1.123456, "description": "花园" * 1000,
-              "scene": ["机场", "花园"], "unused": "不需要"}]
+    units = [
+        {
+            "start": 0.123456,
+            "end": 1.123456,
+            "description": "花园" * 1000,
+            "scene": ["机场", "花园"],
+            "unused": "不需要",
+        }
+    ]
     assert QwenAnalyzer(config).group_scenes(units) == [[0]]
     sent = json.loads(captured[0]["messages"][1]["content"][0]["text"])[0]
     assert len(sent["description"]) == 160
@@ -361,21 +400,31 @@ def test_analyzer_response_retries_exhaust_and_keep_last_reason(config, monkeypa
     with pytest.raises(ModelError, match=rf"连续 {retries + 1} 次无效.*重试已耗尽.*有效 JSON"):
         QwenAnalyzer(config)._chat([], "指令")
     assert len(calls) == retries + 1
-    assert delays == [min(2 ** i, 8) for i in range(retries)]
+    assert delays == [min(2**i, 8) for i in range(retries)]
 
 
-@pytest.mark.parametrize("payload", [
-    {"choices": [{"finish_reason": "stop", "message": {"content": "未完成的 JSON：" + "原文" * 5000}}]},
-    {"choices": [{"finish_reason": "length", "message": {"content": "", "reasoning_content": "原始推理"}}]},
-    {"choices": [{"message": {"content": ""}}]},
-    {"choices": []},
-])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"choices": [{"finish_reason": "stop", "message": {"content": "未完成的 JSON：" + "原文" * 5000}}]},
+        {
+            "choices": [
+                {"finish_reason": "length", "message": {"content": "", "reasoning_content": "原始推理"}}
+            ]
+        },
+        {"choices": [{"message": {"content": ""}}]},
+        {"choices": []},
+    ],
+)
 def test_analyzer_logs_full_invalid_response_even_on_final_attempt(config, monkeypatch, caplog, payload):
     config.analyzer.model = "GLM-5.3-Flash"
     config.analyzer.response_retries = 0
     config.analyzer.api_key = "request-secret"
     monkeypatch.setattr(adapters, "request", lambda *a, **kw: payload)
-    with caplog.at_level("WARNING", logger="mindex.models.qwen"), pytest.raises(ModelError, match="自动重试已耗尽"):
+    with (
+        caplog.at_level("WARNING", logger="models.qwen"),
+        pytest.raises(ModelError, match="自动重试已耗尽"),
+    ):
         QwenAnalyzer(config)._chat([], "request-instructions")
     assert len(caplog.records) == 1
     message = caplog.records[0].getMessage()
@@ -393,7 +442,9 @@ def test_analyzer_retries_non_json_http_body(config, monkeypatch):
         req = httpx.Request(method, url)
         if len(calls) < 3:
             return httpx.Response(200, text="{truncated", request=req)
-        return httpx.Response(200, json={"choices": [{"message": {"content": '{"groups":[[0]]}'}}]}, request=req)
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": '{"groups":[[0]]}'}}]}, request=req
+        )
 
     monkeypatch.setattr(adapters.httpx, "request", wire)
     monkeypatch.setattr(adapters.time, "sleep", delays.append)
@@ -406,8 +457,9 @@ def test_analyzer_does_not_repeat_permanent_http_failure(config, monkeypatch):
 
     def wire(method, url, **kwargs):
         calls.append(kwargs)
-        return httpx.Response(401, json={"error": {"message": "invalid API key"}},
-                              request=httpx.Request(method, url))
+        return httpx.Response(
+            401, json={"error": {"message": "invalid API key"}}, request=httpx.Request(method, url)
+        )
 
     monkeypatch.setattr(adapters.httpx, "request", wire)
     monkeypatch.setattr(adapters.time, "sleep", lambda _: pytest.fail("401 should not retry"))
@@ -424,7 +476,9 @@ def test_analyzer_retries_http_500_until_json_response(config, monkeypatch):
         req = httpx.Request(method, url)
         if len(calls) < 3:
             return httpx.Response(500, json={"error": {"message": "temporary server error"}}, request=req)
-        return httpx.Response(200, json={"choices": [{"message": {"content": '{"answer":"ok"}'}}]}, request=req)
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": '{"answer":"ok"}'}}]}, request=req
+        )
 
     monkeypatch.setattr(adapters.httpx, "request", wire)
     monkeypatch.setattr(adapters.time, "sleep", delays.append)
@@ -435,13 +489,25 @@ def test_analyzer_retries_http_500_until_json_response(config, monkeypatch):
 def test_analyzer_retry_policy_preserves_existing_analysis_key(config):
     original = config.analysis_key
     old_config = config.analyzer.model_dump(
-        exclude={"timeout", "api_key_env", "response_retries", "initial_output_tokens", "max_output_tokens", "thinking_mode"}
+        exclude={
+            "timeout",
+            "api_key_env",
+            "response_retries",
+            "initial_output_tokens",
+            "max_output_tokens",
+            "thinking_mode",
+        }
     )
-    from mindex.shared.config import fingerprint
+    from shared.config import fingerprint
 
-    assert original == fingerprint({
-        "prompt": 2, "model": old_config, "deployment": config.analyzer_deployment, "layout": config.layout_key,
-    })
+    assert original == fingerprint(
+        {
+            "prompt": 2,
+            "model": old_config,
+            "deployment": config.analyzer_deployment,
+            "layout": config.layout_key,
+        }
+    )
     config.analyzer.response_retries = 20
     config.analyzer.initial_output_tokens = 8000
     config.analyzer.max_output_tokens = 32768
@@ -464,24 +530,37 @@ def test_scene_grouping_increases_budget_after_reasoning_exhausts_tokens(config,
     assert budgets == [12768, 25536, 51072] and delays == [1, 2]
 
 
-@pytest.mark.parametrize("cap,expected", [
-    (4096, [4096] * 6),
-    (30000, [12768, 25536, 30000, 30000, 30000, 30000]),
-    (131072, [12768, 25536, 51072, 102144, 131072, 131072]),
-])
+@pytest.mark.parametrize(
+    "cap,expected",
+    [
+        (4096, [4096] * 6),
+        (30000, [12768, 25536, 30000, 30000, 30000, 30000]),
+        (131072, [12768, 25536, 51072, 102144, 131072, 131072]),
+    ],
+)
 def test_truncated_json_is_rejected_and_budget_growth_is_capped(config, monkeypatch, cap, expected):
     config.analyzer.max_output_tokens = cap
     budgets, delays = [], []
 
     def reply(method, url, **kwargs):
         budgets.append(kwargs["json"]["max_tokens"])
-        return {"choices": [{"finish_reason": "length", "message": {
-            "content": '{"groups":[[0]]}', "reasoning_content": "推理占用预算",
-        }}]}
+        return {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {
+                        "content": '{"groups":[[0]]}',
+                        "reasoning_content": "推理占用预算",
+                    },
+                }
+            ]
+        }
 
     monkeypatch.setattr(adapters, "request", reply)
     monkeypatch.setattr(adapters.time, "sleep", delays.append)
-    with pytest.raises(ModelError, match=rf"重试已耗尽.*finish_reason=length.*max_tokens={cap}.*提高输出 token"):
+    with pytest.raises(
+        ModelError, match=rf"重试已耗尽.*finish_reason=length.*max_tokens={cap}.*提高输出 token"
+    ):
         QwenAnalyzer(config).group_scenes([{"start": 0, "end": 1}])
     assert budgets == expected
 
@@ -498,13 +577,13 @@ def test_factories_dispatch_cloud_backends(config):
     config.studio.tts.backend = "dashscope"
     assert isinstance(make_speaker(config), DashScopeSpeaker)
     config.studio.tts.backend = "openai"
-    from mindex.models.speech import OpenAISpeaker
+    from models.speech import OpenAISpeaker
 
     assert isinstance(make_speaker(config), OpenAISpeaker)
 
 
 def test_pipeline_routes_openai_asr_to_raw_flow(config, monkeypatch):
-    from mindex.processing.pipeline import Pipeline
+    from processing.pipeline import Pipeline
 
     config.asr.backend = "openai"
     calls = []
@@ -517,7 +596,7 @@ def test_pipeline_routes_openai_asr_to_raw_flow(config, monkeypatch):
 
 def test_pipeline_routes_minimax_asr_to_timestamp_flow(config, monkeypatch):
     """MiniMax 使用服务词级时间戳，不进入本地对齐流程。"""
-    from mindex.processing.pipeline import Pipeline
+    from processing.pipeline import Pipeline
 
     config.asr.backend = "minimax"
     calls = []

@@ -13,14 +13,14 @@ from uuid import uuid4
 import numpy as np
 from filelock import FileLock
 
-from mindex.diagnostics.film import source_report
-from mindex.models.adapters import ModelError, make_embedder
-from mindex.processing.pipeline import Pipeline
-from mindex.shared.config import Config, fingerprint
-from mindex.shared.jsonio import save
-from mindex.shared.media import atomic_media, content_hash, cut, probe
-from mindex.shared.storage import Store
-from mindex.shared.work_budget import configured, copy_file, resource_write
+from diagnostics.film import source_report
+from models.adapters import ModelError, make_embedder
+from processing.pipeline import Pipeline
+from shared.config import Config, fingerprint
+from shared.jsonio import save
+from shared.media import atomic_media, content_hash, cut, probe
+from shared.storage import Store
+from shared.work_budget import configured, copy_file, resource_write
 
 PHASES = (
     "smoke",
@@ -80,8 +80,9 @@ def initialize(config: Config, source_id: str, directory: Path):
     report = source_report(config, source_id)
     if not report["prepared"] or not report["configuration_matches"] or report["missing_artifacts"]:
         raise ValueError("素材未完成切片、配置不符或文件缺失")
-    from mindex.processing.subtitle_archive import load_archive
-    from mindex.shared.shot_media import ShotMedia
+    from processing.subtitle_archive import load_archive
+    from shared.shot_media import ShotMedia
+
     ShotMedia(store).references(source_id)
     load_archive(store, source_id)
     segments = store.segments(source_id, "moment")
@@ -168,7 +169,8 @@ def make_video_queries(store: Store, source_id: str, segments: list[dict], direc
     candidates = [s for s in segments if s["end"] - s["start"] >= 1]
     chosen = [candidates[int(i)] for i in np.linspace(0, len(candidates) - 2, 4)]
     entries = []
-    from mindex.shared.shot_media import ShotMedia
+    from shared.shot_media import ShotMedia
+
     original = ShotMedia(store).materialize(source_id)
     for number in range(12):
         segment = chosen[number % 4]
@@ -268,8 +270,8 @@ def smoke(config: Config, directory: Path) -> dict:
 
 @configured
 def _smoke(config: Config, directory: Path) -> dict:
-    from mindex.models import compatibility
-    from mindex.models.deployment import ADAPTER_VERSION
+    from models import compatibility
+    from models.deployment import ADAPTER_VERSION
 
     rows = json.loads((directory / "segments.json").read_text(encoding="utf-8"))
     unique = list({row["sha256"]: row for row in rows}.values())
@@ -401,9 +403,9 @@ def run_phase(
             for mode in ("enriched", "visual"):
                 completed = state["phases"].get(mode, {})
                 if completed.get("status") == "complete":
-                    selected_index = json.loads((directory / completed["result_file"]).read_text(encoding="utf-8"))[
-                        "index_id"
-                    ]
+                    selected_index = json.loads(
+                        (directory / completed["result_file"]).read_text(encoding="utf-8")
+                    )["index_id"]
                     break
         if state["data_dir"] != str(store.root) or state["layout_key"] != config.layout_key:
             raise ValueError("实验数据目录或切分参数发生变化，请创建新实验")
@@ -412,8 +414,9 @@ def run_phase(
         source = store.one("SELECT path FROM sources WHERE id=?", (state["source_id"],))
         if not source:
             raise ValueError("素材登记不存在")
-        from mindex.processing.subtitle_archive import load_archive
-        from mindex.shared.shot_media import ShotMedia
+        from processing.subtitle_archive import load_archive
+        from shared.shot_media import ShotMedia
+
         ShotMedia(store).references(state["source_id"])
         load_archive(store, state["source_id"])
         rows = json.loads((directory / "segments.json").read_text(encoding="utf-8"))
@@ -439,9 +442,9 @@ def run_phase(
             if phase == "smoke":
                 result = smoke(config, directory)
             elif phase in {"visual", "enriched"}:
-                from mindex.processing.indexing import IndexBuilder
+                from processing.indexing import IndexBuilder
 
-                with (nullcontext() if config.queue.backend == "postgres" else Pipeline(config).lock()):
+                with nullcontext() if config.queue.backend == "postgres" else Pipeline(config).lock():
                     index_id = IndexBuilder(config).build(
                         mode="visual" if phase == "visual" else "enriched",
                         source_id=state["source_id"],
@@ -482,12 +485,14 @@ def run_phase(
                         for segment in samples
                     ]
             elif phase == "preview":
-                from mindex.search.search import SearchEngine
-                from mindex.shared.types import TextSearch
+                from search.search import SearchEngine
+                from shared.types import TextSearch
 
                 if queries is None:
                     raise ValueError("preview 需要 --queries 指定文字或视频查询草稿")
-                entries = [json.loads(v) for v in queries.read_text(encoding="utf-8").splitlines() if v.strip()]
+                entries = [
+                    json.loads(v) for v in queries.read_text(encoding="utf-8").splitlines() if v.strip()
+                ]
                 if selected_index is None:
                     raise ValueError("请先建立实验索引或指定 --index-id")
                 engine = SearchEngine(config, index_id=selected_index)
@@ -511,7 +516,7 @@ def run_phase(
                 active = store.index_version(selected_index)
                 save(directory / f"preview-{active['id']}-{content_hash(queries)[:12]}.json", result)
             elif phase in {"evaluate", "video-evaluate"}:
-                from mindex.diagnostics.evaluation import evaluate
+                from diagnostics.evaluation import evaluate
 
                 if queries is None:
                     raise ValueError("需要 --queries 指定已冻结的人工标注")
@@ -532,7 +537,7 @@ def run_phase(
                     index_id=selected_index,
                 )
             else:
-                from mindex.processing.indexing import check_index
+                from processing.indexing import check_index
 
                 active = store.index_version(selected_index) if selected_index else store.active_index()
                 if not active:

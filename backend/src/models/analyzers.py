@@ -1,8 +1,10 @@
+"""模型输出分析:各角色适配器返回结果的解析与校验。"""
+
 from __future__ import annotations
 
-from mindex.models.adapters import ModelError
-from mindex.models.llama_cpp import check_after, checked_runtime, manifest
-from mindex.models.qwen import QwenAnalyzer
+from models.adapters import ModelError
+from models.llama_cpp import check_after, checked_runtime, manifest
+from models.qwen import QwenAnalyzer
 
 
 class PinnedQwenAnalyzer(QwenAnalyzer):

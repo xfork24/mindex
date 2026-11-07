@@ -7,16 +7,16 @@ from itertools import pairwise
 
 import numpy as np
 import pytest
-from conftest import FixtureSpeaker, legacy_job
 from fastapi.testclient import TestClient
 
-from mindex.api import create_app
-from mindex.processing.pipeline import Pipeline
-from mindex.shared.media import command, probe
-from mindex.shared.storage import Store
-from mindex.studio import studio
-from mindex.studio import studio_window as window
-from mindex.studio import workspace as ws
+from api import create_app
+from conftest import FixtureSpeaker, legacy_job
+from processing.pipeline import Pipeline
+from shared.media import command, probe
+from shared.storage import Store
+from studio import studio
+from studio import window as window
+from studio import workspace as ws
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
@@ -107,11 +107,18 @@ def refinement(config, video_file, tmp_path):
     with store.connect() as db:
         db.execute("DELETE FROM segments")
         for i in range(10):
-            from mindex.shared.media import cut
+            from shared.media import cut
+
             clip = store.root / f"fixture-shot-{i}.mp4"
             cut(source_file, i, i + 1, clip)
-            row = {**template, "id": f"shot-{i}", "start": i, "end": i + 1, "parent_id": None,
-                   "path": clip.name}
+            row = {
+                **template,
+                "id": f"shot-{i}",
+                "start": i,
+                "end": i + 1,
+                "parent_id": None,
+                "path": clip.name,
+            }
             db.execute(
                 f"INSERT INTO segments ({','.join(row)}) VALUES ({','.join('?' for _ in row)})",
                 tuple(row.values()),
@@ -425,8 +432,8 @@ def test_legacy_manual_requires_explicit_candidate_and_anchor_api_revision(refin
 
 
 def test_save_without_transcoding_and_cached_low_resolution_preview(refinement, monkeypatch):
-    from mindex.shared import media
-    from mindex.studio import studio_render
+    from shared import media
+    from studio import render as studio_render
 
     config, jid, w, p, _ = refinement
     config.studio.render.width = 1920
@@ -505,8 +512,8 @@ def test_save_without_transcoding_and_cached_low_resolution_preview(refinement, 
 
 def test_range_save_overlays_calls_bounded(refinement, monkeypatch):
     """保存定长窗口的可见性检查必须是常数级，不随源内镜头数线性放大。"""
-    from mindex.admin import curation
-    from mindex.shared import media
+    from admin import curation
+    from shared import media
 
     config, jid, w, p, store = refinement
     template = store.one("SELECT * FROM segments WHERE kind='shot'")
@@ -572,7 +579,7 @@ def test_range_save_overlays_calls_bounded(refinement, monkeypatch):
 
 def test_source_shots_visibility_matches_predicate(refinement):
     """批量可见性必须与逐行 interval_visible 逐点等价，含 parent 隐藏传播与脏 parent_id。"""
-    from mindex.studio import studio_steps
+    from studio import steps as studio_steps
 
     config, _jid, _w, _p, store = refinement
     source_id = store.one("SELECT id FROM sources")["id"]
@@ -632,7 +639,10 @@ def test_selection_anchor_matches_automatic_scoring_and_manual_choice(refinement
     url = f"/api/studio/jobs/{jid}/plans/{p['id']}/shots/a/selection-anchor"
     response = client.get(url)
     assert response.status_code == 200, response.text
-    assert response.json()["candidate_id"] == window.context(config, jid, w, p, "a")["anchor_ref"]["candidate_id"]
+    assert (
+        response.json()["candidate_id"]
+        == window.context(config, jid, w, p, "a")["anchor_ref"]["candidate_id"]
+    )
     manual(w, p, candidate="shot-2")
     ws.persist(config, jid, w)
     assert client.get(url).json()["candidate_id"] == "shot-2"

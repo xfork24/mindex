@@ -26,13 +26,14 @@ def store_and_media(tmp_path, monkeypatch):
     import boto3
     import psycopg
 
-    from mindex.shared.backends.s3 import S3MediaStore
-    from mindex.shared.config import Config, S3Config
-    from mindex.shared.db.migrate_pg import migrate_pg
-    from mindex.shared.storage import PgStore
+    from shared.backends.s3 import S3MediaStore
+    from shared.config import Config, S3Config
+    from shared.db.migrate_pg import migrate_pg
+    from shared.storage import PgStore
 
-    client = boto3.client("s3", endpoint_url=S3, aws_access_key_id=ACCESS,
-                          aws_secret_access_key=SECRET, region_name="us-east-1")
+    client = boto3.client(
+        "s3", endpoint_url=S3, aws_access_key_id=ACCESS, aws_secret_access_key=SECRET, region_name="us-east-1"
+    )
     bucket = "mindex-test-purge"
     try:
         client.create_bucket(Bucket=bucket)
@@ -49,12 +50,15 @@ def store_and_media(tmp_path, monkeypatch):
     monkeypatch.setenv("MINDEX_DATABASE_DSN", PG)
     monkeypatch.setenv("MINDEX_S3_ACCESS_KEY", ACCESS)
     monkeypatch.setenv("MINDEX_S3_SECRET_KEY", SECRET)
-    config = Config(data_dir=tmp_path / "data", database={"backend": "postgres"},
-                    storage={"backend": "s3", "s3": {"endpoint_url": S3, "bucket": bucket,
-                                                     "prefix": "libs/"}})
+    config = Config(
+        data_dir=tmp_path / "data",
+        database={"backend": "postgres"},
+        storage={"backend": "s3", "s3": {"endpoint_url": S3, "bucket": bucket, "prefix": "libs/"}},
+    )
     store = PgStore(config)
-    media = S3MediaStore(S3Config(endpoint_url=S3, bucket=bucket, prefix="libs/"),
-                         cache_dir=tmp_path / "cache")
+    media = S3MediaStore(
+        S3Config(endpoint_url=S3, bucket=bucket, prefix="libs/"), cache_dir=tmp_path / "cache"
+    )
     return store, media
 
 
@@ -63,8 +67,8 @@ def _put(media, key: str, payload: bytes):
 
 
 def test_purge_deletes_source_objects_but_keeps_pinned(store_and_media):
-    from mindex.maintenance.purge import purge_source
-    from mindex.shared.media_delivery import DownloadPins
+    from maintenance.purge import purge_source
+    from shared.media_delivery import DownloadPins
 
     store, media = store_and_media
     _put(media, "clips/s1/shot/a.mp4", b"clip")
@@ -72,9 +76,13 @@ def test_purge_deletes_source_objects_but_keeps_pinned(store_and_media):
     _put(media, "transcripts/s1/asr/0.json", b"{}")
     _put(media, "thumbnails/a.jpg", b"thumb")
     _put(media, "clips/s2/shot/c.mp4", b"other")  # 其他素材不受影响
-    store.execute("INSERT INTO sources(id,name,path,media,layout_key) VALUES('s1','素材','sources/s1/a.mp4','{}','k')")
-    store.execute("INSERT INTO segments(id,source_id,kind,start,end,path,thumbnail,generation,reason) "
-                  "VALUES('seg1','s1','shot',0,5,'clips/s1/shot/a.mp4','thumbnails/a.jpg','g','r')")
+    store.execute(
+        "INSERT INTO sources(id,name,path,media,layout_key) VALUES('s1','素材','sources/s1/a.mp4','{}','k')"
+    )
+    store.execute(
+        "INSERT INTO segments(id,source_id,kind,start,end,path,thumbnail,generation,reason) "
+        "VALUES('seg1','s1','shot',0,5,'clips/s1/shot/a.mp4','thumbnails/a.jpg','g','r')"
+    )
     pins = DownloadPins(store, store.library_id)
     pins.pin("clips/s1/shot/b.mp4", 900)  # 预签名仍有效：跳过删除
 
@@ -96,7 +104,7 @@ def test_purge_local_backend_ignores_media_argument(store_and_media, tmp_path):
     clip = store.root / "clips" / "s9" / "shot" / "x.mp4"
     clip.parent.mkdir(parents=True, exist_ok=True)
     clip.write_bytes(b"x")
-    from mindex.maintenance.purge import purge_source
+    from maintenance.purge import purge_source
 
     result = purge_source(store, "s9")
     assert result["deleted"]["files"] == 1 and not clip.exists()

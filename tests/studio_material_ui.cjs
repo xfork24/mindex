@@ -8,22 +8,46 @@ const vm = require("node:vm");
 class Node {
   constructor(tag = "div") {
     Object.assign(this, {
-      tagName: tag, textContent: "", className: "", hidden: false, open: false,
-      dataset: {}, attrs: {}, children: [], listeners: {}, parent: null,
+      tagName: tag,
+      textContent: "",
+      className: "",
+      hidden: false,
+      open: false,
+      dataset: {},
+      attrs: {},
+      children: [],
+      listeners: {},
+      parent: null,
     });
     const node = this;
     this.classList = {
-      add: (...names) => { node.className = [...new Set([...node.className.split(" ").filter(Boolean), ...names])].join(" "); },
-      contains: name => node.className.split(" ").includes(name),
+      add: (...names) => {
+        node.className = [
+          ...new Set([...node.className.split(" ").filter(Boolean), ...names]),
+        ].join(" ");
+      },
+      contains: (name) => node.className.split(" ").includes(name),
     };
   }
-  setAttribute(k, v) { this.attrs[k] = String(v); }
-  append(...children) {
-    for (const c of children) { if (c && typeof c === "object") c.parent = this; this.children.push(c); }
+  setAttribute(k, v) {
+    this.attrs[k] = String(v);
   }
-  replaceChildren(...children) { this.children = []; this.append(...children); }
-  addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
-  fire(type) { for (const fn of this.listeners[type] || []) fn({ preventDefault() {} }); }
+  append(...children) {
+    for (const c of children) {
+      if (c && typeof c === "object") c.parent = this;
+      this.children.push(c);
+    }
+  }
+  replaceChildren(...children) {
+    this.children = [];
+    this.append(...children);
+  }
+  addEventListener(type, fn) {
+    (this.listeners[type] ||= []).push(fn);
+  }
+  fire(type) {
+    for (const fn of this.listeners[type] || []) fn({ preventDefault() {} });
+  }
 }
 const walk = (node, out = []) => {
   if (!node || typeof node !== "object") return out;
@@ -34,7 +58,8 @@ const walk = (node, out = []) => {
 const find = (root, pred) => walk(root).find(pred);
 const findAll = (root, pred) => walk(root).filter(pred);
 // summary 的可见文字：自身文字 + 字符串子节点 + 子元素文字。
-const textOf = node => [node.textContent, ...node.children.map(c => (typeof c === "string" ? c : textOf(c)))].join("");
+const textOf = (node) =>
+  [node.textContent, ...node.children.map((c) => (typeof c === "string" ? c : textOf(c)))].join("");
 
 const requests = [];
 let apiImpl = async () => ({});
@@ -42,21 +67,44 @@ const metaBody = new Node("dl");
 const scriptNote = new Node("p");
 const nodes = { "job-meta-body": metaBody, "script-materials": scriptNote };
 const sandbox = {
-  MindexI18n: {...require("./i18n_adapter.cjs"), language: "zh"},
-  window: {addEventListener() {}},
-  console, Map, Set, Promise, Error, JSON, String, Boolean, Object, Date, Array, Number,
-  document: { createElement: tag => new Node(tag) },
+  MindexI18n: { ...require("./i18n_adapter.cjs"), language: "zh" },
+  window: { addEventListener() {} },
+  console,
+  Map,
+  Set,
+  Promise,
+  Error,
+  JSON,
+  String,
+  Boolean,
+  Object,
+  Date,
+  Array,
+  Number,
+  document: { createElement: (tag) => new Node(tag) },
   state: { id: "job-1", data: null, sources: null, materialDigest: null },
-  $: id => { assert.ok(id in nodes, `未预期的元素 id：${id}`); return nodes[id]; },
-  el: (tag, text = "", cls = "") => { const n = new Node(tag); n.textContent = text ?? ""; n.className = cls; return n; },
-  shortId: id => String(id).slice(0, 8),
-  sourceName: id => `素材-${id}`,
-  api: async (url, method = "GET", body) => { requests.push({ url, method, body }); return apiImpl(url, method, body); },
+  $: (id) => {
+    assert.ok(id in nodes, `未预期的元素 id：${id}`);
+    return nodes[id];
+  },
+  el: (tag, text = "", cls = "") => {
+    const n = new Node(tag);
+    n.textContent = text ?? "";
+    n.className = cls;
+    return n;
+  },
+  shortId: (id) => String(id).slice(0, 8),
+  sourceName: (id) => `素材-${id}`,
+  api: async (url, method = "GET", body) => {
+    requests.push({ url, method, body });
+    return apiImpl(url, method, body);
+  },
 };
 vm.createContext(sandbox);
 const source = require("./studio_source.cjs").studioSource();
 const slice = (start, end) => {
-  const a = source.indexOf(start), b = source.indexOf(end, a);
+  const a = source.indexOf(start),
+    b = source.indexOf(end, a);
   assert.ok(a >= 0 && b > a, `创作页脚本中找不到代码片段：${start} … ${end}`);
   return source.slice(a, b);
 };
@@ -65,10 +113,13 @@ const jobSource = fs.readFileSync("frontend/src/studio/studio-jobs.js", "utf8");
 vm.runInContext(jobSource.slice(jobSource.indexOf("function renderJobMeta(")), sandbox);
 // 文案区"参考了 N 个素材、M 个镜头描述"提示（renderScript 中调用的顶层函数）。
 vm.runInContext(slice("function renderScriptMaterials(", "function renderScript()"), sandbox);
-const run = code => vm.runInContext(code, sandbox);
+const run = (code) => vm.runInContext(code, sandbox);
 
 const job = (id = "job-1") => ({
-  id, outline: "港口的一天\n\n渔船靠岸", created_at: "2026-10-26T08:00:00Z", source_ids: ["src-a", "src-b"],
+  id,
+  outline: "港口的一天\n\n渔船靠岸",
+  created_at: "2026-10-26T08:00:00Z",
+  source_ids: ["src-a", "src-b"],
 });
 function reset() {
   sandbox.MindexI18n.language = "zh";
@@ -85,9 +136,10 @@ async function renderAndLoad() {
   run("renderJobMeta()");
   await sandbox.state.materialDigest?.request;
 }
-const digestBox = () => find(metaBody, n => n.tagName === "details" && n.className === "material-digest");
-const metaRows = () => findAll(metaBody, n => String(n.className).startsWith("job-meta-row"));
-const statusOf = box => find(box, n => String(n.className).includes("material-digest-status"));
+const digestBox = () =>
+  find(metaBody, (n) => n.tagName === "details" && n.className === "material-digest");
+const metaRows = () => findAll(metaBody, (n) => String(n.className).startsWith("job-meta-row"));
+const statusOf = (box) => find(box, (n) => String(n.className).includes("material-digest-status"));
 const digestData = (over = {}) => ({
   text: "【港口素材】时长 60 秒\n画面词：渔船、码头\n故事线：港口清晨的渔船\n",
   sources: [{ source_id: "src-a", name: "港口素材" }],
@@ -103,99 +155,166 @@ function assertMetaRowsIntact() {
 }
 
 const cases = [
-  ["加载中先显示占位，加载后默认折叠，summary 显示标题与计数，正文在折叠块内", async () => {
-    apiImpl = async () => digestData();
-    run("renderJobMeta()");
-    assert.equal(textOf(statusOf(digestBox())), "加载中…");
-    await sandbox.state.materialDigest.request;
-    assert.deepEqual(requests.map(r => [r.url, r.method]), [["/api/studio/jobs/job-1/material-digest?language=zh", "GET"]]);
-    const box = digestBox();
-    assert.equal(box.open, false);
-    const summary = find(box, n => n.tagName === "summary");
-    assert.equal(textOf(summary), "可用素材摘要 · 2 个素材 · 17 个镜头");
-    const pre = find(box, n => n.tagName === "pre");
-    assert.equal(pre.textContent, digestData().text);
-    assert.equal(box.children.length, 2); // summary + 正文
-    assertMetaRowsIntact();
-  }],
-  ["展开状态在重渲染后保留，同一任务不重复请求", async () => {
-    apiImpl = async () => digestData();
-    await renderAndLoad();
-    const box = digestBox();
-    box.open = true;
-    box.fire("toggle");
-    run("renderJobMeta()");
-    assert.equal(digestBox().open, true);
-    assert.equal(requests.length, 1);
-    // 切换到另一任务时重新获取。
-    sandbox.state.id = "job-2";
-    sandbox.state.data = { job: job("job-2") };
-    await renderAndLoad();
-    assert.equal(requests.at(-1).url, "/api/studio/jobs/job-2/material-digest?language=zh");
-    assert.equal(digestBox().open, false);
-  }],
-  ["摘要为空时显示接口给出的原因，不显示正文", async () => {
-    for (const reason of ["预算为 0", "无生效索引", "无已分析镜头"]) {
-      reset();
-      apiImpl = async () => digestData({
-        text: "", sources: [], empty_reason: reason,
-        stats: { sources: 0, segments: 0, fingerprint: null, content_index_id: null },
-      });
-      await renderAndLoad();
+  [
+    "加载中先显示占位，加载后默认折叠，summary 显示标题与计数，正文在折叠块内",
+    async () => {
+      apiImpl = async () => digestData();
+      run("renderJobMeta()");
+      assert.equal(textOf(statusOf(digestBox())), "加载中…");
+      await sandbox.state.materialDigest.request;
+      assert.deepEqual(
+        requests.map((r) => [r.url, r.method]),
+        [["/api/studio/jobs/job-1/material-digest?language=zh", "GET"]],
+      );
       const box = digestBox();
       assert.equal(box.open, false);
-      assert.equal(textOf(statusOf(box)), reason);
-      assert.equal(find(box, n => n.tagName === "pre"), undefined);
+      const summary = find(box, (n) => n.tagName === "summary");
+      assert.equal(textOf(summary), "可用素材摘要 · 2 个素材 · 17 个镜头");
+      const pre = find(box, (n) => n.tagName === "pre");
+      assert.equal(pre.textContent, digestData().text);
+      assert.equal(box.children.length, 2); // summary + 正文
       assertMetaRowsIntact();
-    }
-  }],
-  ["请求失败时显示加载失败提示，其余元信息正常显示", async () => {
-    apiImpl = async () => { throw new Error("网络错误"); };
-    await renderAndLoad();
-    const box = digestBox();
-    const status = statusOf(box);
-    assert.equal(textOf(status), "素材摘要加载失败");
-    assert.ok(status.classList.contains("warn-text"));
-    assert.equal(find(box, n => n.tagName === "pre"), undefined);
-    assertMetaRowsIntact();
-    assert.equal(textOf(metaRows()[1].children[0]).length > 0, true);
-  }],
-  ["文案版本带 data.materials 时显示\u201c参考了 N 个素材、M 个镜头描述\u201d", async () => {
-    sandbox.renderScriptMaterials({ data: { text: "文案", materials: { sources: 3, segments: 512 } } });
-    assert.equal(scriptNote.hidden, false);
-    assert.equal(scriptNote.textContent, "参考了 3 个素材、512 个镜头描述");
-  }],
-  ["文案版本没有 data.materials 时隐藏提示（含切换到无摘要版本与无版本）", async () => {
-    sandbox.renderScriptMaterials({ data: { text: "文案", materials: { sources: 1, segments: 2 } } });
-    assert.equal(scriptNote.hidden, false);
-    for (const item of [{ data: { text: "手动文案", origin: "manual" } }, { data: {} }, null, undefined]) {
-      sandbox.renderScriptMaterials(item);
-      assert.equal(scriptNote.hidden, true, JSON.stringify(item));
-    }
-  }],
-  ["元信息第一行为“原始输入”：显示用户原话而非整理后的大纲；没有原话的旧任务退回大纲", async () => {
-    sandbox.state.data = { job: { ...job(), outline: "整理后的大纲", original_input: "帮我做个港口视频\n\n要有渔船" } };
-    await renderAndLoad();
-    let row = metaRows()[0];
-    assert.equal(textOf(row.children[0]), "原始输入");
-    assert.equal(row.children[1].textContent, "帮我做个港口视频\n要有渔船");
-    reset();
-    await renderAndLoad();
-    row = metaRows()[0];
-    assert.equal(textOf(row.children[0]), "原始输入");
-    assert.equal(row.children[1].textContent, "港口的一天\n渔船靠岸");
-  }],
+    },
+  ],
+  [
+    "展开状态在重渲染后保留，同一任务不重复请求",
+    async () => {
+      apiImpl = async () => digestData();
+      await renderAndLoad();
+      const box = digestBox();
+      box.open = true;
+      box.fire("toggle");
+      run("renderJobMeta()");
+      assert.equal(digestBox().open, true);
+      assert.equal(requests.length, 1);
+      // 切换到另一任务时重新获取。
+      sandbox.state.id = "job-2";
+      sandbox.state.data = { job: job("job-2") };
+      await renderAndLoad();
+      assert.equal(requests.at(-1).url, "/api/studio/jobs/job-2/material-digest?language=zh");
+      assert.equal(digestBox().open, false);
+    },
+  ],
+  [
+    "摘要为空时显示接口给出的原因，不显示正文",
+    async () => {
+      for (const reason of ["预算为 0", "无生效索引", "无已分析镜头"]) {
+        reset();
+        apiImpl = async () =>
+          digestData({
+            text: "",
+            sources: [],
+            empty_reason: reason,
+            stats: { sources: 0, segments: 0, fingerprint: null, content_index_id: null },
+          });
+        await renderAndLoad();
+        const box = digestBox();
+        assert.equal(box.open, false);
+        assert.equal(textOf(statusOf(box)), reason);
+        assert.equal(
+          find(box, (n) => n.tagName === "pre"),
+          undefined,
+        );
+        assertMetaRowsIntact();
+      }
+    },
+  ],
+  [
+    "请求失败时显示加载失败提示，其余元信息正常显示",
+    async () => {
+      apiImpl = async () => {
+        throw new Error("网络错误");
+      };
+      await renderAndLoad();
+      const box = digestBox();
+      const status = statusOf(box);
+      assert.equal(textOf(status), "素材摘要加载失败");
+      assert.ok(status.classList.contains("warn-text"));
+      assert.equal(
+        find(box, (n) => n.tagName === "pre"),
+        undefined,
+      );
+      assertMetaRowsIntact();
+      assert.equal(textOf(metaRows()[1].children[0]).length > 0, true);
+    },
+  ],
+  [
+    "文案版本带 data.materials 时显示\u201c参考了 N 个素材、M 个镜头描述\u201d",
+    async () => {
+      sandbox.renderScriptMaterials({
+        data: { text: "文案", materials: { sources: 3, segments: 512 } },
+      });
+      assert.equal(scriptNote.hidden, false);
+      assert.equal(scriptNote.textContent, "参考了 3 个素材、512 个镜头描述");
+    },
+  ],
+  [
+    "文案版本没有 data.materials 时隐藏提示（含切换到无摘要版本与无版本）",
+    async () => {
+      sandbox.renderScriptMaterials({
+        data: { text: "文案", materials: { sources: 1, segments: 2 } },
+      });
+      assert.equal(scriptNote.hidden, false);
+      for (const item of [
+        { data: { text: "手动文案", origin: "manual" } },
+        { data: {} },
+        null,
+        undefined,
+      ]) {
+        sandbox.renderScriptMaterials(item);
+        assert.equal(scriptNote.hidden, true, JSON.stringify(item));
+      }
+    },
+  ],
+  [
+    "元信息第一行为“原始输入”：显示用户原话而非整理后的大纲；没有原话的旧任务退回大纲",
+    async () => {
+      sandbox.state.data = {
+        job: { ...job(), outline: "整理后的大纲", original_input: "帮我做个港口视频\n\n要有渔船" },
+      };
+      await renderAndLoad();
+      let row = metaRows()[0];
+      assert.equal(textOf(row.children[0]), "原始输入");
+      assert.equal(row.children[1].textContent, "帮我做个港口视频\n要有渔船");
+      reset();
+      await renderAndLoad();
+      row = metaRows()[0];
+      assert.equal(textOf(row.children[0]), "原始输入");
+      assert.equal(row.children[1].textContent, "港口的一天\n渔船靠岸");
+    },
+  ],
 ];
 
-module.exports = { cases, sandbox, run, reset, renderAndLoad, find, findAll, textOf, requests, metaBody,
-  setApi: fn => { apiImpl = fn; } };
+module.exports = {
+  cases,
+  sandbox,
+  run,
+  reset,
+  renderAndLoad,
+  find,
+  findAll,
+  textOf,
+  requests,
+  metaBody,
+  setApi: (fn) => {
+    apiImpl = fn;
+  },
+};
 
 if (require.main === module) {
   (async () => {
     for (const [name, fn] of cases) {
       reset();
-      try { await fn(); } catch (error) { error.message = `${name}：${error.message}`; throw error; }
+      try {
+        await fn();
+      } catch (error) {
+        error.message = `${name}：${error.message}`;
+        throw error;
+      }
     }
     console.log(`Material digest: ${cases.length} cases passed.`);
-  })().catch(error => { console.error(error); process.exitCode = 1; });
+  })().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
 }

@@ -14,13 +14,13 @@ from filelock import Timeout
 from pydantic import Field, model_validator
 from starlette.concurrency import run_in_threadpool
 
-from mindex.processing.dialogue import atomic_json
-from mindex.processing.pipeline import Pipeline
-from mindex.shared.background_tasks import BackgroundTaskRunner
-from mindex.shared.config import Config, StrictModel, absolutize_config_paths, relativize_config_paths
-from mindex.shared.processing_lock import ProcessingLock
-from mindex.shared.queue_dispatch import insert_ledger
-from mindex.shared.storage import dumps
+from processing.dialogue import atomic_json
+from processing.pipeline import Pipeline
+from shared.background_tasks import BackgroundTaskRunner
+from shared.config import Config, StrictModel, absolutize_config_paths, relativize_config_paths
+from shared.processing_lock import ProcessingLock
+from shared.queue_dispatch import insert_ledger
+from shared.storage import dumps
 
 
 class DialogueOptions(StrictModel):
@@ -39,14 +39,28 @@ class DialogueOptions(StrictModel):
 
 
 def execute_dialogue(
-    config, source_id=None, *, method="auto", subtitle_stream=None, subtitle_file=None, publish=True, workers=2,
-    progress=None, embedder=None, force=False
+    config,
+    source_id=None,
+    *,
+    method="auto",
+    subtitle_stream=None,
+    subtitle_file=None,
+    publish=True,
+    workers=2,
+    progress=None,
+    embedder=None,
+    force=False,
 ):
     started = perf_counter()
     pipeline = Pipeline(config)
     result = pipeline.enrich_dialogue(
-        source_id, method=method, subtitle_stream=subtitle_stream, subtitle_file=subtitle_file,
-        workers=workers, progress=progress, **({"force": True} if force else {})
+        source_id,
+        method=method,
+        subtitle_stream=subtitle_stream,
+        subtitle_file=subtitle_file,
+        workers=workers,
+        progress=progress,
+        **({"force": True} if force else {}),
     )
     summaries = [
         {
@@ -68,7 +82,8 @@ def execute_dialogue(
     if publish:
         if progress:
             progress({"stage": "embedding", "message": "对白处理完成，正在嵌入并检查新索引"})
-        from mindex.admin.source_tasks import publication_attempt
+        from admin.source_tasks import publication_attempt
+
         result["publication"] = publication_attempt(
             config, source_id, "dialogue", embedder=embedder, progress=progress
         )
@@ -93,7 +108,7 @@ class DialogueTasks(BackgroundTaskRunner):
             if not self.store.one("SELECT 1 FROM sources WHERE id=?", (source_id,)):
                 raise HTTPException(404, "找不到素材")
             if options.subtitle_file:
-                from mindex.processing.subtitle_uploads import resolve_subtitle
+                from processing.subtitle_uploads import resolve_subtitle
 
                 try:
                     resolve_subtitle(self.store, source_id, options.subtitle_file)
@@ -101,7 +116,10 @@ class DialogueTasks(BackgroundTaskRunner):
                     raise HTTPException(422, str(exc)) from exc
             config = self.runtime.current().model_copy(deep=True)
             task_id = uuid.uuid4().hex
-            insert_ledger(self.store, self.table, task_id,
+            insert_ledger(
+                self.store,
+                self.table,
+                task_id,
                 "INSERT INTO dialogue_tasks(id,source_id,status,config,options) VALUES(?,?,?,?,?)",
                 (task_id, source_id, "queued", self.freeze(config), options.model_dump_json()),
             )
@@ -129,7 +147,8 @@ class DialogueTasks(BackgroundTaskRunner):
         # 使数据目录移动/改名后的历史任务仍能解析 data_dir / 部署清单 / 字幕字体。
         snapshot = absolutize_config_paths(self.runtime.base.data_dir, snapshot)
         config = Config.model_validate(snapshot)
-        from mindex.admin.source_tasks import preserve_numbers
+        from admin.source_tasks import preserve_numbers
+
         preserve_numbers(config, snapshot)
         for role, reference in profiles.items():
             if reference:
@@ -143,17 +162,32 @@ class DialogueTasks(BackgroundTaskRunner):
     def execute(self, task_id, row, config, save):
         options = json.loads(row["options"])
         publish = options.pop("publish", True)
-        result = json.loads(row["result"]) if row["result"] and publish else execute_dialogue(
-            config, row["source_id"], **options, publish=False,
-            progress=lambda v: save("progress", v), embedder=self.embedder,
+        result = (
+            json.loads(row["result"])
+            if row["result"] and publish
+            else execute_dialogue(
+                config,
+                row["source_id"],
+                **options,
+                publish=False,
+                progress=lambda v: save("progress", v),
+                embedder=self.embedder,
+            )
         )
         save("result", result)
         if publish:
-            from mindex.admin.source_tasks import enqueue_publications
+            from admin.source_tasks import enqueue_publications
 
-            save("publication", enqueue_publications(
-                self.runtime, self.store, row['source_id'], 'dialogue', self.embedder,
-            ))
+            save(
+                "publication",
+                enqueue_publications(
+                    self.runtime,
+                    self.store,
+                    row["source_id"],
+                    "dialogue",
+                    self.embedder,
+                ),
+            )
         else:
             save("publication", {"status": "not_requested"})
 
@@ -164,12 +198,8 @@ def dialogue_router(runtime, store, embedder=None):
 
     @router.post("/sources/{source_id}/subtitles", status_code=201)
     async def upload_subtitle(source_id: str, file: UploadFile):
-        from mindex.processing.subtitle_uploads import (
-            SUBTITLE_EXTENSIONS,
-            SUBTITLE_MAX_BYTES,
-            register_subtitle,
-        )
-        from mindex.shared.uploads import save_upload
+        from processing.subtitle_uploads import SUBTITLE_EXTENSIONS, SUBTITLE_MAX_BYTES, register_subtitle
+        from shared.uploads import save_upload
 
         name = (file.filename or "").replace("\\", "/").rsplit("/", 1)[-1]
         try:

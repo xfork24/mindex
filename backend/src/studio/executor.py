@@ -25,9 +25,9 @@ from typing import Literal
 from fastapi import HTTPException
 from filelock import Timeout
 
-from mindex.shared import lock_backend, locks
-from mindex.studio import studio
-from mindex.studio.studio_artifacts import safe_path
+from shared import lock_backend, locks
+from studio import studio
+from studio.artifacts import safe_path
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +39,7 @@ def busy_executors(data_dir) -> bool:
     """属于 ``data_dir`` 的执行器中是否有存活的执行线程。"""
     target = Path(data_dir).resolve()
     return any(Path(e.base.data_dir).resolve() == target and e.busy() for e in list(_EXECUTORS))
+
 
 BUSY = "已有创作步骤在执行，请稍候再试"
 
@@ -60,7 +61,7 @@ def cancel_sentinel(config, kind: Kind, job_id: str, key: str | None = None) -> 
 
 def request_cancel(config, kind: Kind, job_id: str, key: str | None = None) -> None:
     if config.queue.backend == "postgres":
-        from mindex.studio.tasks import cancel
+        from studio.tasks import cancel
 
         cancel(config, kind, job_id, key)
         return
@@ -69,10 +70,11 @@ def request_cancel(config, kind: Kind, job_id: str, key: str | None = None) -> N
     path.touch()
 
 
-def cancel_requested(config, kind: Kind, job_id: str, key: str | None = None,
-                     event: threading.Event | None = None) -> bool:
+def cancel_requested(
+    config, kind: Kind, job_id: str, key: str | None = None, event: threading.Event | None = None
+) -> bool:
     """进程内事件已置位，或哨兵文件存在，即视为已请求取消。"""
-    from mindex.shared.db.fencing import current_attempt
+    from shared.db.fencing import current_attempt
 
     attempt = current_attempt()
     if attempt is not None:
@@ -87,10 +89,14 @@ def clear_cancel(config, kind: Kind, job_id: str, key: str | None = None) -> Non
 # ---------------------------------------------------------------- worker 包装
 
 
-def run_guarded(fn: Callable[[], object], *, message: str,
-                on_error: Callable[[Exception], object] | None = None,
-                finally_: Callable[[], object] | None = None,
-                lock: locks.SharedFileLock | None = None) -> None:
+def run_guarded(
+    fn: Callable[[], object],
+    *,
+    message: str,
+    on_error: Callable[[Exception], object] | None = None,
+    finally_: Callable[[], object] | None = None,
+    lock: locks.SharedFileLock | None = None,
+) -> None:
     """后台 worker 包装：异常先 ``log.exception``，再调用 ``on_error`` 写失败终态。
 
     ``on_error`` 与 ``finally_`` 各自单独保护，失败只记录日志、不掩盖原始异常；锁总在最后释放。
@@ -173,9 +179,14 @@ class StudioExecutor:
                 if self.base.queue.backend == "postgres":
                     lock.release()
 
-    def start(self, name: str, target: Callable[[], object], *,
-              lock: locks.SharedFileLock | None = None,
-              on_failure: Callable[[Exception], object] | None = None) -> threading.Thread:
+    def start(
+        self,
+        name: str,
+        target: Callable[[], object],
+        *,
+        lock: locks.SharedFileLock | None = None,
+        on_failure: Callable[[Exception], object] | None = None,
+    ) -> threading.Thread:
         """启动唯一的后台执行线程（守护线程）。
 
         已有存活线程时返回 409。``lock`` 交给线程：线程结束时先腾出执行线程槽再释放锁，

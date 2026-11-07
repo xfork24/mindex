@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import shutil
 
-from mindex.maintenance.clean import CleanAction, CleanItem, Scan, _tree_stats
+from maintenance.clean import CleanAction, CleanItem, Scan, _tree_stats
 
 
 def _jobs(scan: Scan) -> list[tuple[object, dict | None]]:
@@ -38,10 +38,7 @@ def _running(state: dict | None) -> bool:
     if state.get("execution", {}).get("status") == "running":
         return True
     steps = state.get("steps", {})
-    return any(
-        isinstance(info, dict) and info.get("status") == "running"
-        for info in steps.values()
-    )
+    return any(isinstance(info, dict) and info.get("status") == "running" for info in steps.values())
 
 
 def studio_previews(scan: Scan) -> CleanAction | None:
@@ -56,8 +53,7 @@ def studio_previews(scan: Scan) -> CleanAction | None:
             if not path.is_file() or not scan.expired(path, days):
                 continue
             targets.append(path)
-            items.append(CleanItem(
-                path.relative_to(scan.store.root).as_posix(), path.stat().st_size))
+            items.append(CleanItem(path.relative_to(scan.store.root).as_posix(), path.stat().st_size))
 
     def execute() -> dict:
         for path in targets:
@@ -67,10 +63,13 @@ def studio_previews(scan: Scan) -> CleanAction | None:
     if not items:
         return None
     return CleanAction(
-        category="studio_previews", level="B", stage="studio",
+        category="studio_previews",
+        level="B",
+        stage="studio",
         description="超过生命期的分镜/方案预览缓存",
         policy=f"mtime 早于 {days} 天；预览按请求指纹命名，可按需重生成",
-        items=items, execute=execute,
+        items=items,
+        execute=execute,
     )
 
 
@@ -97,13 +96,13 @@ def studio_attempts(scan: Scan) -> CleanAction | None:
         for child in expired_dirs:
             targets.append(child)
             size, _ = _tree_stats(child)
-            items.append(CleanItem(
-                child.relative_to(scan.store.root).as_posix(), size))
+            items.append(CleanItem(child.relative_to(scan.store.root).as_posix(), size))
             sidecar = child.with_name(child.name + ".json")
             if sidecar.is_file() and scan.expired(sidecar, days):
                 targets.append(sidecar)
-                items.append(CleanItem(
-                    sidecar.relative_to(scan.store.root).as_posix(), sidecar.stat().st_size))
+                items.append(
+                    CleanItem(sidecar.relative_to(scan.store.root).as_posix(), sidecar.stat().st_size)
+                )
 
     def execute() -> dict:
         deleted = 0
@@ -118,11 +117,15 @@ def studio_attempts(scan: Scan) -> CleanAction | None:
     if not items and not running_jobs:
         return None
     return CleanAction(
-        category="studio_attempts", level="B", stage="studio",
+        category="studio_attempts",
+        level="B",
+        stage="studio",
         description="未被检查点或当前 attempt 引用的过期 attempt 留档",
         policy=f"checkpoints.json 引用与各步骤当前 attempt 一律保留，其余树内最新文件早于 "
-               f"{days} 天删除（含 edit-* 人工编辑归档）；running 任务整体跳过",
-        items=items, kept={"running_jobs": running_jobs}, execute=execute,
+        f"{days} 天删除（含 edit-* 人工编辑归档）；running 任务整体跳过",
+        items=items,
+        kept={"running_jobs": running_jobs},
+        execute=execute,
     )
 
 
@@ -155,15 +158,12 @@ def studio_exports(scan: Scan) -> CleanAction | None:
         if not exports.is_dir():
             continue
         for path in sorted(exports.iterdir()):
-            if not path.is_file() or not (
-                path.name.endswith(".zip") or path.name.endswith(".zip.partial")
-            ):
+            if not path.is_file() or not (path.name.endswith(".zip") or path.name.endswith(".zip.partial")):
                 continue
             if not scan.expired(path, days):
                 continue
             targets.append(path)
-            items.append(CleanItem(
-                path.relative_to(scan.store.root).as_posix(), path.stat().st_size))
+            items.append(CleanItem(path.relative_to(scan.store.root).as_posix(), path.stat().st_size))
 
     def execute() -> dict:
         for path in targets:
@@ -173,9 +173,13 @@ def studio_exports(scan: Scan) -> CleanAction | None:
     if not items:
         return None
     return CleanAction(
-        category="studio_exports", level="B", stage="studio",
+        category="studio_exports",
+        level="B",
+        stage="studio",
         description="超过生命期的整包导出 zip",
-        policy=f"mtime 早于 {days} 天；页面可随时重新打包导出", items=items, execute=execute,
+        policy=f"mtime 早于 {days} 天；页面可随时重新打包导出",
+        items=items,
+        execute=execute,
     )
 
 

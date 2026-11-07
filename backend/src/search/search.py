@@ -1,3 +1,5 @@
+"""多模态检索引擎:向量召回、词法检索与混合排序。"""
+
 from __future__ import annotations
 
 import hashlib
@@ -13,17 +15,17 @@ from time import perf_counter
 
 import jieba
 
-from mindex.admin.curation import EntityNotFound, Library, source_public, source_sql
-from mindex.models.adapters import ModelError, MultimodalEmbedder, make_embedder
-from mindex.processing.indexing import VectorIndex
-from mindex.shared.config import Config, fingerprint
-from mindex.shared.images import image_png
-from mindex.shared.jsonio import save, save_bytes
-from mindex.shared.media import content_hash, cut, probe, windows
-from mindex.shared.storage import Store
-from mindex.shared.tokenizer import document_terms, tokens
-from mindex.shared.trace import record
-from mindex.shared.types import Filters, TextSearch
+from admin.curation import EntityNotFound, Library, source_public, source_sql
+from models.adapters import ModelError, MultimodalEmbedder, make_embedder
+from processing.indexing import VectorIndex
+from shared.config import Config, fingerprint
+from shared.images import image_png
+from shared.jsonio import save, save_bytes
+from shared.media import content_hash, cut, probe, windows
+from shared.storage import Store
+from shared.tokenizer import document_terms, tokens
+from shared.trace import record
+from shared.types import Filters, TextSearch
 
 jieba.setLogLevel(30)
 
@@ -37,12 +39,17 @@ _QUERY_VECTOR_SIZES: dict = {}
 def recall_scope(method):
     @wraps(method)
     def wrapped(self, *args, **kwargs):
-        from mindex.shared.query_budget import scope as query_scope
+        from shared.query_budget import scope as query_scope
 
-        with query_scope(self.store, self.config.search.query_timeout_seconds) if self.store.pg else nullcontext():
+        with (
+            query_scope(self.store, self.config.search.query_timeout_seconds)
+            if self.store.pg
+            else nullcontext()
+        ):
             scope = None if method.__name__ == "similar" else getattr(self.embedder, "recall_scope", None)
             with scope() if scope else nullcontext():
                 return method(self, *args, **kwargs)
+
     return wrapped
 
 
@@ -83,7 +90,9 @@ def fuse(routes: dict[str, list[dict]], weights: dict[str, float], k: int) -> li
     # Multiplying all weights by a constant cannot change the score or ordering.
     scale = max((weights.get(route, 0) for route, hits in routes.items() if hits), default=0) or 1
     relative = {route: weight / scale for route, weight in weights.items()}
-    ceiling = sum(relative.get(route, 0) for route, hits in routes.items() if hits and relative.get(route, 0) > 0) / (k + 1)
+    ceiling = sum(
+        relative.get(route, 0) for route, hits in routes.items() if hits and relative.get(route, 0) > 0
+    ) / (k + 1)
     for route, hits in routes.items():
         if weights.get(route, 0) == 0:
             continue
@@ -115,8 +124,9 @@ def fuse(routes: dict[str, list[dict]], weights: dict[str, float], k: int) -> li
     ]
 
 
-
-def duration_rank(ranked: list[dict], segments: dict[str, dict], target: float | None, settings) -> list[dict]:
+def duration_rank(
+    ranked: list[dict], segments: dict[str, dict], target: float | None, settings
+) -> list[dict]:
     """Bounded blend of relevance and usable duration; missing targets leave ordinary search intact."""
     if target is None or settings.duration_weight == 0:
         return ranked
@@ -124,13 +134,20 @@ def duration_rank(ranked: list[dict], segments: dict[str, dict], target: float |
     for position, hit in enumerate(ranked, 1):
         segment = segments[hit["id"]]
         ratio = min(1.0, max(0.0, segment["end"] - segment["start"]) / target)
-        duration = ratio ** settings.duration_exponent
+        duration = ratio**settings.duration_exponent
         relevance = hit["score"]
         if any(match.get("route") == "person" for match in hit["matches"]):
             relevance = (settings.rrf_k + 1) / (settings.rrf_k + position)
         score = (1 - settings.duration_weight) * relevance + settings.duration_weight * duration
-        results.append({**hit, "score": score, "relevance_score": relevance,
-                        "duration_score": duration, "target_duration": target})
+        results.append(
+            {
+                **hit,
+                "score": score,
+                "relevance_score": relevance,
+                "duration_score": duration,
+                "target_duration": target,
+            }
+        )
     return sorted(results, key=lambda item: (-item["score"], item["id"]))
 
 
@@ -156,7 +173,11 @@ def public_segment(segment: dict) -> dict:
 
 class SearchEngine:
     def __init__(
-        self, config: Config, embedder: MultimodalEmbedder | None = None, *, index_id: str | None = None,
+        self,
+        config: Config,
+        embedder: MultimodalEmbedder | None = None,
+        *,
+        index_id: str | None = None,
         release_id: str | None = None,
         force_embedding: bool = False,
     ):
@@ -175,10 +196,14 @@ class SearchEngine:
 
     def _vectors(self, index_id: str, *, create: bool = False) -> VectorIndex:
         """按配置选择向量客户端：缺省本地嵌入；chroma_server 形态走共享 HttpClient（plans §6.2）。"""
-        from mindex.processing.indexing import vector_client
+        from processing.indexing import vector_client
 
-        return VectorIndex(self.store.root, index_id, create,
-                           client=vector_client(self.config, library_id=self.store.library_id))
+        return VectorIndex(
+            self.store.root,
+            index_id,
+            create,
+            client=vector_client(self.config, library_id=self.store.library_id),
+        )
 
     def _validate_space(self, active):
         self._space_id = None
@@ -209,7 +234,9 @@ class SearchEngine:
         identity = fingerprint(key)
         path = self.store.root / "cache" / "query-vectors" / (identity + ".json")
         self._prune_disk_vectors(path.parent)
-        cache_enabled = self.config.search.query_cache_entries > 0 and self.config.search.query_cache_bytes > 0
+        cache_enabled = (
+            self.config.search.query_cache_entries > 0 and self.config.search.query_cache_bytes > 0
+        )
         if not self.force_embedding and cache_enabled:
             with _QUERY_VECTOR_LOCK:
                 cached = _QUERY_VECTORS.get(key)
@@ -220,10 +247,13 @@ class SearchEngine:
             try:
                 saved = json.loads(path.read_text())
                 vector = saved["vector"]
-                if (saved["key"] == identity and saved["checksum"] == fingerprint(vector)
+                if (
+                    saved["key"] == identity
+                    and saved["checksum"] == fingerprint(vector)
                     and len(vector) == self.config.embedding.dimensions
                     and all(type(v) in (int, float) and math.isfinite(v) for v in vector)
-                    and sum(v * v for v in vector) > 1e-12):
+                    and sum(v * v for v in vector) > 1e-12
+                ):
                     self._remember_vector(key, vector)
                     record("query-vector-cache", {"hit": True, "kind": kind})
                     return vector
@@ -254,8 +284,10 @@ class SearchEngine:
             for key in list(_QUERY_VECTOR_SIZES):
                 if key not in _QUERY_VECTORS:
                     del _QUERY_VECTOR_SIZES[key]
-            while (len(_QUERY_VECTORS) > min(QUERY_VECTOR_CACHE_SIZE, limits.query_cache_entries)
-                   or sum(_QUERY_VECTOR_SIZES.values()) > limits.query_cache_bytes):
+            while (
+                len(_QUERY_VECTORS) > min(QUERY_VECTOR_CACHE_SIZE, limits.query_cache_entries)
+                or sum(_QUERY_VECTOR_SIZES.values()) > limits.query_cache_bytes
+            ):
                 key, _ = _QUERY_VECTORS.popitem(last=False)
                 _QUERY_VECTOR_SIZES.pop(key, None)
 
@@ -269,7 +301,7 @@ class SearchEngine:
     def _prune_disk_vectors(self, directory):
         import heapq
 
-        from mindex.shared.query_budget import check
+        from shared.query_budget import check
 
         limits = self.config.search
         kept = []
@@ -297,7 +329,7 @@ class SearchEngine:
         if active["status"] != "ready":
             raise ModelError("当前索引未就绪")
         if getattr(self.store, "deployment_form", None) == "cluster":
-            from mindex.shared.admission import validate_index
+            from shared.admission import validate_index
 
             validate_index(self.store, active)
         return active
@@ -372,18 +404,36 @@ class SearchEngine:
                 break
         if projected:
             hydrated = self._hydrate(active, [hit["id"] for hit in chosen])
-            lookup = {key: {**value, **({"person_evidence": lookup[key]["person_evidence"]}
-                                       if "person_evidence" in lookup[key] else {})}
-                      for key, value in hydrated.items()}
-        results = [{**public_segment(lookup[hit["id"]]), **{key: hit[key] for key in
-                    ("score", "matches", "relevance_score", "duration_score", "target_duration") if key in hit}}
-                   for hit in chosen]
+            lookup = {
+                key: {
+                    **value,
+                    **(
+                        {"person_evidence": lookup[key]["person_evidence"]}
+                        if "person_evidence" in lookup[key]
+                        else {}
+                    ),
+                }
+                for key, value in hydrated.items()
+            }
+        results = [
+            {
+                **public_segment(lookup[hit["id"]]),
+                **{
+                    key: hit[key]
+                    for key in ("score", "matches", "relevance_score", "duration_score", "target_duration")
+                    if key in hit
+                },
+            }
+            for hit in chosen
+        ]
         return {
             "index_id": active["id"],
             "index_mode": active["spec"].get("mode", "enriched"),
             "results": results,
             "elapsed_ms": round((perf_counter() - started) * 1000),
-            "score_type": "duration_blend" if target_duration and self.config.search.duration_weight else "weighted_rrf",
+            "score_type": "duration_blend"
+            if target_duration and self.config.search.duration_weight
+            else "weighted_rrf",
             "eligible_segments": len(snapshots) if eligible_count is None else eligible_count,
         }
 
@@ -394,11 +444,15 @@ class SearchEngine:
         library = Library(self.store)
         snapshots = []
         for offset in range(0, len(ids), 400):
-            batch = ids[offset:offset + 400]
+            batch = ids[offset : offset + 400]
             placeholders = ",".join("?" * len(batch))
-            snapshots.extend(json.loads(row["snapshot"]) for row in self.store.rows(
-                "SELECT snapshot FROM index_members WHERE index_id=? "
-                f"AND segment_id IN ({placeholders})", [active["id"], *batch]))
+            snapshots.extend(
+                json.loads(row["snapshot"])
+                for row in self.store.rows(
+                    f"SELECT snapshot FROM index_members WHERE index_id=? AND segment_id IN ({placeholders})",
+                    [active["id"], *batch],
+                )
+            )
         sources, segments = library.overlays(snapshots=snapshots)
         lookup = {}
         for snapshot in snapshots:
@@ -407,149 +461,213 @@ class SearchEngine:
 
     def _text_projection(self, query, active: dict, started: float):
         """format 2 且派生词法索引可用的文字检索快路径；不可用时返回 None 回退。"""
-        from mindex.search.lexical_query import eligible_projection
-        from mindex.shared.lexical_store import lexical_ready
+        from search.lexical_query import eligible_projection
+        from shared.lexical_store import lexical_ready
 
         if active["spec"].get("format", 1) < 2 or not lexical_ready(self.store, active["id"]):
             return None
         selected_sources = query.filters.effective_sources(self.store)
         rows = eligible_projection(
-            self.store, active["id"], query.granularity, query.filters, selected_sources)
+            self.store, active["id"], query.granularity, query.filters, selected_sources
+        )
         vectors = self._vectors(active["id"])
         return self._channel_text(query, active, rows, vectors, started, projection=True)
 
     @recall_scope
     def text(self, query: TextSearch) -> dict:
-        from mindex.persons.person_names import overlaps_for, resolve_names
-        from mindex.persons.persons import Persons
+        from persons.person_names import overlaps_for, resolve_names
+        from persons.persons import Persons
 
         started = perf_counter()
         if self._paged(self._active()):
-            from mindex.search.paged_search import text
+            from search.paged_search import text
 
             return text(self, query, started)
         catalogue = Persons(self.store)
         preliminary_ids, _, _, _ = resolve_names(query, catalogue.entities())
-        person = bool(preliminary_ids and query.person_mode != 'mentioned')
-        if not person and query.person_mode != 'mentioned':
+        person = bool(preliminary_ids and query.person_mode != "mentioned")
+        if not person and query.person_mode != "mentioned":
             # 无人物条件的文字检索走投影 + SQL 词法路径（format 2 且派生索引可用；
             # 否则返回 None 回退全快照参考路径，行为与旧实现一致）。
             active = self._active()
             fast = self._text_projection(query, active, started)
             if fast is not None:
                 release = catalogue.release_for(
-                    active['id'], pinned=self.index_id is not None,
-                    release_id=self.release_id or active.get('search_release_id'))
-                meta = {'person_mode': query.person_mode, 'person_ids': [],
-                        'recognized_people': [],
-                        'release_id': release['id'] if release else None,
-                        'person_version': release['person_id'] if release else None}
+                    active["id"],
+                    pinned=self.index_id is not None,
+                    release_id=self.release_id or active.get("search_release_id"),
+                )
+                meta = {
+                    "person_mode": query.person_mode,
+                    "person_ids": [],
+                    "recognized_people": [],
+                    "release_id": release["id"] if release else None,
+                    "person_version": release["person_id"] if release else None,
+                }
                 return {**fast, **meta}
         active = self._active()
         if active["spec"].get("format", 1) == 1 and not person:
             self._validate_space(active)
         snapshots, projected = self._eligible_rows(active, query.granularity, query.filters)
         vectors = self._vectors(active["id"])
-        release = catalogue.release_for(active['id'], pinned=self.index_id is not None, release_id=self.release_id or active.get('search_release_id'))
+        release = catalogue.release_for(
+            active["id"],
+            pinned=self.index_id is not None,
+            release_id=self.release_id or active.get("search_release_id"),
+        )
         # 只取实体（几 KB）；数十 MB 的证据与覆盖区间只在出镜检索时才加载。
         published = catalogue.published_entities(release)
         # Newly registered names are also strict even before the first person publication.
-        entities = list({e['id']: e for e in [*published['entities'], *catalogue.entities()]}.values())
+        entities = list({e["id"]: e for e in [*published["entities"], *catalogue.entities()]}.values())
         ids, recognized, remaining, variant_groups = resolve_names(query, entities)
-        mode = 'onscreen' if query.person_mode == 'auto' and ids else query.person_mode
-        meta = {'person_mode': mode, 'person_ids': ids,
-                'recognized_people': [p for p in recognized if p.get('usage') != 'reference'],
-                'release_id': release['id'] if release else None,
-                'person_version': release['person_id'] if release else None}
-        references = [p for p in recognized if p.get('usage') == 'reference']
+        mode = "onscreen" if query.person_mode == "auto" and ids else query.person_mode
+        meta = {
+            "person_mode": mode,
+            "person_ids": ids,
+            "recognized_people": [p for p in recognized if p.get("usage") != "reference"],
+            "release_id": release["id"] if release else None,
+            "person_version": release["person_id"] if release else None,
+        }
+        references = [p for p in recognized if p.get("usage") == "reference"]
         if references:
-            meta['referenced_people'] = references
-        if mode == 'onscreen' and not ids:
-            raise ValueError('人物出镜模式需要选择人物或输入已登记姓名')
-        if mode == 'onscreen':
-            from mindex.persons.person_names import coverage_missing
-            from mindex.persons.person_processing import EvidenceReferences
+            meta["referenced_people"] = references
+        if mode == "onscreen" and not ids:
+            raise ValueError("人物出镜模式需要选择人物或输入已登记姓名")
+        if mode == "onscreen":
+            from persons.person_names import coverage_missing
+            from persons.person_processing import EvidenceReferences
+
             reference_images = EvidenceReferences(self.config, self.store)
-            if published.get('format', 1) >= 2:
+            if published.get("format", 1) >= 2:
                 # Actor searches expand through the immutable release cast, not live edits.
                 cast_roles = {}
-                for entity in published['entities']:
-                    if entity.get('kind') == 'role':
-                        for actor in entity.get('actor_ids', []):
-                            cast_roles.setdefault(actor, []).append(entity['id'])
-                variant_groups = [list(dict.fromkeys(
-                    role for identifier in group for role in cast_roles.get(identifier, [identifier])
-                )) for group in variant_groups]
-            published = {**published, **catalogue.evidence_for(
-                release, sources={s['source_id'] for s in snapshots},
-                identifiers={identifier for group in variant_groups for identifier in group})}
-            meta['person_coverage_missing'] = coverage_missing(snapshots, published['coverage'])
+                for entity in published["entities"]:
+                    if entity.get("kind") == "role":
+                        for actor in entity.get("actor_ids", []):
+                            cast_roles.setdefault(actor, []).append(entity["id"])
+                variant_groups = [
+                    list(
+                        dict.fromkeys(
+                            role for identifier in group for role in cast_roles.get(identifier, [identifier])
+                        )
+                    )
+                    for group in variant_groups
+                ]
+            published = {
+                **published,
+                **catalogue.evidence_for(
+                    release,
+                    sources={s["source_id"] for s in snapshots},
+                    identifiers={identifier for group in variant_groups for identifier in group},
+                ),
+            }
+            meta["person_coverage_missing"] = coverage_missing(snapshots, published["coverage"])
             eligible = []
-            names = {e['id']: e['name'] for e in entities}
+            names = {e["id"]: e["name"] for e in entities}
             # reference_url 要读特征缓存、较贵，只为最终返回的少数结果计算（见 finish_references）。
             originals = {}
-            index = published.get('evidence_index') or published['evidence']
+            index = published.get("evidence_index") or published["evidence"]
             for segment in snapshots:
                 evidence = overlaps_for(segment, index, variant_groups, query.person_relation)
                 if evidence:
                     enriched = []
                     for item in evidence:
-                        originals[(segment['id'], item['id'])] = item
-                        enriched.append({**item, 'data': {k:v for k,v in item['data'].items() if k not in {'body_feature','space'}}, 'actor_name': names.get(item['actor_id']),
-                            'role_name': names.get(item['role_id']),
-                            'image_url': '/api/persons/evidence/' + item['id'] + '/image' if item['data'].get('image_path') else None,
-                            'reference_url': None,
-                            'start': max(item['start'], segment['start']),
-                            'end': min(item['end'], segment['end'])})
-                    eligible.append({**segment, 'person_evidence': enriched})
+                        originals[(segment["id"], item["id"])] = item
+                        enriched.append(
+                            {
+                                **item,
+                                "data": {
+                                    k: v
+                                    for k, v in item["data"].items()
+                                    if k not in {"body_feature", "space"}
+                                },
+                                "actor_name": names.get(item["actor_id"]),
+                                "role_name": names.get(item["role_id"]),
+                                "image_url": "/api/persons/evidence/" + item["id"] + "/image"
+                                if item["data"].get("image_path")
+                                else None,
+                                "reference_url": None,
+                                "start": max(item["start"], segment["start"]),
+                                "end": min(item["end"], segment["end"]),
+                            }
+                        )
+                    eligible.append({**segment, "person_evidence": enriched})
             snapshots = eligible
 
             def finish_references(result):
-                for hit in result['results']:
-                    for item in hit.get('person_evidence', []):
-                        item['reference_url'] = reference_images.url(originals[(hit['id'], item['id'])])
+                for hit in result["results"]:
+                    for item in hit.get("person_evidence", []):
+                        item["reference_url"] = reference_images.url(originals[(hit["id"], item["id"])])
                 return result
+
             if not remaining:
+
                 def score(segment):
-                    intervals = sorted((e['start'], e['end']) for e in segment['person_evidence'])
+                    intervals = sorted((e["start"], e["end"]) for e in segment["person_evidence"])
                     total, end = 0, -1
                     for a, b in intervals:
                         total += max(0, b - max(a, end))
                         end = max(end, b)
-                    quality = max(e['data'].get('score', 0) for e in segment['person_evidence'])
+                    quality = max(e["data"].get("score", 0) for e in segment["person_evidence"])
                     return total + quality * 0.001
-                ranked = [{'id': s['id'], 'score': score(s), 'matches': [{'route': 'person', 'rank': i+1}]}
-                          for i, s in enumerate(sorted(snapshots, key=lambda s: (-score(s), s['id'])))]
-                result = finish_references(self._result(active, snapshots, {}, query.limit, started, ranked=ranked,
-                                                       target_duration=query.target_duration, projected=projected))
-                result['score_type'] = 'duration_blend' if query.target_duration and self.config.search.duration_weight else 'person_coverage_quality'
-                return {**result, **meta}
-            query = query.model_copy(update={'text': remaining})
-        elif mode == 'mentioned':
-            # Mention mode is literal dialogue evidence, with no visual/analysis bypass.
-            from mindex.persons.person_names import _occurrences
 
-            names = {e['id']: [e['name'], *e.get('aliases', [])] for e in entities}
+                ranked = [
+                    {"id": s["id"], "score": score(s), "matches": [{"route": "person", "rank": i + 1}]}
+                    for i, s in enumerate(sorted(snapshots, key=lambda s: (-score(s), s["id"])))
+                ]
+                result = finish_references(
+                    self._result(
+                        active,
+                        snapshots,
+                        {},
+                        query.limit,
+                        started,
+                        ranked=ranked,
+                        target_duration=query.target_duration,
+                        projected=projected,
+                    )
+                )
+                result["score_type"] = (
+                    "duration_blend"
+                    if query.target_duration and self.config.search.duration_weight
+                    else "person_coverage_quality"
+                )
+                return {**result, **meta}
+            query = query.model_copy(update={"text": remaining})
+        elif mode == "mentioned":
+            # Mention mode is literal dialogue evidence, with no visual/analysis bypass.
+            from persons.person_names import _occurrences
+
+            names = {e["id"]: [e["name"], *e.get("aliases", [])] for e in entities}
             if ids:
                 if projected:
-                    from mindex.search.lexical_query import dialogue_projection
+                    from search.lexical_query import dialogue_projection
 
-                    dialogue = dialogue_projection(self.store, active['id'], [s['id'] for s in snapshots])
-                    snapshots = [{**s, 'views': {'dialogue': dialogue.get(s['id'], '')}} for s in snapshots]
+                    dialogue = dialogue_projection(self.store, active["id"], [s["id"] for s in snapshots])
+                    snapshots = [{**s, "views": {"dialogue": dialogue.get(s["id"], "")}} for s in snapshots]
+
                 def mentions(s):
-                    text = s.get('views', {}).get('dialogue', '')
-                    checks = [any(_occurrences(n, text) for i in group for n in names[i]) for group in variant_groups]
-                    return any(checks) if query.person_relation == 'any' else all(checks)
+                    text = s.get("views", {}).get("dialogue", "")
+                    checks = [
+                        any(_occurrences(n, text) for i in group for n in names[i])
+                        for group in variant_groups
+                    ]
+                    return any(checks) if query.person_relation == "any" else all(checks)
+
                 snapshots = [s for s in snapshots if mentions(s)]
-            query = query.model_copy(update={'channels': ['dialogue'], 'text': query.text or ' '.join(names[i][0] for i in ids)})
+            query = query.model_copy(
+                update={"channels": ["dialogue"], "text": query.text or " ".join(names[i][0] for i in ids)}
+            )
         result = self._text_query(query, active, snapshots, vectors, started, projection=projected)
-        if mode == 'onscreen':
+        if mode == "onscreen":
             finish_references(result)
         return {**result, **meta}
 
     def _text_query(self, query, active, snapshots, vectors, started, *, projection=False):
         if not snapshots:
-            return self._result(active, snapshots, {}, query.limit, started, target_duration=query.target_duration)
+            return self._result(
+                active, snapshots, {}, query.limit, started, target_duration=query.target_duration
+            )
         if active["spec"].get("format", 1) >= 2:
             return self._channel_text(query, active, snapshots, vectors, started, projection=projection)
         self._validate_space(active)
@@ -579,20 +697,28 @@ class SearchEngine:
                 set(self.config.search.lexical_exclude)
                 | ({"description", "style", "dialogue"} - selected_views),
             )
-        return self._result(active, snapshots, routes, query.limit, started, target_duration=query.target_duration)
+        return self._result(
+            active, snapshots, routes, query.limit, started, target_duration=query.target_duration
+        )
 
     def _channel_text(self, query, active, snapshots, vectors, started, *, projection=False):
         """format 2 文字检索。``projection=True`` 时 ``snapshots`` 是 eligible 投影行
         （无 views/dialogue 全文）：词法走 SQL 倒排，融合后按命中批量水合快照。"""
-        from mindex.search.lexical_query import sql_bm25
+        from search.lexical_query import sql_bm25
 
         selected = set(query.channels or ("visual", "dialogue", "analysis"))
         selected = {c for c in selected if self.config.search.channel_weights[c] > 0}
         count, k = self.config.search.candidates, self.config.search.rrf_k
-        available = snapshots.available() if hasattr(snapshots, "available") else {v for s in snapshots for v in s.get("indexed_views", [])}
+        available = (
+            snapshots.available()
+            if hasattr(snapshots, "available")
+            else {v for s in snapshots for v in s.get("indexed_views", [])}
+        )
         selected = {c for c in selected if ("video" if c == "visual" else c) in available}
         if not selected:
-            result = self._result(active, snapshots, {}, query.limit, started, target_duration=query.target_duration)
+            result = self._result(
+                active, snapshots, {}, query.limit, started, target_duration=query.target_duration
+            )
             return {**result, "channels": [], "degraded": False, "warnings": []}
         ids = snapshots.ids if hasattr(snapshots, "ids") else [s["id"] for s in snapshots]
         lexical = {}
@@ -629,7 +755,11 @@ class SearchEngine:
         if projection:
             # 只对融合后的候选命中读取完整快照（时长排序/IoU 去重/证据展示需要）。
             lookup = self._hydrate(active, [hit["id"] for hit in ranked])
-            candidates = snapshots.lookup([hit["id"] for hit in ranked]).values() if hasattr(snapshots, "lookup") else snapshots
+            candidates = (
+                snapshots.lookup([hit["id"] for hit in ranked]).values()
+                if hasattr(snapshots, "lookup")
+                else snapshots
+            )
             evidence = {s["id"]: s["person_evidence"] for s in candidates if "person_evidence" in s}
             for identifier in evidence.keys() & lookup.keys():
                 lookup[identifier] = {**lookup[identifier], "person_evidence": evidence[identifier]}
@@ -666,9 +796,17 @@ class SearchEngine:
                     match["route"] = "video"
                     match["matched_text"] = None
                     match["evidence"] = [{"start": segment["start"], "end": segment["end"]}]
-        result = self._result(active, snapshots, {}, query.limit, started, ranked=ranked,
-                              target_duration=query.target_duration, lookup=lookup,
-                              eligible_count=len(snapshots))
+        result = self._result(
+            active,
+            snapshots,
+            {},
+            query.limit,
+            started,
+            ranked=ranked,
+            target_duration=query.target_duration,
+            lookup=lookup,
+            eligible_count=len(snapshots),
+        )
         return {
             **result,
             "channels": sorted(selected),
@@ -681,35 +819,49 @@ class SearchEngine:
             return False
         if getattr(self.store, "deployment_form", None) == "cluster":
             return True
-        from mindex.shared.lexical_store import lexical_ready
+        from shared.lexical_store import lexical_ready
 
         return active["spec"].get("format", 1) >= 2 and lexical_ready(self.store, active["id"])
 
     def _eligible_rows(self, active: dict, granularity: str, filters: Filters):
         """向量检索的候选行：优先投影（format 2 且派生索引可用），否则全快照过滤。"""
         if self._paged(active):
-            from mindex.search.eligible_set import EligibleSet
-            from mindex.shared.admission import validate_index
+            from search.eligible_set import EligibleSet
+            from shared.admission import validate_index
 
             validate_index(self.store, active)
-            return EligibleSet.build(self.store, active["id"], granularity, filters,
-                                     filters.effective_sources(self.store),
-                                     page_size=self.config.search.id_page_size), True
+            return EligibleSet.build(
+                self.store,
+                active["id"],
+                granularity,
+                filters,
+                filters.effective_sources(self.store),
+                page_size=self.config.search.id_page_size,
+            ), True
         projection = None
         if active["spec"].get("format", 1) >= 2:
-            from mindex.shared.lexical_store import lexical_ready
+            from shared.lexical_store import lexical_ready
 
             if lexical_ready(self.store, active["id"]):
-                from mindex.search.lexical_query import eligible_projection
+                from search.lexical_query import eligible_projection
 
                 projection = eligible_projection(
-                    self.store, active["id"], granularity, filters, filters.effective_sources(self.store))
+                    self.store, active["id"], granularity, filters, filters.effective_sources(self.store)
+                )
         if projection is not None:
             return projection, True
         return self._snapshots(active, granularity, filters), False
 
     @recall_scope
-    def video(self, path: Path, granularity="moment", limit=20, filters: Filters | None = None, *, target_duration: float | None = None) -> dict:
+    def video(
+        self,
+        path: Path,
+        granularity="moment",
+        limit=20,
+        filters: Filters | None = None,
+        *,
+        target_duration: float | None = None,
+    ) -> dict:
         started = perf_counter()
         info = probe(path)
         if info["duration"] > self.config.search.max_query_seconds + 0.05:
@@ -719,7 +871,11 @@ class SearchEngine:
         snapshots, projected = self._eligible_rows(active, granularity, filters or Filters())
         vectors = self._vectors(active["id"])
         if active["spec"].get("format", 1) >= 2:
-            snapshots = snapshots.select(lambda s: "video" in s.get("indexed_views", [])) if hasattr(snapshots, "select") else [s for s in snapshots if "video" in s.get("indexed_views", [])]
+            snapshots = (
+                snapshots.select(lambda s: "video" in s.get("indexed_views", []))
+                if hasattr(snapshots, "select")
+                else [s for s in snapshots if "video" in s.get("indexed_views", [])]
+            )
         if not snapshots:
             return self._result(active, snapshots, {}, limit, started, target_duration=target_duration)
         v = self.config.video
@@ -730,16 +886,23 @@ class SearchEngine:
             if len(pieces) == 1:
                 embedding = self._cached_vector("video", query_hash, lambda: self.embedder.video(path))
             else:
+
                 def compute(start=start, end=end):
-                    with tempfile.TemporaryDirectory(prefix="query-window-", dir=self.store.root) as directory:
+                    with tempfile.TemporaryDirectory(
+                        prefix="query-window-", dir=self.store.root
+                    ) as directory:
                         window = Path(directory) / "window.mp4"
                         cut(path, start, end, window)
                         return self.embedder.video(window)
 
-                embedding = self._cached_vector("video", fingerprint({
-                    "sha256": query_hash, "start": start, "end": end}), compute)
+                embedding = self._cached_vector(
+                    "video", fingerprint({"sha256": query_hash, "start": start, "end": end}), compute
+                )
             routes[f"video_{index}"] = vectors.query(
-                embedding, "video", snapshots.ids if hasattr(snapshots, "ids") else [s["id"] for s in snapshots], self.config.search.candidates
+                embedding,
+                "video",
+                snapshots.ids if hasattr(snapshots, "ids") else [s["id"] for s in snapshots],
+                self.config.search.candidates,
             )
         # Query windows are equal votes; the number of windows must not change scale.
         weights = {key: 1 / len(routes) for key in routes}
@@ -748,11 +911,28 @@ class SearchEngine:
             for match in hit["matches"]:
                 match["route"] = "video"
         lookup = self._hydrate(active, [hit["id"] for hit in fused]) if projected else None
-        return self._result(active, snapshots, {}, limit, started, ranked=fused,
-                            target_duration=target_duration, lookup=lookup, eligible_count=len(snapshots))
+        return self._result(
+            active,
+            snapshots,
+            {},
+            limit,
+            started,
+            ranked=fused,
+            target_duration=target_duration,
+            lookup=lookup,
+            eligible_count=len(snapshots),
+        )
 
     @recall_scope
-    def image(self, path: Path, granularity="moment", limit=20, filters: Filters | None = None, *, target_duration: float | None = None) -> dict:
+    def image(
+        self,
+        path: Path,
+        granularity="moment",
+        limit=20,
+        filters: Filters | None = None,
+        *,
+        target_duration: float | None = None,
+    ) -> dict:
         started = perf_counter()
         png = image_png(path, self.config.video.max_pixels)
         active = self._active()
@@ -760,7 +940,11 @@ class SearchEngine:
         snapshots, projected = self._eligible_rows(active, granularity, filters or Filters())
         vectors = self._vectors(active["id"])
         if active["spec"].get("format", 1) >= 2:
-            snapshots = snapshots.select(lambda s: "video" in s.get("indexed_views", [])) if hasattr(snapshots, "select") else [s for s in snapshots if "video" in s.get("indexed_views", [])]
+            snapshots = (
+                snapshots.select(lambda s: "video" in s.get("indexed_views", []))
+                if hasattr(snapshots, "select")
+                else [s for s in snapshots if "video" in s.get("indexed_views", [])]
+            )
         if not snapshots:
             return self._result(active, snapshots, {}, limit, started, target_duration=target_duration)
         if not hasattr(self.embedder, "image"):
@@ -768,14 +952,29 @@ class SearchEngine:
         with tempfile.TemporaryDirectory(prefix="query-image-", dir=self.store.root) as directory:
             normalized = Path(directory) / "query.png"
             save_bytes(normalized, png)
-            embedding = self._cached_vector("image", hashlib.sha256(png).hexdigest(),
-                                            lambda: self.embedder.image(normalized))
-        hits = vectors.query(embedding, "video", snapshots.ids if hasattr(snapshots, "ids") else [s["id"] for s in snapshots], self.config.search.candidates)
+            embedding = self._cached_vector(
+                "image", hashlib.sha256(png).hexdigest(), lambda: self.embedder.image(normalized)
+            )
+        hits = vectors.query(
+            embedding,
+            "video",
+            snapshots.ids if hasattr(snapshots, "ids") else [s["id"] for s in snapshots],
+            self.config.search.candidates,
+        )
         # Image queries compare only with video vectors, independent from text-fusion weights.
         ranked = fuse({"video": hits}, {"video": 1}, self.config.search.rrf_k)
         lookup = self._hydrate(active, [hit["id"] for hit in ranked]) if projected else None
-        return self._result(active, snapshots, {}, limit, started, ranked=ranked,
-                            target_duration=target_duration, lookup=lookup, eligible_count=len(snapshots))
+        return self._result(
+            active,
+            snapshots,
+            {},
+            limit,
+            started,
+            ranked=ranked,
+            target_duration=target_duration,
+            lookup=lookup,
+            eligible_count=len(snapshots),
+        )
 
     @recall_scope
     def similar(
@@ -801,7 +1000,8 @@ class SearchEngine:
         ids = [
             r["id"]
             for r in self.store.rows(
-                "SELECT id FROM representations WHERE index_id=? AND segment_id=? AND view='video' ORDER BY id",
+                "SELECT id FROM representations WHERE index_id=? AND segment_id=? AND view='video' ORDER BY "
+                "id",
                 (active["id"], segment_id),
             )
         ]
@@ -811,11 +1011,22 @@ class SearchEngine:
         if not embeddings:
             raise SimilarUnavailable("该片段的画面向量缺失，请重建索引后再试")
         candidates, projected = self._eligible_rows(active, granularity or seed["kind"], filters or Filters())
+
         def accepted(s):
-            return ((not visual_only or "video" in s.get("indexed_views", []))
-                    and s["id"] != seed["id"] and not (s["source_id"] == seed["source_id"]
-                    and min(s["end"], seed["end"]) - max(s["start"], seed["start"]) > 0))
-        snapshots = candidates.select(accepted) if hasattr(candidates, "select") else [s for s in candidates if accepted(s)]
+            return (
+                (not visual_only or "video" in s.get("indexed_views", []))
+                and s["id"] != seed["id"]
+                and not (
+                    s["source_id"] == seed["source_id"]
+                    and min(s["end"], seed["end"]) - max(s["start"], seed["start"]) > 0
+                )
+            )
+
+        snapshots = (
+            candidates.select(accepted)
+            if hasattr(candidates, "select")
+            else [s for s in candidates if accepted(s)]
+        )
         if not snapshots:
             result = self._result(active, snapshots, {}, limit, started)
             return {**result, "seed_segment_id": segment_id}
@@ -830,14 +1041,19 @@ class SearchEngine:
             for match in hit["matches"]:
                 match["route"] = "video"
         lookup = self._hydrate(active, [hit["id"] for hit in fused]) if projected else None
-        result = self._result(active, snapshots, {}, limit, started, ranked=fused,
-                              lookup=lookup, eligible_count=len(snapshots))
+        result = self._result(
+            active, snapshots, {}, limit, started, ranked=fused, lookup=lookup, eligible_count=len(snapshots)
+        )
         return {**result, "seed_segment_id": segment_id}
 
 
 def status(
-    config: Config, *, health=False, summary=False,
-    embedder: MultimodalEmbedder | None = None, index_id: str | None = None
+    config: Config,
+    *,
+    health=False,
+    summary=False,
+    embedder: MultimodalEmbedder | None = None,
+    index_id: str | None = None,
 ) -> dict:
     store = Store.open(config)
     active = store.index_version(index_id) if index_id else store.active_index()
@@ -858,8 +1074,11 @@ def status(
         },
         "model_health": {"checked": False},
         "channel_coverage": channel_coverage(store, active) if not summary else {},
-        "person_coverage": __import__('mindex.persons.persons', fromlist=['Persons']).Persons(store).published(
-            active['id'], pinned=index_id is not None)[1]['coverage'] if active and not summary else [],
+        "person_coverage": __import__("mindex.persons.persons", fromlist=["Persons"])
+        .Persons(store)
+        .published(active["id"], pinned=index_id is not None)[1]["coverage"]
+        if active and not summary
+        else [],
     }
     if health:
         try:

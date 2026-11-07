@@ -1,22 +1,25 @@
 """人物库的 SQLite 表结构、迁移与实体规范化。
 
-放在 shared 层，使 `Store` 的 v1 迁移（`storage.METADATA_STEPS`）不必依赖 persons 包；人物业务逻辑仍在 `persons/persons.py`。
+放在 shared 层，使 `Store` 的 v1 迁移（`storage.METADATA_STEPS`）不必依赖 persons 包；人物业务逻辑仍在
+`persons/persons.py`。
 """
 
 from __future__ import annotations
 
 import json
 
-from mindex.shared.config import fingerprint
-from mindex.shared.migrations import execute_script
-from mindex.shared.storage import dumps
+from shared.config import fingerprint
+from shared.migrations import execute_script
+from shared.storage import dumps
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS person_entities(id TEXT PRIMARY KEY, kind TEXT NOT NULL, data TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS person_sources(source_id TEXT PRIMARY KEY REFERENCES sources(id), work_id TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS person_sources(source_id TEXT PRIMARY KEY REFERENCES sources(id), work_id TEXT NOT
+NULL);
 CREATE TABLE IF NOT EXISTS person_references(id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, stage_id TEXT,
  path TEXT NOT NULL, digest TEXT NOT NULL, data TEXT NOT NULL, role_id TEXT);
-CREATE TABLE IF NOT EXISTS person_imports(id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft');
+CREATE TABLE IF NOT EXISTS person_imports(id TEXT PRIMARY KEY, data TEXT NOT NULL, status TEXT NOT NULL
+DEFAULT 'draft');
 CREATE TABLE IF NOT EXISTS person_features(id TEXT PRIMARY KEY, source_id TEXT, space TEXT NOT NULL,
  kind TEXT NOT NULL, data TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS person_features_source ON person_features(source_id,kind,space);
@@ -31,7 +34,8 @@ CREATE INDEX IF NOT EXISTS person_evidence_review ON person_evidence(
  source_id,shot_id,status,actor_id,role_id,start,id,
  json_extract(data,'$.confirmation'),json_extract(data,'$.shot_excluded'),
  json_type(data,'$.score'),json_extract(data,'$.score'),json_extract(data,'$.reviewed_at'));
-CREATE TABLE IF NOT EXISTS person_coverage(source_id TEXT NOT NULL, cache_id TEXT PRIMARY KEY, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS person_coverage(source_id TEXT NOT NULL, cache_id TEXT PRIMARY KEY, data TEXT NOT
+NULL);
 CREATE INDEX IF NOT EXISTS person_coverage_shot
  ON person_coverage(source_id,json_extract(data,'$.shot_id'));
 CREATE TABLE IF NOT EXISTS person_tasks(id TEXT PRIMARY KEY, source_id TEXT NOT NULL, status TEXT NOT NULL,
@@ -71,7 +75,8 @@ def init_person_schema(db):
             ),
         )
     db.execute(
-        "UPDATE person_evidence SET role_id=COALESCE(stage_id,role_id),stage_id=NULL WHERE stage_id IS NOT NULL"
+        "UPDATE person_evidence SET role_id=COALESCE(stage_id,role_id),stage_id=NULL WHERE stage_id IS NOT "
+        "NULL"
     )
     db.execute("UPDATE person_references SET stage_id=NULL WHERE stage_id IS NOT NULL")
     db.execute("INSERT INTO settings(key,value) VALUES(?, 'complete')", (marker,))
@@ -92,15 +97,25 @@ def migrate_actor_only_evidence(db):
     for row in db.execute(
         "SELECT source_id,shot_id,MIN(start) AS start,MAX(end) AS end, "
         "MAX(status='accepted' AND COALESCE(json_extract(data,'$.confirmation'),'')='shot_review') "
-        "AS removed_confirmation FROM person_evidence WHERE "
-        + predicate + " GROUP BY source_id,shot_id"
+        "AS removed_confirmation FROM person_evidence WHERE " + predicate + " GROUP BY source_id,shot_id"
     ).fetchall():
         key = fingerprint([marker, row["source_id"], row["shot_id"]])
-        db.execute("INSERT OR IGNORE INTO person_coverage VALUES(?,?,?)", (
-            row["source_id"], key, dumps({"shot_id": row["shot_id"], "start": row["start"],
-                                        "end": row["end"], "migration": marker,
-                                        "removed_confirmation": bool(row["removed_confirmation"])}),
-        ))
+        db.execute(
+            "INSERT OR IGNORE INTO person_coverage VALUES(?,?,?)",
+            (
+                row["source_id"],
+                key,
+                dumps(
+                    {
+                        "shot_id": row["shot_id"],
+                        "start": row["start"],
+                        "end": row["end"],
+                        "migration": marker,
+                        "removed_confirmation": bool(row["removed_confirmation"]),
+                    }
+                ),
+            ),
+        )
     db.execute("DELETE FROM person_evidence WHERE " + predicate)
     db.execute("INSERT INTO settings(key,value) VALUES(?, 'complete')", (marker,))
 

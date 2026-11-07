@@ -1,19 +1,53 @@
 """权威资源引用闭包：业务媒体、检查点、目录历史及外部回执共用。"""
+
 from __future__ import annotations
 
 import json
 from pathlib import PurePosixPath
 
-PATH_FIELDS = frozenset({"path", "thumbnail", "source_path", "image_path", "sample_path",
-                        "object_key", "$bytes", "input_path", "output_path", "audio_path", "video_path"})
-PREFIXES = ("sources/", "clips/", "thumbnails/", "persons/", "music/", "voices/", "studio/",
-            "topics/", "plans/", "transcripts/", "annotations/", "subtitles/", "objects/", "uploads/", "external/")
+PATH_FIELDS = frozenset(
+    {
+        "path",
+        "thumbnail",
+        "source_path",
+        "image_path",
+        "sample_path",
+        "object_key",
+        "$bytes",
+        "input_path",
+        "output_path",
+        "audio_path",
+        "video_path",
+    }
+)
+PREFIXES = (
+    "sources/",
+    "clips/",
+    "thumbnails/",
+    "persons/",
+    "music/",
+    "voices/",
+    "studio/",
+    "topics/",
+    "plans/",
+    "transcripts/",
+    "annotations/",
+    "subtitles/",
+    "objects/",
+    "uploads/",
+    "external/",
+)
 REFERENCE_COLUMNS = {
-    "sources": ("path",), "segments": ("path", "thumbnail"),
-    "index_members": ("snapshot",), "media_references": ("refs",),
-    "person_references": ("path", "data"), "person_versions": ("data",),
-    "person_evidence": ("data",), "person_imports": ("data",),
-    "voices": ("sample_path",), "topic_sources": ("config",),
+    "sources": ("path",),
+    "segments": ("path", "thumbnail"),
+    "index_members": ("snapshot",),
+    "media_references": ("refs",),
+    "person_references": ("path", "data"),
+    "person_versions": ("data",),
+    "person_evidence": ("data",),
+    "person_imports": ("data",),
+    "voices": ("sample_path",),
+    "topic_sources": ("config",),
 }
 
 
@@ -35,8 +69,11 @@ def _rows(db, table, fields, *, page=256):
     cursor = 0
     sequence = "id" if table in {"voices", "model_profiles", "runs", "studio_events"} else "rowid"
     while True:
-        rows = db.execute(f"SELECT {sequence} AS sequence,{','.join(fields)} FROM {table} "
-                          f"WHERE {sequence}>? ORDER BY {sequence} LIMIT ?", (cursor, page)).fetchall()
+        rows = db.execute(
+            f"SELECT {sequence} AS sequence,{','.join(fields)} FROM {table} "
+            f"WHERE {sequence}>? ORDER BY {sequence} LIMIT ?",
+            (cursor, page),
+        ).fetchall()
         if not rows:
             return
         yield from rows
@@ -52,7 +89,7 @@ def referenced_objects(store, *, connection=None):
     for row in _rows(db, "shared_files", ("object_key", "size")):
         if row["size"] >= 0:
             yield row["object_key"]
-    from mindex.shared.directory_files import document_digest, validate_entry
+    from shared.directory_files import document_digest, validate_entry
 
     for row in _rows(db, "directory_manifests", ("revision", "path", "document"), page=32):
         document = json.loads(row["document"])
@@ -72,7 +109,9 @@ def referenced_objects(store, *, connection=None):
                 except (ValueError, TypeError):
                     value = raw
                 for logical in path_values(value, field=field):
-                    pointer = db.execute("SELECT object_key,size FROM shared_files WHERE path=?", (logical,)).fetchone()
+                    pointer = db.execute(
+                        "SELECT object_key,size FROM shared_files WHERE path=?", (logical,)
+                    ).fetchone()
                     if pointer:
                         if pointer["size"] >= 0:
                             yield pointer["object_key"]
@@ -87,11 +126,15 @@ def referenced_objects(store, *, connection=None):
             yield from path_values(json.loads(row["receipt"]))
     for row in _rows(db, "uploaded_assets", ("object_key",)):
         yield row["object_key"]
-    for row in db.execute("SELECT pending_key FROM upload_sessions WHERE state IN ('pending','completing') "
-                          "AND pending_key IS NOT NULL").fetchall():
+    for row in db.execute(
+        "SELECT pending_key FROM upload_sessions WHERE state IN ('pending','completing') "
+        "AND pending_key IS NOT NULL"
+    ).fetchall():
         yield row["pending_key"]
-    rows = db.execute("SELECT p.object_key FROM upload_parts p JOIN upload_sessions s ON s.id=p.session_id "
-                      "WHERE s.state IN ('pending','completing')").fetchall()
+    rows = db.execute(
+        "SELECT p.object_key FROM upload_parts p JOIN upload_sessions s ON s.id=p.session_id "
+        "WHERE s.state IN ('pending','completing')"
+    ).fetchall()
     for row in rows:
         yield row["object_key"]
 
@@ -106,12 +149,18 @@ def required_objects(store):
         if key.startswith(("objects/", "uploads/", "external/", "pending/", "persons/", "music/", "voices/")):
             yield key
     with store.connect() as db:
+
         def authority(key):
             pointer = db.execute("SELECT object_key,size FROM shared_files WHERE path=?", (key,)).fetchone()
             return pointer["object_key"] if pointer and pointer["size"] >= 0 else key
 
         for row in _rows(db, "sources", ("id", "path", "prepared")):
-            if not row["prepared"] or not db.execute("SELECT 1 FROM segments WHERE source_id=? AND kind='shot' LIMIT 1", (row["id"],)).fetchone():
+            if (
+                not row["prepared"]
+                or not db.execute(
+                    "SELECT 1 FROM segments WHERE source_id=? AND kind='shot' LIMIT 1", (row["id"],)
+                ).fetchone()
+            ):
                 yield authority(row["path"])
         for row in _rows(db, "segments", ("path", "thumbnail", "kind")):
             if row["kind"] == "shot":

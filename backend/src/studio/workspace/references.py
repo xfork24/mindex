@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import hashlib
 
-from mindex.studio import studio
-from mindex.studio.studio_artifacts import digest
+from studio import studio
+from studio.artifacts import digest
 
 from .versions import root
 

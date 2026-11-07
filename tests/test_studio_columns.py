@@ -3,15 +3,15 @@ from __future__ import annotations
 import json
 
 import pytest
-from conftest import FixtureSpeaker, FixtureStoryboarder
 from fastapi.testclient import TestClient
-from test_studio_workspace import setup_workspace, wait_build
 
-from mindex.api import create_app
-from mindex.shared.trace import record
-from mindex.studio import studio
-from mindex.studio import workspace as ws
-from mindex.studio.studio_logs import ExecutionLog, log_path, read_events
+from api import create_app
+from conftest import FixtureSpeaker, FixtureStoryboarder
+from shared.trace import record
+from studio import studio
+from studio import workspace as ws
+from studio.logs import ExecutionLog, log_path, read_events
+from test_studio_workspace import setup_workspace, wait_build
 
 
 def request_body(config, jid, w, p, stage):

@@ -7,8 +7,8 @@ import threading
 
 import pytest
 
-from mindex.shared import jsonio
-from mindex.studio import studio
+from shared import jsonio
+from studio import studio
 
 
 def test_concurrent_writes_to_same_file_stay_valid(tmp_path):
@@ -81,7 +81,7 @@ def test_save_upload_removes_partial_file_on_failure(tmp_path):
     from fastapi import HTTPException
     from starlette.datastructures import UploadFile
 
-    from mindex.shared.uploads import save_upload
+    from shared.uploads import save_upload
 
     target = tmp_path / "upload.bin"
     with pytest.raises(HTTPException) as too_big:

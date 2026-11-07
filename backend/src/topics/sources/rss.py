@@ -9,9 +9,9 @@ from xml.etree import ElementTree
 
 from pydantic import Field
 
-from mindex.shared.config import StrictModel
-from mindex.topics.common import parse_time
-from mindex.topics.sources.base import FetchContext, Item, SourceError, http_get, item, register
+from shared.config import StrictModel
+from topics.common import parse_time
+from topics.sources.base import FetchContext, Item, SourceError, http_get, item, register
 
 _DTD = re.compile(rb"<!\s*(DOCTYPE|ENTITY)", re.IGNORECASE)
 
@@ -55,7 +55,9 @@ def time_of(node, *names: str) -> str | None:
 
 def atom_link(entry) -> str | None:
     links = [c for c in entry if local(c.tag) == "link"]
-    preferred = next((c for c in links if c.get("rel", "alternate") == "alternate"), links[0] if links else None)
+    preferred = next(
+        (c for c in links if c.get("rel", "alternate") == "alternate"), links[0] if links else None
+    )
     return preferred.get("href") if preferred is not None else None
 
 
@@ -71,7 +73,9 @@ def parse_feed(data: bytes, limit: int = 100) -> list[Item]:
         entries = [e for e in root if local(e.tag) == "entry"]
     elif kind in ("rss", "RDF"):
         channel = child(root, "channel")
-        entries = [e for e in (channel if channel is not None and kind == "rss" else root) if local(e.tag) == "item"]
+        entries = [
+            e for e in (channel if channel is not None and kind == "rss" else root) if local(e.tag) == "item"
+        ]
     else:
         raise SourceError("不是 RSS 或 Atom 订阅")
     items = []

@@ -14,15 +14,15 @@ import numpy as np
 from fastapi import HTTPException
 from pydantic import Field, model_validator
 
-from mindex.models.adapters import ModelError
-from mindex.persons.person_models import uid
-from mindex.persons.persons import Persons
-from mindex.shared.background_tasks import BackgroundTaskRunner, public_task
-from mindex.shared.config import StrictModel, fingerprint
-from mindex.shared.processing_lock import ProcessingLock
-from mindex.shared.queue_dispatch import insert_ledger
-from mindex.shared.storage import Store, dumps
-from mindex.shared.task_progress import RETRYABLE
+from models.adapters import ModelError
+from persons.person_models import uid
+from persons.persons import Persons
+from shared.background_tasks import BackgroundTaskRunner, public_task
+from shared.config import StrictModel, fingerprint
+from shared.processing_lock import ProcessingLock
+from shared.queue_dispatch import insert_ledger
+from shared.storage import Store, dumps
+from shared.task_progress import RETRYABLE
 
 
 class PersonOptions(StrictModel):
@@ -83,7 +83,9 @@ class PersonClient:
                 padded = ImageOps.expand(image.convert("RGB"), border=border, fill=(128, 128, 128))
                 buffer = io.BytesIO()
                 padded.save(buffer, format="PNG")
-            retry = self.request("POST", "/extract/image", files={"file": ("padded.png", buffer.getvalue(), "image/png")})
+            retry = self.request(
+                "POST", "/extract/image", files={"file": ("padded.png", buffer.getvalue(), "image/png")}
+            )
             if retry.get("space") != result.get("space"):
                 raise ModelError("特征提取响应空间与任务固定空间不符")
             # Keep all detections so group photos remain subject to the same gate.
@@ -95,7 +97,7 @@ class PersonClient:
         return {**result, "reference_preprocessing": self.reference_preprocessing}
 
     def video(self, path, start, end, frame_interval):
-        from mindex.persons.person_frames import sample_frames
+        from persons.person_frames import sample_frames
 
         frames, batch = [], []
         space = None
@@ -171,17 +173,18 @@ def reference_check(detections, min_quality):
     quality = subject.get("face_quality", 0)
     if quality < float(min_quality):
         # 质量门槛可配（默认 0）；被挡下的参考图要显式报出来，不能悄悄不参与。
-        return subject, (
-            f"参考照片人脸清晰度 {quality:.2f} 低于门槛 {float(min_quality):.2f}，未参与匹配"
-        )
+        return subject, (f"参考照片人脸清晰度 {quality:.2f} 低于门槛 {float(min_quality):.2f}，未参与匹配")
     return subject, None
 
 
 def stale_reference_features(client, extracted):
     preprocessing = getattr(client, "reference_preprocessing", None)
-    return bool(extracted is not None and preprocessing
-                and extracted.get("reference_preprocessing") != preprocessing
-                and reference_subject(extracted["observations"]) is None)
+    return bool(
+        extracted is not None
+        and preprocessing
+        and extracted.get("reference_preprocessing") != preprocessing
+        and reference_subject(extracted["observations"]) is None
+    )
 
 
 def ensure_reference_quality(store, config, client, item, space=None):
@@ -320,8 +323,10 @@ class EvidenceReferences:
             return None
         for frame in cached.get("frames", []):
             for index, observation in enumerate(frame["observations"]):
-                if evidence["id"] not in {fingerprint([data["cache_id"], frame["timestamp"], index]),
-                                          fingerprint(["role-evidence-v1", data["cache_id"], frame["timestamp"], index])}:
+                if evidence["id"] not in {
+                    fingerprint([data["cache_id"], frame["timestamp"], index]),
+                    fingerprint(["role-evidence-v1", data["cache_id"], frame["timestamp"], index]),
+                }:
                     continue
                 ref = matched_reference(
                     observation,
@@ -331,9 +336,12 @@ class EvidenceReferences:
                     evidence["role_id"],
                 )
                 score = Persons.evidence_score(data.get("original_score", data.get("score")))
-                if ref and (score is None or not math.isclose(
-                    cosine(observation.get("face_feature"), ref.get("face_feature")), score, abs_tol=1e-6
-                )):
+                if ref and (
+                    score is None
+                    or not math.isclose(
+                        cosine(observation.get("face_feature"), ref.get("face_feature")), score, abs_tol=1e-6
+                    )
+                ):
                     return None
                 return ref["id"] if ref else None
         return None
@@ -348,6 +356,7 @@ class EvidenceReferences:
         ):
             return None
         return ref["url"]
+
 
 def iou(a, b):
     x1, y1 = max(a[0], b[0]), max(a[1], b[1])
@@ -423,9 +432,21 @@ def attribute_frames(
             if ambiguous or not reliable:
                 anchors.pop(track, None)
             role_id, score, accepted = face_match(observation, references, config)
-            winning = [r for r in references if r.get("role_id") == role_id
-                       and r.get("face_quality", 0) >= config.min_reference_quality] if role_id else []
-            winner = max(winning, key=lambda r: cosine(observation.get("face_feature"), r.get("face_feature")), default=None)
+            winning = (
+                [
+                    r
+                    for r in references
+                    if r.get("role_id") == role_id
+                    and r.get("face_quality", 0) >= config.min_reference_quality
+                ]
+                if role_id
+                else []
+            )
+            winner = max(
+                winning,
+                key=lambda r: cosine(observation.get("face_feature"), r.get("face_feature")),
+                default=None,
+            )
             actor = winner["actor_id"] if winner else None
             reference_id = winner.get("id") if winner else None
             kind, status = "face", "candidate"
@@ -550,13 +571,19 @@ class PersonProcessor:
         if options.start >= duration or (options.end is not None and options.end > duration + 0.001):
             raise ValueError("处理区间超出原片")
         shots = [
-            {**s, "media_start": s["start"], "start": max(s["start"], options.start),
-             "end": min(s["end"], options.end or duration)}
+            {
+                **s,
+                "media_start": s["start"],
+                "start": max(s["start"], options.start),
+                "end": min(s["end"], options.end or duration),
+            }
             for s in shots
             if s["end"] > options.start and s["start"] < (options.end or duration)
         ]
         if progress:
-            progress({"stage": "extracting", "completed_shots": 0, "total_shots": len(shots), "unit": "shots"})
+            progress(
+                {"stage": "extracting", "completed_shots": 0, "total_shots": len(shots), "unit": "shots"}
+            )
         space = self.client.identity()
         roles = [r for r in self.catalogue.entities("role") if work_id in r["work_ids"]]
         entity_names = {e["id"]: e["name"] for e in self.catalogue.entities()}
@@ -575,9 +602,7 @@ class PersonProcessor:
                 "role_name": entity_names.get(ref["role_id"]) if ref["role_id"] else None,
             }
             if ref["role_id"] and ref["actor_id"] not in role_actors.get(ref["role_id"], []):
-                reference_errors.append(
-                    {**identity, "error": "参考图演员已不属于该角色，请重新配对"}
-                )
+                reference_errors.append({**identity, "error": "参考图演员已不属于该角色，请重新配对"})
                 continue
             key = fingerprint(["reference-v1", ref["digest"], space])
             extracted = self.feature(key)
@@ -591,7 +616,9 @@ class PersonProcessor:
             if reason is not None:
                 reference_errors.append({**identity, "error": reason})
                 continue
-            references.append({**subject, "id": ref["id"], "actor_id": ref["actor_id"], "role_id": ref["role_id"]})
+            references.append(
+                {**subject, "id": ref["id"], "actor_id": ref["actor_id"], "role_id": ref["role_id"]}
+            )
         report = {
             "source_id": source_id,
             "space": space,
@@ -624,14 +651,21 @@ class PersonProcessor:
                     }
                 )
         reusable = defaultdict(list)
-        for row in self.store.rows('SELECT cache_id,data FROM person_coverage WHERE source_id=?', (source_id,)):
-            coverage = json.loads(row['data'])
-            if (coverage.get('space') == space and coverage.get('sampling_rule') in {'frame-interval-v3', 'frame-offset-v4'}
-                    and coverage.get('frame_interval') == self.config.person.frame_interval):
-                reusable[(round(coverage['start'], 6), round(coverage['end'], 6), coverage['sampling_rule'])].append(row['cache_id'])
+        for row in self.store.rows(
+            "SELECT cache_id,data FROM person_coverage WHERE source_id=?", (source_id,)
+        ):
+            coverage = json.loads(row["data"])
+            if (
+                coverage.get("space") == space
+                and coverage.get("sampling_rule") in {"frame-interval-v3", "frame-offset-v4"}
+                and coverage.get("frame_interval") == self.config.person.frame_interval
+            ):
+                reusable[
+                    (round(coverage["start"], 6), round(coverage["end"], 6), coverage["sampling_rule"])
+                ].append(row["cache_id"])
         for position, shot in enumerate(shots):
-            clipped = shot['start'] > shot['media_start']
-            sampling_rule = 'frame-offset-v4' if clipped else 'frame-interval-v3'
+            clipped = shot["start"] > shot["media_start"]
+            sampling_rule = "frame-offset-v4" if clipped else "frame-interval-v3"
             key = fingerprint(
                 [
                     "shot-features-frame-offset-v4" if clipped else "shot-features-frame-interval-v3",
@@ -647,17 +681,17 @@ class PersonProcessor:
             extracted = self.feature(key)
             if extracted is None:
                 # 镜头 ID / 布局身份变化不改变同一原片区间的采样输入。
-                for previous_key in reusable[(round(shot['start'], 6), round(shot['end'], 6), sampling_rule)]:
+                for previous_key in reusable[(round(shot["start"], 6), round(shot["end"], 6), sampling_rule)]:
                     previous = self.feature(previous_key)
                     if previous is None:
                         continue
                     try:
                         self.validate_space(previous, space)
-                        self.validate_frames(previous['frames'], shot)
+                        self.validate_frames(previous["frames"], shot)
                     except (ModelError, KeyError, TypeError):
                         continue
                     extracted = previous
-                    self.cache(key, source_id, space, 'shot', extracted)
+                    self.cache(key, source_id, space, "shot", extracted)
                     break
             if extracted is None:
                 if progress:
@@ -671,8 +705,12 @@ class PersonProcessor:
                         }
                     )
                 with self.store.materialize_media(shot["path"]) as path:
-                    extracted = self.client.video(path, shot["start"] - shot["media_start"],
-                                                  shot["end"] - shot["media_start"], self.config.person.frame_interval)
+                    extracted = self.client.video(
+                        path,
+                        shot["start"] - shot["media_start"],
+                        shot["end"] - shot["media_start"],
+                        self.config.person.frame_interval,
+                    )
                 self.validate_space(extracted, space)
                 frames = extracted["frames"]
                 for frame in frames:
@@ -681,8 +719,10 @@ class PersonProcessor:
                 for frame in frames:
                     if frame.get("image_base64"):
                         item = self.catalogue.image(
-                            base64.b64decode(frame.pop("image_base64"), validate=True), "frames/" + source_id,
-                            max_edge=self.config.person.frames_max_edge, image_format="JPEG",
+                            base64.b64decode(frame.pop("image_base64"), validate=True),
+                            "frames/" + source_id,
+                            max_edge=self.config.person.frames_max_edge,
+                            image_format="JPEG",
                             jpeg_quality=self.config.person.frames_jpeg_quality,
                         )
                         frame["image_path"] = item["path"]
@@ -714,8 +754,11 @@ class PersonProcessor:
                 "SELECT * FROM person_evidence WHERE source_id=? AND shot_id=?", (source_id, shot["id"])
             ):
                 data = json.loads(row["data"])
-                if (data.get("reviewed") and data.get("cache_id") == key
-                    and row["actor_id"] in role_actors.get(row["role_id"], [])):
+                if (
+                    data.get("reviewed")
+                    and data.get("cache_id") == key
+                    and row["actor_id"] in role_actors.get(row["role_id"], [])
+                ):
                     manual_anchors[row["id"]] = {
                         **{k: row[k] for k in ("actor_id", "role_id", "status")},
                         "reference_id": data.get("reference_id"),
@@ -735,9 +778,11 @@ class PersonProcessor:
             if evidence is None:
                 timestamps = [f["timestamp"] for f in extracted["frames"]]
                 intervals = [b - a for a, b in pairwise(timestamps) if b > a]
-                matching_config = self.config.person.model_copy(update={
-                    "fps": 1 / float(np.median(intervals)) if intervals else self.config.person.fps,
-                })
+                matching_config = self.config.person.model_copy(
+                    update={
+                        "fps": 1 / float(np.median(intervals)) if intervals else self.config.person.fps,
+                    }
+                )
                 evidence = attribute_frames(
                     extracted["frames"],
                     references,
@@ -752,16 +797,21 @@ class PersonProcessor:
                 self.cache(match_key, source_id, space, "matching", evidence)
             with self.store.connect() as db:
                 # Whole-shot exclusions remain authoritative on reruns.
-                excluded = db.execute(
-                    "SELECT 1 FROM person_evidence e WHERE source_id=? AND shot_id=? AND ("
-                    + self.catalogue.SHOT_EXCLUSION + ") LIMIT 1",
-                    (source_id, shot["id"]),
-                ).fetchone() is not None
+                excluded = (
+                    db.execute(
+                        "SELECT 1 FROM person_evidence e WHERE source_id=? AND shot_id=? AND ("
+                        + self.catalogue.SHOT_EXCLUSION
+                        + ") LIMIT 1",
+                        (source_id, shot["id"]),
+                    ).fetchone()
+                    is not None
+                )
                 if excluded:
                     evidence = []
                 # Replace stale candidates, retaining all accepted/rejected evidence.
                 for old in db.execute(
-                    "SELECT id,data,actor_id,role_id,status FROM person_evidence WHERE source_id=? AND shot_id=? AND start>=? AND start<?",
+                    "SELECT id,data,actor_id,role_id,status FROM person_evidence WHERE source_id=? AND "
+                    "shot_id=? AND start>=? AND start<?",
                     (source_id, shot["id"], shot["start"], shot["end"]),
                 ).fetchall():
                     if old["actor_id"] and not old["role_id"]:
@@ -788,7 +838,9 @@ class PersonProcessor:
                     elif old and json.loads(old["data"]).get("reviewed"):
                         continue
                     db.execute(
-                        "INSERT OR REPLACE INTO person_evidence(id,source_id,shot_id,actor_id,role_id,start,end,status,data) VALUES(?,?,?,?,?,?,?,?,?)",
+                        "INSERT OR REPLACE INTO "
+                        "person_evidence(id,source_id,shot_id,actor_id,role_id,start,end,status,data) "
+                        "VALUES(?,?,?,?,?,?,?,?,?)",
                         tuple(
                             e[k]
                             for k in (
@@ -840,8 +892,14 @@ class PersonProcessor:
             elif state and (state["candidate"] or not state["rejected"]):
                 candidate_shots.add(shot["id"])
             if progress:
-                progress({"stage": "matching", "completed_shots": position + 1,
-                          "total_shots": len(shots), "unit": "shots"})
+                progress(
+                    {
+                        "stage": "matching",
+                        "completed_shots": position + 1,
+                        "total_shots": len(shots),
+                        "unit": "shots",
+                    }
+                )
         if self.client.identity() != space:
             raise ModelError("处理期间人物特征空间变化，拒绝发布；缓存仍按空间隔离")
         report["elapsed_seconds"] = round(time.perf_counter() - started, 3)
@@ -849,7 +907,8 @@ class PersonProcessor:
         report["candidate_shots"] = len(candidate_shots - accepted_shots)
         report["release"] = None
         if options.publish:
-            from mindex.admin.source_tasks import publication_attempt
+            from admin.source_tasks import publication_attempt
+
             report["publication"] = publication_attempt(self.config, source_id, "persons", progress=progress)
             if report["publication"]["status"] == "complete":
                 report["release"] = report["publication"]
@@ -893,23 +952,35 @@ class PersonTasks(BackgroundTaskRunner):
 
     def recent(self, limit=30):
         """最近的任务（新在前），一次查询取齐，避免逐条 get() 的 N+1 查询。"""
-        return [public_task(r) for r in self.store.rows("SELECT * FROM person_tasks ORDER BY rowid DESC LIMIT ?", (limit,))]
+        return [
+            public_task(r)
+            for r in self.store.rows("SELECT * FROM person_tasks ORDER BY rowid DESC LIMIT ?", (limit,))
+        ]
 
     def start(self, source_id, options):
         if not self.store.one("SELECT id FROM sources WHERE id=?", (source_id,)):
             raise HTTPException(404, "找不到素材")
 
         def create():
-            from mindex.admin.source_tasks import freeze_config
+            from admin.source_tasks import freeze_config
 
             config = self.runtime.current().model_copy(deep=True)
             self.validate(source_id, options)
             if options.work_id:
                 Persons(self.store).assign_work(source_id, options.work_id)
             identifier = uid()
-            insert_ledger(self.store, self.table, identifier,
+            insert_ledger(
+                self.store,
+                self.table,
+                identifier,
                 "INSERT INTO person_tasks(id,source_id,status,config,options) VALUES(?,?,?,?,?)",
-                (identifier, source_id, "queued", freeze_config(config, self.store), options.model_dump_json()),
+                (
+                    identifier,
+                    source_id,
+                    "queued",
+                    freeze_config(config, self.store),
+                    options.model_dump_json(),
+                ),
             )
             return identifier, config
 
@@ -917,7 +988,7 @@ class PersonTasks(BackgroundTaskRunner):
 
     def validate(self, source_id, options, publish_only=False):
         """需已完成分镜；新工作台选择作品时做资料预检（仅重新发布时跳过）。"""
-        from mindex.admin.source_tasks import person_setup
+        from admin.source_tasks import person_setup
 
         source = self.store.one("SELECT prepared FROM sources WHERE id=?", (source_id,))
         if not source or not source["prepared"]:
@@ -933,7 +1004,8 @@ class PersonTasks(BackgroundTaskRunner):
         self.validate(row["source_id"], options, publish_only=bool(row["result"] and options.publish))
 
     def restore(self, row):
-        from mindex.admin.source_tasks import restore_config
+        from admin.source_tasks import restore_config
+
         return restore_config(row["config"], self.runtime, self.store)
 
     def delete(self, identifier):
@@ -947,11 +1019,16 @@ class PersonTasks(BackgroundTaskRunner):
 
     def execute(self, task_id, row, config, save):
         options = PersonOptions.model_validate_json(row["options"])
-        result = json.loads(row["result"]) if row["result"] and options.publish else PersonProcessor(config).run(
-            row["source_id"], options.model_copy(update={"publish": False}), lambda v: save("progress", v))
+        result = (
+            json.loads(row["result"])
+            if row["result"] and options.publish
+            else PersonProcessor(config).run(
+                row["source_id"], options.model_copy(update={"publish": False}), lambda v: save("progress", v)
+            )
+        )
         save("result", result)
         if options.publish:
-            from mindex.admin.source_tasks import enqueue_publications
+            from admin.source_tasks import enqueue_publications
 
             save("publication", enqueue_publications(self.runtime, self.store, row["source_id"], "persons"))
         else:

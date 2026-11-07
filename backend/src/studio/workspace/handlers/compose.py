@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
-from .. import music, post
-from ..plans import canvas_render
-from ..post import MUSIC_MIX_VERSION, compose
-from ..stages import StageHandler, register
-from ..versions import ordered_shots
+from studio.workspace import music, post
+from studio.workspace.plans import canvas_render
+from studio.workspace.post import MUSIC_MIX_VERSION, compose
+from studio.workspace.stages import StageHandler, register
+from studio.workspace.versions import ordered_shots
+
 from .render import canvas_settings
 
 
 def music_payload(w, p) -> list:
     """背景音乐段落的签名：每段的起始分镜、覆盖的分镜、音乐版本与音量；没有背景音乐时为空（不进签名）。"""
     return [
-        {"cue": segment["cue"], "shots": segment["shots"], "music": p["shots"][segment["cue"]].get("music"),
-         "volume": segment["music"].get("volume", 0.25)}
+        {
+            "cue": segment["cue"],
+            "shots": segment["shots"],
+            "music": p["shots"][segment["cue"]].get("music"),
+            "volume": segment["music"].get("volume", 0.25),
+        }
         for segment in music.segments(w, p)
     ]
 
@@ -27,11 +32,14 @@ class ComposeHandler(StageHandler):
 
     def settings(self, config, p, *, store=None, display=False):
         o = p["options"]
-        return canvas_settings(p, {
-            "burn": o["burn"],
-            "subtitle": {**config.studio.subtitle.model_dump(), "burn": o["burn"]},
-            "render": canvas_render(config, p)[0].model_dump(),
-        })
+        return canvas_settings(
+            p,
+            {
+                "burn": o["burn"],
+                "subtitle": {**config.studio.subtitle.model_dump(), "burn": o["burn"]},
+                "render": canvas_render(config, p)[0].model_dump(),
+            },
+        )
 
     def specification(self, config, job_id, w, p, sid, params, resources):
         shots = ordered_shots(w, p)

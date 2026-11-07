@@ -31,19 +31,45 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 
 def make_video(path: Path) -> Path:
-    from mindex.shared.media import command
+    from shared.media import command
 
-    command(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-             "-f", "lavfi", "-i", "color=c=red:s=160x120:r=25:d=1",
-             "-f", "lavfi", "-i", "color=c=blue:s=160x120:r=25:d=1",
-             "-f", "lavfi", "-i", "color=c=green:s=160x120:r=25:d=8",
-             "-filter_complex", "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]", "-map", "[v]",
-             "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path)])
+    command(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=red:s=160x120:r=25:d=1",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=blue:s=160x120:r=25:d=1",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=green:s=160x120:r=25:d=8",
+            "-filter_complex",
+            "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]",
+            "-map",
+            "[v]",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(path),
+        ]
+    )
     return path
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--backend", choices=["openai", "anthropic"])
     parser.add_argument("--base-url")
     parser.add_argument("--model")
@@ -61,10 +87,20 @@ def main() -> int:
     if args.list:
         for scenario in SCENARIOS:
             needs = f" [需要：{'、'.join(scenario.needs)}]" if scenario.needs else ""
-            print(f"{scenario.name}{needs}\n    请求：{scenario.prompt}" + (f"\n    说明：{scenario.note}" if scenario.note else ""))
+            print(
+                f"{scenario.name}{needs}\n    请求：{scenario.prompt}"
+                + (f"\n    说明：{scenario.note}" if scenario.note else "")
+            )
         return 0
-    missing = [flag for flag, value in (("--backend", args.backend), ("--base-url", args.base_url),
-                                        ("--model", args.model)) if not value]
+    missing = [
+        flag
+        for flag, value in (
+            ("--backend", args.backend),
+            ("--base-url", args.base_url),
+            ("--model", args.model),
+        )
+        if not value
+    ]
     if missing:
         parser.error("缺少参数：" + " ".join(missing))
     if not os.environ.get(args.api_key_env):
@@ -73,10 +109,13 @@ def main() -> int:
 
     from fastapi.testclient import TestClient
 
-    from mindex.shared.config import Config
+    from shared.config import Config
 
-    chosen = [s for s in SCENARIOS if (not args.scenario or s.name in args.scenario)
-              and not (args.no_vision and "vision" in s.needs)]
+    chosen = [
+        s
+        for s in SCENARIOS
+        if (not args.scenario or s.name in args.scenario) and not (args.no_vision and "vision" in s.needs)
+    ]
     if not chosen:
         print("没有匹配的场景：" + ", ".join(s.name for s in SCENARIOS), file=sys.stderr)
         return 2
@@ -86,15 +125,27 @@ def main() -> int:
     stamp = time.strftime("%Y%m%d-%H%M%S")
     output = args.output / f"{stamp}-{args.backend}-{args.model.replace('/', '_')}"
     output.mkdir(parents=True, exist_ok=True)
-    report = {"backend": args.backend, "model": args.model, "base_url": args.base_url, "started": stamp, "scenarios": []}
+    report = {
+        "backend": args.backend,
+        "model": args.model,
+        "base_url": args.base_url,
+        "started": stamp,
+        "scenarios": [],
+    }
     with tempfile.TemporaryDirectory(prefix="mindex-agent-eval-") as directory:
         video = make_video(Path(directory) / "工程测试专用_颜色样本.mp4")
         for scenario in chosen:
             config = Config(data_dir=Path(directory) / scenario.name / "data")
             config.embedding.dimensions = 8
-            config.agent.llm = config.agent.llm.model_copy(update={
-                "backend": args.backend, "base_url": args.base_url, "model": args.model,
-                "api_key_env": args.api_key_env, "max_tokens": args.max_tokens})
+            config.agent.llm = config.agent.llm.model_copy(
+                update={
+                    "backend": args.backend,
+                    "base_url": args.base_url,
+                    "model": args.model,
+                    "api_key_env": args.api_key_env,
+                    "max_tokens": args.max_tokens,
+                }
+            )
             started = time.monotonic()
             entry = {"name": scenario.name, "prompt": scenario.prompt, "note": scenario.note}
             events = []
@@ -105,14 +156,25 @@ def main() -> int:
                     scenario.check(world, client, events)
                 entry["passed"] = True
             except Exception as exc:  # noqa: BLE001 — 评测要记录每个场景的失败原因
-                entry.update(passed=False, error=f"{type(exc).__name__}: {exc}", trace=traceback.format_exc()[-2000:])
-            entry.update(seconds=round(time.monotonic() - started, 1), tools=tool_names(events),
-                         reply=final_text(events)[-1500:],
-                         usage=[e["data"].get("usage") for e in events if e["type"] == "assistant/message"])
-            (output / f"{scenario.name}.events.json").write_text(json.dumps(events, ensure_ascii=False, indent=1))
+                entry.update(
+                    passed=False, error=f"{type(exc).__name__}: {exc}", trace=traceback.format_exc()[-2000:]
+                )
+            entry.update(
+                seconds=round(time.monotonic() - started, 1),
+                tools=tool_names(events),
+                reply=final_text(events)[-1500:],
+                usage=[e["data"].get("usage") for e in events if e["type"] == "assistant/message"],
+            )
+            (output / f"{scenario.name}.events.json").write_text(
+                json.dumps(events, ensure_ascii=False, indent=1)
+            )
             report["scenarios"].append(entry)
-            print(f"{'✓' if entry['passed'] else '✗'} {scenario.name} ({entry['seconds']}s) "
-                  f"tools={entry['tools']}" + ("" if entry["passed"] else f"\n    {entry['error']}"), flush=True)
+            print(
+                f"{'✓' if entry['passed'] else '✗'} {scenario.name} ({entry['seconds']}s) "
+                f"tools={entry['tools']}"
+                f"" + ("" if entry["passed"] else f"\n    {entry['error']}"),
+                flush=True,
+            )
     passed = sum(1 for s in report["scenarios"] if s["passed"])
     report["pass_rate"] = f"{passed}/{len(report['scenarios'])}"
     (output / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2))

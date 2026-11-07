@@ -1,3 +1,5 @@
+"""检索质量评估:召回指标计算与报告生成。"""
+
 from __future__ import annotations
 
 import json
@@ -6,11 +8,11 @@ from pathlib import Path
 
 import numpy as np
 
-from mindex.search.search import SearchEngine
-from mindex.shared.config import Config, fingerprint
-from mindex.shared.media import content_hash
-from mindex.shared.storage import Store
-from mindex.shared.types import TextSearch
+from search.search import SearchEngine
+from shared.config import Config, fingerprint
+from shared.media import content_hash
+from shared.storage import Store
+from shared.types import TextSearch
 
 
 def relevance(result: dict, targets: list[dict]) -> float:
@@ -79,8 +81,10 @@ def evaluate(
     native = active["spec"].get("format", 1) >= 2
     if native:
         profiles = {
-            "video_only": {"visual": 1}, "dialogue_only": {"dialogue": 1},
-            "analysis_only": {"analysis": 1}, "video_asr": {"visual": 1, "dialogue": 1},
+            "video_only": {"visual": 1},
+            "dialogue_only": {"dialogue": 1},
+            "analysis_only": {"analysis": 1},
+            "video_asr": {"visual": 1, "dialogue": 1},
             "fusion": config.search.channel_weights,
             "no_dialogue": {**config.search.channel_weights, "dialogue": 0},
             "no_analysis": {**config.search.channel_weights, "analysis": 0},
@@ -110,7 +114,9 @@ def evaluate(
             continue
         current = config.model_copy(deep=True)
         if native:
-            current.search.channel_weights = {key: weights.get(key, 0) for key in config.search.channel_weights}
+            current.search.channel_weights = {
+                key: weights.get(key, 0) for key in config.search.channel_weights
+            }
         else:
             current.search.weights = {key: weights.get(key, 0) for key in config.search.weights}
         excluded = {

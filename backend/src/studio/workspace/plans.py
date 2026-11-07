@@ -8,11 +8,11 @@ from uuid import uuid4
 
 from pydantic import Field, field_validator, model_serializer, model_validator
 
-from mindex.shared.config import StrictModel
-from mindex.shared.types import SCRIPT_TEMPLATE_ID
-from mindex.studio import studio
-from mindex.studio.brands import BRAND_ID, BrandOverrides
-from mindex.studio.delivery_templates import DeliverySnapshot
+from shared.config import StrictModel
+from shared.types import SCRIPT_TEMPLATE_ID
+from studio import studio
+from studio.brands import BRAND_ID, BrandOverrides
+from studio.delivery_templates import DeliverySnapshot
 
 from .publish import PublishOptions
 from .stages import handler, names, shot_stages
@@ -31,7 +31,10 @@ DEFAULT_CANVAS = ("16:9", "pad")
 
 
 class ExportSpec(StrictModel):
-    """多画幅导出：derive 由主成片裁切或加边快速派生；rerender 用关联子方案按该画幅重新渲染（画质更好、耗时更长）。"""
+    (
+        """多画幅导出：derive 由主成片裁切或加边快速派生；rerender """
+        """用关联子方案按该画幅重新渲染（画质更好、耗时更长）。"""
+    )
 
     canvas: Literal["16:9", "9:16", "1:1"]
     fit: Literal["pad", "crop"] = "crop"
@@ -45,7 +48,15 @@ class BeatAlign(StrictModel):
     tolerance: float = Field(default=0.25, ge=0.04, le=1.0, allow_inf_nan=False)
 
 
-OPTIONAL_OPTIONS = ("subtitle_style", "brand_id", "brand_overrides", "exports", "publish", "beat_align", "delivery")
+OPTIONAL_OPTIONS = (
+    "subtitle_style",
+    "brand_id",
+    "brand_overrides",
+    "exports",
+    "publish",
+    "beat_align",
+    "delivery",
+)
 
 
 class PlanOptions(StrictModel):
@@ -103,7 +114,11 @@ class PlanOptions(StrictModel):
         if isinstance(value, dict) and value.get("delivery") and value.get("exports"):
             value = dict(value)
             canvas = value.get("canvas", "16:9")
-            value["exports"] = [x for x in value["exports"] if (x.get("canvas") if isinstance(x, dict) else x.canvas) != canvas]
+            value["exports"] = [
+                x
+                for x in value["exports"]
+                if (x.get("canvas") if isinstance(x, dict) else x.canvas) != canvas
+            ]
         return value
 
     @model_validator(mode="after")
@@ -191,10 +206,14 @@ def remove_plan(w, plan_id):
         raise studio.StudioError("至少保留一个方案")
     link = w["plans"][plan_id].get("variant_of") or {}
     parent = w["plans"].get(link.get("plan"))
-    if parent and any(item.get("canvas") == link.get("canvas") and item.get("mode") == "rerender"
-                      for item in parent["options"].get("exports") or []):
-        raise studio.StudioError(f"这是方案「{parent['name']}」{link['canvas']} 画幅重新渲染的子方案；"
-                                 "请先在主方案取消该画幅的重新渲染导出")
+    if parent and any(
+        item.get("canvas") == link.get("canvas") and item.get("mode") == "rerender"
+        for item in parent["options"].get("exports") or []
+    ):
+        raise studio.StudioError(
+            f"这是方案「{parent['name']}」{link['canvas']} 画幅重新渲染的子方案；"
+            "请先在主方案取消该画幅的重新渲染导出"
+        )
     w["plans"].pop(plan_id)
     if w["active_plan"] == plan_id:
         w["active_plan"] = max(w["plans"].values(), key=lambda p: p.get("created_at") or "")["id"]
@@ -248,7 +267,9 @@ def set_board(config, job_id, w, p, shots, *, origin=None):
         # 来源变化后不再属于该分镜的阶段（例如改为图片后的召回与选片）不保留选用。
         sequence = shot_stages(shot.model_dump())
         selected[shot.id] = {
-            key: value for key, value in {**old, "content": cid}.items() if key == "content" or key in sequence
+            key: value
+            for key, value in {**old, "content": cid}.items()
+            if key == "content" or key in sequence
         }
         if "recall" not in sequence:
             recall_free.add(shot.id)
@@ -263,9 +284,13 @@ def set_board(config, job_id, w, p, shots, *, origin=None):
     )
     p.update(board=bid, shots=selected)
     # Ranges belonging to removed shots remain in historical plans/versions only.
-    p["ranges"] = {sid: value for sid, value in p["ranges"].items() if sid in selected and sid not in recall_free}
+    p["ranges"] = {
+        sid: value for sid, value in p["ranges"].items() if sid in selected and sid not in recall_free
+    }
     p["anchors"] = {
-        sid: value for sid, value in p.get("anchors", {}).items() if sid in selected and sid not in recall_free
+        sid: value
+        for sid, value in p.get("anchors", {}).items()
+        if sid in selected and sid not in recall_free
     }
 
 
@@ -368,8 +393,14 @@ def restore(w, vid, name):
     normalize_voice_options(p)
     p.setdefault("anchors", {})
     if "script" not in p:  # 文案阶段之前的成片快照：分镜来自旧任务原文
-        legacy = next((v["id"] for v in w["versions"].values()
-                       if v["stage"] == "script" and v["data"].get("origin") == "legacy"), None)
+        legacy = next(
+            (
+                v["id"]
+                for v in w["versions"].values()
+                if v["stage"] == "script" and v["data"].get("origin") == "legacy"
+            ),
+            None,
+        )
         p["script"] = legacy
         p["board_script"] = legacy if p.get("board") else None
     p.update(id=uuid4().hex[:12], name=name, created_at=studio.now(), final=vid)

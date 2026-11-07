@@ -12,20 +12,12 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 
-from mindex.models import adapters, deployment
-from mindex.models.adapters import ModelError
-from mindex.models.deployment import (
-    PREFIX,
-    SUFFIX,
-    check_local_files,
-    normalized_metadata,
-    read_manifest,
-    space_contract,
-    validate_role,
-)
-from mindex.models.embedders import HTTPEmbedder
-from mindex.shared.config import Config, Service, fingerprint
-from mindex.shared.media import MediaError, atomic_media, content_hash, probe
+from models import adapters, deployment
+from models.adapters import ModelError
+from models.deployment import PREFIX, SUFFIX, check_local_files, normalized_metadata, read_manifest, space_contract, validate_role
+from models.embedders import HTTPEmbedder
+from shared.config import Config, Service, fingerprint
+from shared.media import MediaError, atomic_media, content_hash, probe
 
 ADAPTER_VERSION = deployment.ADAPTER_VERSION
 _RECALL_CHECKS: ContextVar[dict | None] = ContextVar("llama_recall_checks", default=None)
@@ -360,7 +352,7 @@ class LlamaEmbedder(HTTPEmbedder):
         if recalling and checks.get(key):
             return
         if space.get("schema") == 2:
-            from mindex.models.compatibility import require_gate
+            from models.compatibility import require_gate
 
             require_gate(self.config, space, report)
             if recalling:

@@ -42,7 +42,10 @@ jobs:
         run: uv sync --extra dev
 
       - name: ruff
-        run: uv run ruff check backend/src tests
+        run: uv run ruff check backend/src tests scripts eval
+
+      - name: ruff format
+        run: uv run ruff format --check backend/src tests scripts eval
 
       - name: mypy（shared+models 基线）
         run: bash scripts/typecheck.sh
@@ -58,6 +61,11 @@ jobs:
 
       - name: 前端 JS 语法
         run: for f in frontend/src/*/*.js desktop/*.js desktop/lib/*.js desktop/scripts/*.js; do node --check "$f"; done
+
+      - name: 前端 Prettier 格式
+        run: >-
+          npx --yes prettier@3.9.10 --check "frontend/src/**/*.js" "frontend/src/**/*.html" "frontend/src/**/*.css"
+          "desktop/**/*.js" "tests/*.cjs" "scripts/*.cjs"
 
       - name: CLI 入口
         run: uv run mindex --help

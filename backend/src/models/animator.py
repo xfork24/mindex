@@ -13,10 +13,10 @@ from __future__ import annotations
 import os
 import re
 
-from mindex.models import adapters
-from mindex.models.adapters import ModelError
-from mindex.shared.config import Config
-from mindex.shared.trace import record
+from models import adapters
+from models.adapters import ModelError
+from shared.config import Config
+from shared.trace import record
 
 ANIMATOR_PROMPT_VERSION = 1
 ANIMATOR_TEMPERATURE = 0.3

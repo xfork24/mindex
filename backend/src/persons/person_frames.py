@@ -6,7 +6,7 @@ import io
 
 from PIL import Image
 
-from mindex.models.adapters import ModelError
+from models.adapters import ModelError
 
 
 def sample_frames(path, start, end, frame_interval=15):

@@ -2,31 +2,58 @@
 "use strict";
 // 动画规格一行：画面说明在前，句号分隔，其后是来源、字符数、时长与尺寸。
 function animateLine(d) {
-  const detail = MindexI18n.msg("ui.animate_detail", { p0: MindexI18n.msg(d.origin === "manual" ? "ui.animate_origin_manual" : "ui.animate_origin_generated"),
-    p1: d.chars ?? "?", p2: secs(d.seconds), p3: d.width || "?", p4: d.height || "?" });
-  return d.brief ? `${MindexI18n.msg("ui.animate_brief_line", { p0: d.brief })}。${detail}` : detail;
+  const detail = MindexI18n.msg("ui.animate_detail", {
+    p0: MindexI18n.msg(
+      d.origin === "manual" ? "ui.animate_origin_manual" : "ui.animate_origin_generated",
+    ),
+    p1: d.chars ?? "?",
+    p2: secs(d.seconds),
+    p3: d.width || "?",
+    p4: d.height || "?",
+  });
+  return d.brief
+    ? `${MindexI18n.msg("ui.animate_brief_line", { p0: d.brief })}。${detail}`
+    : detail;
 }
 function renderStageDetails(body, sid, stage) {
   const vid = plan().shots[sid][stage],
     item = ver(vid),
     actions = el("div", "", "detail-actions");
   actions.append(
-    mutationButton(stage === "select" ? MindexI18n.msg("ui.5d9c0feb3855") : MindexI18n.msg("ui.fb03cbd3e2da"), () => runNode(stage, sid, false)),
-    mutationButton(stage === "select" ? MindexI18n.msg("ui.2c2583899752") : MindexI18n.msg("ui.c6a70df5d5ee"), () => runNode(stage, sid, true))
+    mutationButton(
+      stage === "select" ? MindexI18n.msg("ui.5d9c0feb3855") : MindexI18n.msg("ui.fb03cbd3e2da"),
+      () => runNode(stage, sid, false),
+    ),
+    mutationButton(
+      stage === "select" ? MindexI18n.msg("ui.2c2583899752") : MindexI18n.msg("ui.c6a70df5d5ee"),
+      () => runNode(stage, sid, true),
+    ),
   );
   if (item) actions.append(button(MindexI18n.msg("ui.ae6c80665732"), () => showVersion(vid)));
   const result = el("p", "", "warn-text");
   result.dataset.nodeResult = "true";
   result.setAttribute("role", "status");
   body.append(actions, result);
-  if (stage === "recall") body.append(el("p", MindexI18n.msg("ui.796ebaa8b64a"),
-  "muted"));
+  if (stage === "recall") body.append(el("p", MindexI18n.msg("ui.796ebaa8b64a"), "muted"));
   const recallSource = shotStages(sid).includes("recall");
   const aigcSource = shotStages(sid).includes("generate");
   const toolSource = shotStages(sid).includes("invoke");
-  if (stage === "select") body.append(el("p", MindexI18n.msg(recallSource ? "ui.6ad63039cb96" :
-  aigcSource ? "ui.select_generated_help" : toolSource ? "ui.select_tool_help" : "ui.select_clip_help"),
-  "muted"));
+  if (stage === "select")
+    body.append(
+      el(
+        "p",
+        MindexI18n.msg(
+          recallSource
+            ? "ui.6ad63039cb96"
+            : aigcSource
+              ? "ui.select_generated_help"
+              : toolSource
+                ? "ui.select_tool_help"
+                : "ui.select_clip_help",
+        ),
+        "muted",
+      ),
+    );
   if (stage === "invoke") {
     const help = el("p", MindexI18n.msg("ui.invoke_help"), "muted");
     const manage = el("a", MindexI18n.msg("ui.invoke_manage"), "quiet nav-link");
@@ -46,58 +73,113 @@ function renderStageDetails(body, sid, stage) {
     help.append(manage);
     body.append(help);
     // 人工编辑源码：没有成功版本时也可从空白模板开始写。
-    actions.append(mutationButton(MindexI18n.msg("ui.animate_edit_source"), () => openAnimationEditor(sid)));
+    actions.append(
+      mutationButton(MindexI18n.msg("ui.animate_edit_source"), () => openAnimationEditor(sid)),
+    );
   }
   if (stage === "tts") {
     const current = state.data.tts_settings;
-    const base = current ? MindexI18n.msg("ui.905f065f533b", { p0:
-      current.voice_mode === "inherit" ? MindexI18n.msg("ui.79cde58eb13b") : MindexI18n.msg("ui.7a506144d437"), p1: current.voice, p2: current.model }) : MindexI18n.msg("ui.b695402e923b", { p0:
-      plan().options.voice || MindexI18n.msg("ui.79cde58eb13b") });
+    const base = current
+      ? MindexI18n.msg("ui.905f065f533b", {
+          p0:
+            current.voice_mode === "inherit"
+              ? MindexI18n.msg("ui.79cde58eb13b")
+              : MindexI18n.msg("ui.7a506144d437"),
+          p1: current.voice,
+          p2: current.model,
+        })
+      : MindexI18n.msg("ui.b695402e923b", {
+          p0: plan().options.voice || MindexI18n.msg("ui.79cde58eb13b"),
+        });
     // 已选版本的时长并入同一行。
     const seconds = item?.data?.duration;
-    body.append(el("p", seconds == null ? base : `${base} · ${MindexI18n.msg("ui.tts_duration", { p0: secs(seconds) })}`, "muted"));
-  }
-  if (!item) body.append(el("p", MindexI18n.msg("ui.f72548296145"), "muted"));else
-  {
-    if (item.incomplete)
     body.append(
-      el("p", MindexI18n.msg("ui.6ca99f1c90fb"), "warn-text")
+      el(
+        "p",
+        seconds == null
+          ? base
+          : `${base} · ${MindexI18n.msg("ui.tts_duration", { p0: secs(seconds) })}`,
+        "muted",
+      ),
     );
+  }
+  if (!item) body.append(el("p", MindexI18n.msg("ui.f72548296145"), "muted"));
+  else {
+    if (item.incomplete) body.append(el("p", MindexI18n.msg("ui.6ca99f1c90fb"), "warn-text"));
     if (stage === "recall") {
       const recall = item.data.recall,
         meta = item.data.meta || {};
       body.append(
         el(
-          "p", MindexI18n.msg("ui.ee6cc02c2e4c", { p0:
-            RECALL_MODE_LABEL[item.data.mode || "text"], p1: item.data.query || MindexI18n.msg("ui.f1b46a8c5d6c"), p2: item.data.results?.length || 0 })
-        )
+          "p",
+          MindexI18n.msg("ui.ee6cc02c2e4c", {
+            p0: RECALL_MODE_LABEL[item.data.mode || "text"],
+            p1: item.data.query || MindexI18n.msg("ui.f1b46a8c5d6c"),
+            p2: item.data.results?.length || 0,
+          }),
+        ),
       );
       if (recall?.person_ids?.length)
-      body.append(
-        el(
-          "p", MindexI18n.msg("ui.e2ee09bf74bf", { p0:
-            recall.person_ids.map(personName).join("、"), p1: recall.person_mode === "onscreen" ? MindexI18n.msg("ui.0b697429bd52") : recall.person_mode === "mentioned" ? MindexI18n.msg("ui.9f7ab435be94") : MindexI18n.msg("ui.4afad877551a"), p2: recall.person_relation === "any" ? MindexI18n.msg("ui.31af9a60c654") : MindexI18n.msg("ui.3bd33bf40e37") })
-        )
-      );
-      const sources = recall?.filters?.source_ids?.length ? recall.filters.source_ids : recall?.filters?.source_id ? [recall.filters.source_id] : [];
+        body.append(
+          el(
+            "p",
+            MindexI18n.msg("ui.e2ee09bf74bf", {
+              p0: recall.person_ids.map(personName).join("、"),
+              p1:
+                recall.person_mode === "onscreen"
+                  ? MindexI18n.msg("ui.0b697429bd52")
+                  : recall.person_mode === "mentioned"
+                    ? MindexI18n.msg("ui.9f7ab435be94")
+                    : MindexI18n.msg("ui.4afad877551a"),
+              p2:
+                recall.person_relation === "any"
+                  ? MindexI18n.msg("ui.31af9a60c654")
+                  : MindexI18n.msg("ui.3bd33bf40e37"),
+            }),
+          ),
+        );
+      const sources = recall?.filters?.source_ids?.length
+        ? recall.filters.source_ids
+        : recall?.filters?.source_id
+          ? [recall.filters.source_id]
+          : [];
       const jobMaterials = jobScope();
       if (sources.length)
-      body.append(el("p", MindexI18n.msg("ui.81f420e6a6d2", { p0: sources.map(sourceName).join("、") })));
+        body.append(
+          el("p", MindexI18n.msg("ui.81f420e6a6d2", { p0: sources.map(sourceName).join("、") })),
+        );
       else if (jobMaterials)
-      body.append(el("p", MindexI18n.msg("ui.9213d98274d9", { n: jobMaterials.size }), "muted"));
-      for (const [key, label] of [["scene", "ui.625b392c7b8a"], ["emotion", "ui.61fe61644a75"], ["shot_size", "ui.6867f7b4537a"], ["min_duration", "ui.26b6f15b345b"], ["max_duration", "ui.2de8ce6144b7"]]) {
-        if (recall?.filters?.[key]) body.append(el("p", `${MindexI18n.msg(label)}：${recall.filters[key]}`));
+        body.append(el("p", MindexI18n.msg("ui.9213d98274d9", { n: jobMaterials.size }), "muted"));
+      for (const [key, label] of [
+        ["scene", "ui.625b392c7b8a"],
+        ["emotion", "ui.61fe61644a75"],
+        ["shot_size", "ui.6867f7b4537a"],
+        ["min_duration", "ui.26b6f15b345b"],
+        ["max_duration", "ui.2de8ce6144b7"],
+      ]) {
+        if (recall?.filters?.[key])
+          body.append(el("p", `${MindexI18n.msg(label)}：${recall.filters[key]}`));
       }
       if (meta.referenced_people?.length)
-      body.append(el("p", MindexI18n.msg("ui.b607edb41246", { p0: [...new Set(meta.referenced_people.map(p => p.name))].join('、') }), "muted"));
+        body.append(
+          el(
+            "p",
+            MindexI18n.msg("ui.b607edb41246", {
+              p0: [...new Set(meta.referenced_people.map((p) => p.name))].join("、"),
+            }),
+            "muted",
+          ),
+        );
       if (meta.person_coverage_missing?.length)
-      body.append(
-        el(
-          "p", MindexI18n.msg("ui.75671397b702", { p0:
-            meta.person_coverage_missing.map(sourceName).join("、") }),
-          "warn-text"
-        )
-      );
+        body.append(
+          el(
+            "p",
+            MindexI18n.msg("ui.75671397b702", {
+              p0: meta.person_coverage_missing.map(sourceName).join("、"),
+            }),
+            "warn-text",
+          ),
+        );
       if (recall?.media_id) {
         const host = el("div", "", "query-preview-host");
         body.append(host);
@@ -113,37 +195,95 @@ function renderStageDetails(body, sid, stage) {
       // 生成图片：提示词、尺寸与图片预览；渲染阶段按静态图片推拉/平移。
       const d = item.data;
       body.append(el("p", MindexI18n.msg("ui.generate_prompt_line", { p0: d.prompt || "" })));
-      body.append(el("p", MindexI18n.msg("ui.draw_summary", { p0: d.width || "?", p1: d.height || "?" }), "muted"));
+      body.append(
+        el(
+          "p",
+          MindexI18n.msg("ui.draw_summary", { p0: d.width || "?", p1: d.height || "?" }),
+          "muted",
+        ),
+      );
       if (item.files.image?.url) body.append(queryPreviewNode(item.files.image.url, "image"));
     } else if (stage === "generate") {
       // 生成画面：提示词、请求/实际时长与生成结果预览（下载后统一为 MP4）。
       const d = item.data;
       body.append(el("p", MindexI18n.msg("ui.generate_prompt_line", { p0: d.prompt || "" })));
-      body.append(el("p", MindexI18n.msg("ui.generate_detail", { p0: d.task_id || "?", p1: secs(d.seconds),
-        p2: secs(d.duration), p3: d.width || "?", p4: d.height || "?" }), "muted"));
+      body.append(
+        el(
+          "p",
+          MindexI18n.msg("ui.generate_detail", {
+            p0: d.task_id || "?",
+            p1: secs(d.seconds),
+            p2: secs(d.duration),
+            p3: d.width || "?",
+            p4: d.height || "?",
+          }),
+          "muted",
+        ),
+      );
       if (item.files.generated?.url) body.append(media("video", item.files.generated.url));
     } else if (stage === "invoke") {
       // 第三方工具产物：工具源与工具名、产物类型、来源主机与尺寸/时长；预览视频或图片。
       const d = item.data;
-      body.append(el("p", MindexI18n.msg("ui.invoke_detail", { p0: d.tool_id || "?", p1: d.tool || "?",
-        p2: MindexI18n.msg(d.output === "image" ? "ui.invoke_output_image" : "ui.invoke_output_video"), p3: d.origin || "?" })));
-      body.append(el("p", d.output === "image" ? MindexI18n.msg("ui.draw_summary", { p0: d.width || "?", p1: d.height || "?" }) :
-        MindexI18n.msg("ui.invoke_video_detail", { p0: secs(d.duration), p1: d.width || "?", p2: d.height || "?" }), "muted"));
+      body.append(
+        el(
+          "p",
+          MindexI18n.msg("ui.invoke_detail", {
+            p0: d.tool_id || "?",
+            p1: d.tool || "?",
+            p2: MindexI18n.msg(
+              d.output === "image" ? "ui.invoke_output_image" : "ui.invoke_output_video",
+            ),
+            p3: d.origin || "?",
+          }),
+        ),
+      );
+      body.append(
+        el(
+          "p",
+          d.output === "image"
+            ? MindexI18n.msg("ui.draw_summary", { p0: d.width || "?", p1: d.height || "?" })
+            : MindexI18n.msg("ui.invoke_video_detail", {
+                p0: secs(d.duration),
+                p1: d.width || "?",
+                p2: d.height || "?",
+              }),
+          "muted",
+        ),
+      );
       const url = item.files.artifact?.url;
-      if (url) body.append(d.output === "image" ? queryPreviewNode(url, "image") : media("video", url));
+      if (url)
+        body.append(d.output === "image" ? queryPreviewNode(url, "image") : media("video", url));
     } else if (stage === "animate") {
       // 动画源码：来源（模型生成/人工修改）、字符数与时长；沙箱 iframe 预览（严格 CSP，不含 allow-same-origin）。
       const d = item.data;
       body.append(el("p", animateLine(item.data)));
-      if (item.status === "complete" && item.files.animation) body.append(animationFrame(vid, d.width, d.height));
+      if (item.status === "complete" && item.files.animation)
+        body.append(animationFrame(vid, d.width, d.height));
     } else if (stage === "select" && item.data.event.video.kind === "file") {
       // 上传片段 / 生成画面：窗口是文件内的时间。
       const d = item.data,
         video = d.event.video;
-      body.append(el("p", MindexI18n.msg("ui.5e5e44f7ea35", { p0: MindexI18n.msg(d.generated ? "ui.source_aigc" : d.tool ? "ui.source_tool" : "ui.source_clip") })));
       body.append(
-        el("p", MindexI18n.msg("ui.select_clip_window", { p0: secs(video.start), p1: secs(video.end),
-          p2: secs((d.clip || d.generated || d.tool)?.duration), p3: (d.atempo || d.event.audio.atempo).toFixed(3), p4: secs(d.freeze_seconds) }))
+        el(
+          "p",
+          MindexI18n.msg("ui.5e5e44f7ea35", {
+            p0: MindexI18n.msg(
+              d.generated ? "ui.source_aigc" : d.tool ? "ui.source_tool" : "ui.source_clip",
+            ),
+          }),
+        ),
+      );
+      body.append(
+        el(
+          "p",
+          MindexI18n.msg("ui.select_clip_window", {
+            p0: secs(video.start),
+            p1: secs(video.end),
+            p2: secs((d.clip || d.generated || d.tool)?.duration),
+            p3: (d.atempo || d.event.audio.atempo).toFixed(3),
+            p4: secs(d.freeze_seconds),
+          }),
+        ),
       );
       if (d.event.warning) body.append(el("p", shortIds(d.event.warning), "warn-text"));
     } else if (stage === "select") {
@@ -152,42 +292,64 @@ function renderStageDetails(body, sid, stage) {
         actual = d.actual_range || d.event.video;
       body.append(
         el(
-          "p", MindexI18n.msg("ui.5e5e44f7ea35", { p0:
-            sourceName(d.event.video.source_id, d.event.video.source_name) })
-        )
+          "p",
+          MindexI18n.msg("ui.5e5e44f7ea35", {
+            p0: sourceName(d.event.video.source_id, d.event.video.source_name),
+          }),
+        ),
       );
       if (d.anchor)
-      body.append(
-        el(
-          "p", MindexI18n.msg("ui.f0786353b3bb", { p0:
-            secs(d.anchor.start), p1: secs(d.anchor.end), p2: d.anchor.rank || 0 })
-        )
-      );
+        body.append(
+          el(
+            "p",
+            MindexI18n.msg("ui.f0786353b3bb", {
+              p0: secs(d.anchor.start),
+              p1: secs(d.anchor.end),
+              p2: d.anchor.rank || 0,
+            }),
+          ),
+        );
       if (range)
+        body.append(
+          el(
+            "p",
+            MindexI18n.msg("ui.32fb7a7b38fb", {
+              p0: secs(range.start),
+              p1: secs(range.end),
+              p2: secs(actual.start),
+              p3: secs(actual.end),
+            }),
+          ),
+        );
       body.append(
         el(
-          "p", MindexI18n.msg("ui.32fb7a7b38fb", { p0:
-            secs(range.start), p1: secs(range.end), p2: secs(actual.start), p3: secs(actual.end) })
-        )
-      );
-      body.append(
-        el(
-          "p", MindexI18n.msg("ui.630a26be62ed", { p0:
-            d.event.video.segment_ids.length, p1: (d.atempo || d.event.audio.atempo).toFixed(3), p2: secs(d.trim_seconds), p3: secs(d.freeze_seconds) })
-        )
+          "p",
+          MindexI18n.msg("ui.630a26be62ed", {
+            p0: d.event.video.segment_ids.length,
+            p1: (d.atempo || d.event.audio.atempo).toFixed(3),
+            p2: secs(d.trim_seconds),
+            p3: secs(d.freeze_seconds),
+          }),
+        ),
       );
       if (d.extension)
-      body.append(
-        el(
-          "p", MindexI18n.msg("ui.453085df275b", { p0:
-            secs(d.extension.before), p1: secs(d.extension.after) })
-        )
-      );
+        body.append(
+          el(
+            "p",
+            MindexI18n.msg("ui.453085df275b", {
+              p0: secs(d.extension.before),
+              p1: secs(d.extension.after),
+            }),
+          ),
+        );
       if (d.event.warning) body.append(el("p", shortIds(d.event.warning), "warn-text"));
     } else if (stage === "render") {
       // AI 动画分镜：动画规格（画面说明、来源、字符数、时长、尺寸）与帧数放在同一行，用 · 连接。
       const animation = ver(plan().shots[sid].animate);
-      const frames = MindexI18n.msg("ui.a8e554e0bc5a", { p0: item.data.frames || "?", p1: item.data.fps || "?" });
+      const frames = MindexI18n.msg("ui.a8e554e0bc5a", {
+        p0: item.data.frames || "?",
+        p1: item.data.fps || "?",
+      });
       body.append(el("p", animation?.data ? `${animateLine(animation.data)} · ${frames}` : frames));
       // 只显示带配音与字幕的分镜视频，不再单独列出音频。
       const video = renderPreviewVideo(item);
@@ -197,11 +359,11 @@ function renderStageDetails(body, sid, stage) {
   if (stage === "select" && recallSource) {
     const host = el("div", "", "manual-range-host");
     body.append(host);
-    if (!busy()) manualRange(sid, host).catch((error) => {
-      if (host.isConnected) host.replaceChildren(el("p", shortIds(error.message), "warn-text"));
-    });else
-    body.append(button(MindexI18n.msg("ui.1e81d450a0cb"), () => manualRange(sid, host)));
-
+    if (!busy())
+      manualRange(sid, host).catch((error) => {
+        if (host.isConnected) host.replaceChildren(el("p", shortIds(error.message), "warn-text"));
+      });
+    else body.append(button(MindexI18n.msg("ui.1e81d450a0cb"), () => manualRange(sid, host)));
   }
   if (stage === "tts") renderMusicSection(body, sid);
   if (stage === "render") {
@@ -237,7 +399,7 @@ function renderPreviewVideo(item) {
   text.mode = "hidden";
   const update = () => {
     const full = document.fullscreenElement === video;
-    const active = [...text.activeCues || []].map((cue) => cue.text).join("\n");
+    const active = [...(text.activeCues || [])].map((cue) => cue.text).join("\n");
     if (caption.textContent !== active) caption.textContent = active;
     caption.hidden = !active || full;
     placeCaption(video, caption);
@@ -248,7 +410,8 @@ function renderPreviewVideo(item) {
     text.mode = document.fullscreenElement === video ? "showing" : "hidden";
     update();
   });
-  if (typeof ResizeObserver === "function") new ResizeObserver(() => placeCaption(video, caption)).observe(video);
+  if (typeof ResizeObserver === "function")
+    new ResizeObserver(() => placeCaption(video, caption)).observe(video);
   // 首帧可能尚未解码（preload=metadata）或整帧偏暗（如淡入）：在加载、跳转、播放时反复尝试，直到检测出画面。
   const events = ["loadeddata", "seeked", "playing", "timeupdate"];
   const attempt = () => {
@@ -265,7 +428,10 @@ function renderPreviewVideo(item) {
 // 叠加字幕的位置：按 object-fit: contain 求视频画面在元素中的实际矩形，字幕宽度与画面一致，
 // 底边落在画面内“可视画面底边”（pictureBottom，缺省为整帧底边）；字号随画面短边缩放。
 function placeCaption(video, caption) {
-  const vw = video.videoWidth, vh = video.videoHeight, w = video.clientWidth, h = video.clientHeight;
+  const vw = video.videoWidth,
+    vh = video.videoHeight,
+    w = video.clientWidth,
+    h = video.clientHeight;
   if (!vw || !vh || !w || !h) return;
   const scale = Math.min(w / vw, h / vh),
     picW = vw * scale,
@@ -278,14 +444,15 @@ function placeCaption(video, caption) {
     left: `${left}px`,
     width: `${picW}px`,
     bottom: `${Math.max(0, wrapHeight - (top + picH * bottom))}px`,
-    fontSize: `${Math.max(11, Math.round(Math.min(picW, picH) * 0.06))}px`
+    fontSize: `${Math.max(11, Math.round(Math.min(picW, picH) * 0.06))}px`,
   });
 }
 // 可视画面底边占整帧高度的比例（0–1）：从下往上找第一行“有画面”的像素行；整帧都偏暗时返回 null。
 // 黑边是纯黑（编码后亮度约 16 以下），画面行要求至少 2% 的像素亮度超过阈值。
 function pictureBottom(source, width, height) {
   if (!width || !height) return null;
-  const w = 64, h = Math.max(1, Math.round(w * height / width));
+  const w = 64,
+    h = Math.max(1, Math.round((w * height) / width));
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
@@ -315,7 +482,9 @@ function shotSubtitleUrl(subtitle) {
     return `${pad(Math.floor(ms / 3600000))}:${pad(Math.floor(ms / 60000) % 60)}:${pad(Math.floor(ms / 1000) % 60)}.${pad(ms % 1000, 3)}`;
   };
   // 字幕文本里的 "-->" 与空行会破坏 WebVTT 结构，替换掉。
-  const text = String(subtitle.text).replace(/-->/g, "→").replace(/\n\s*\n/g, "\n");
+  const text = String(subtitle.text)
+    .replace(/-->/g, "→")
+    .replace(/\n\s*\n/g, "\n");
   const vtt = `WEBVTT\n\n1\n${stamp(subtitle.start)} --> ${stamp(subtitle.end)}\n${text}\n`;
   return URL.createObjectURL(new Blob([vtt], { type: "text/vtt" }));
 }
@@ -343,7 +512,13 @@ function shotCue(sid) {
 }
 // 提示点类型的显示名与说明（生成/翻唱为描述，曲库为曲名）。
 function musicKindText(cue) {
-  return MindexI18n.msg(cue?.kind === "cover" ? "ui.music_kind_cover" : cue?.kind === "library" ? "ui.music_kind_library" : "ui.music_kind_generate");
+  return MindexI18n.msg(
+    cue?.kind === "cover"
+      ? "ui.music_kind_cover"
+      : cue?.kind === "library"
+        ? "ui.music_kind_library"
+        : "ui.music_kind_generate",
+  );
 }
 function musicCueText(cue, item) {
   if (cue?.kind === "library") return item?.data?.title || (cue.track_id || "").slice(0, 8);
@@ -356,16 +531,28 @@ function musicSummary(sid) {
   if (belong.start) {
     const cue = shotCue(sid);
     const item = ver(plan().shots[sid].music);
-    return MindexI18n.msg("ui.music_summary_start", { p0: musicKindText(cue),
-      p1: musicCueText(cue, item), p2: item ? statusText(item.status) : MindexI18n.msg("ui.53e2db70167f") });
+    return MindexI18n.msg("ui.music_summary_start", {
+      p0: musicKindText(cue),
+      p1: musicCueText(cue, item),
+      p2: item ? statusText(item.status) : MindexI18n.msg("ui.53e2db70167f"),
+    });
   }
-  return MindexI18n.msg("ui.music_summary_continue", { p0: order().indexOf(belong.from) + 1, p1: shortId(belong.from) });
+  return MindexI18n.msg("ui.music_summary_continue", {
+    p0: order().indexOf(belong.from) + 1,
+    p1: shortId(belong.from),
+  });
 }
 function musicEditable(cue) {
   // 键序与 ShotMusic 字段一致。
-  return { kind: cue?.kind || "", prompt: cue?.prompt ?? null, lyrics: cue?.lyrics ?? null,
-    instrumental: cue?.instrumental ?? true, audio_id: cue?.audio_id ?? null, track_id: cue?.track_id ?? null,
-    volume: cue?.volume ?? 0.25 };
+  return {
+    kind: cue?.kind || "",
+    prompt: cue?.prompt ?? null,
+    lyrics: cue?.lyrics ?? null,
+    instrumental: cue?.instrumental ?? true,
+    audio_id: cue?.audio_id ?? null,
+    track_id: cue?.track_id ?? null,
+    volume: cue?.volume ?? 0.25,
+  };
 }
 // 某分镜适用的背景音乐素材：起始提示点所在分镜（from）、提示点、已选用的音乐版本；停止或没有背景音乐时为 null / {stop}。
 function musicMaterial(sid) {
@@ -377,7 +564,14 @@ function musicMaterial(sid) {
 // 分镜渲染详情缓存键：背景音乐素材变化（切换提示点、音乐版本状态、音量）时重建详情。
 function musicMaterialKey(sid) {
   const found = musicMaterial(sid);
-  return [found?.stop || false, found?.from, found?.start, found?.cue, found?.item?.id, found?.item?.status];
+  return [
+    found?.stop || false,
+    found?.from,
+    found?.start,
+    found?.cue,
+    found?.item?.id,
+    found?.item?.status,
+  ];
 }
 // 分镜渲染阶段列出本镜适用的背景音乐素材：在哪个分镜切入、描述、音量、音乐版本与试听。
 // 分镜预览本身只含配音（与原声）；背景音乐在成片合成时按分镜边界切换并铺在配音下面。
@@ -385,24 +579,44 @@ function renderMusicMaterial(body, sid) {
   const section = el("div", "", "music-material");
   section.append(el("h4", MindexI18n.msg("ui.music_render_heading")));
   const found = musicMaterial(sid);
-  if (!found) section.append(el("p", MindexI18n.msg("ui.music_render_none"), "muted"));else
-  if (found.stop) section.append(el("p", MindexI18n.msg("ui.music_render_stop")));else
-  {
+  if (!found) section.append(el("p", MindexI18n.msg("ui.music_render_none"), "muted"));
+  else if (found.stop) section.append(el("p", MindexI18n.msg("ui.music_render_stop")));
+  else {
     const cue = found.cue;
     const kind = musicKindText(cue);
     const text = musicCueText(cue, found.item);
-    section.append(el("p", found.start ?
-    MindexI18n.msg("ui.music_render_start", { p0: kind, p1: text }) :
-    MindexI18n.msg("ui.music_render_continue", { p0: order().indexOf(found.from) + 1, p1: shortId(found.from), p2: kind, p3: text })));
+    section.append(
+      el(
+        "p",
+        found.start
+          ? MindexI18n.msg("ui.music_render_start", { p0: kind, p1: text })
+          : MindexI18n.msg("ui.music_render_continue", {
+              p0: order().indexOf(found.from) + 1,
+              p1: shortId(found.from),
+              p2: kind,
+              p3: text,
+            }),
+      ),
+    );
     const item = found.item;
     if (item) {
-      section.append(el("p", MindexI18n.msg("ui.music_render_meta", { p0: cue?.volume ?? 0.25, p1: item.id.slice(0, 8),
-        p2: statusText(item.status), p3: secs(item.data?.duration) }), item.status === "failed" ? "warn-text" : "muted"));
+      section.append(
+        el(
+          "p",
+          MindexI18n.msg("ui.music_render_meta", {
+            p0: cue?.volume ?? 0.25,
+            p1: item.id.slice(0, 8),
+            p2: statusText(item.status),
+            p3: secs(item.data?.duration),
+          }),
+          item.status === "failed" ? "warn-text" : "muted",
+        ),
+      );
       if (item.error) section.append(el("p", shortIds(MindexI18n.system(item.error)), "warn-text"));
       if (item.files?.music?.url) section.append(media("audio", item.files.music.url));
     }
     if (!item || item.status !== "complete")
-    section.append(el("p", MindexI18n.msg("ui.music_render_missing"), "warn-text"));
+      section.append(el("p", MindexI18n.msg("ui.music_render_missing"), "warn-text"));
   }
   body.append(section);
 }
@@ -420,69 +634,134 @@ function renderMusicSection(body, sid) {
     state.musicDrafts.set(key, draft);
   }
   const value = draft.data;
-  const redraw = () => {invalidatePanel(sid);renderMatrix();};
+  const redraw = () => {
+    invalidatePanel(sid);
+    renderMatrix();
+  };
   const kind = field(MindexI18n.msg("ui.music_kind"), value.kind, "text", [
-  ["", MindexI18n.msg("ui.music_kind_continue")], ["generate", MindexI18n.msg("ui.music_kind_generate")],
-  ["cover", MindexI18n.msg("ui.music_kind_cover")], ["library", MindexI18n.msg("ui.music_kind_library")],
-  ["none", MindexI18n.msg("ui.music_kind_none")]]);
-  kind.input.addEventListener("change", () => {value.kind = kind.input.value;redraw();});
+    ["", MindexI18n.msg("ui.music_kind_continue")],
+    ["generate", MindexI18n.msg("ui.music_kind_generate")],
+    ["cover", MindexI18n.msg("ui.music_kind_cover")],
+    ["library", MindexI18n.msg("ui.music_kind_library")],
+    ["none", MindexI18n.msg("ui.music_kind_none")],
+  ]);
+  kind.input.addEventListener("change", () => {
+    value.kind = kind.input.value;
+    redraw();
+  });
   section.append(kind.wrap);
   if (value.kind === "library") section.append(musicLibraryPicker(sid, value));
   if (["generate", "cover", "library"].includes(value.kind)) {
     if (value.kind !== "library") {
-    const prompt = field(MindexI18n.msg(value.kind === "cover" ? "ui.music_cover_prompt" : "ui.music_prompt"), value.prompt ?? "", "textarea");
-    prompt.input.rows = 2;
-    prompt.input.maxLength = value.kind === "cover" ? 300 : 2000;
-    MindexI18n.setAttr(prompt.input, "placeholder", MindexI18n.msg("ui.music_prompt_placeholder"));
-    prompt.input.addEventListener("input", () => {value.prompt = prompt.input.value.trim() ? prompt.input.value : null;});
-    section.append(prompt.wrap);
-    if (value.kind === "generate") {
-      const wrap = el("label", "", "check");
-      const box = document.createElement("input");
-      box.type = "checkbox";
-      box.checked = value.instrumental !== false;
-      box.addEventListener("change", () => {value.instrumental = box.checked;redraw();});
-      wrap.append(box, el("span", MindexI18n.msg("ui.music_instrumental")));
-      section.append(wrap);
-    }
-    if (value.kind === "cover" || value.instrumental === false) {
-      const lyrics = field(MindexI18n.msg("ui.music_lyrics"), value.lyrics ?? "", "textarea");
-      lyrics.input.rows = 6;
-      lyrics.input.maxLength = 3500;
-      MindexI18n.setAttr(lyrics.input, "placeholder", MindexI18n.msg("ui.music_lyrics_placeholder"));
-      lyrics.input.addEventListener("input", () => {value.lyrics = lyrics.input.value.trim() ? lyrics.input.value : null;});
-      const status = el("p", "", "muted");
-      status.setAttribute("role", "status");
-      const write = button(MindexI18n.msg("ui.music_write_lyrics"), async () => {
-        write.disabled = true;
-        MindexI18n.setText(status, MindexI18n.msg("ui.music_writing_lyrics"));
-        try {
-          const result = await api(`${base()}/music/lyrics`, "POST", value.lyrics ?
-          { mode: "edit", prompt: value.prompt || "", lyrics: value.lyrics } : { mode: "write_full_song", prompt: value.prompt || "" });
-          value.lyrics = result.lyrics;
-          lyrics.input.value = result.lyrics;
-          MindexI18n.setText(status, MindexI18n.msg("ui.music_lyrics_done", { p0: result.title || "", p1: result.style_tags || "" }));
-        } catch (error) {
-          MindexI18n.setText(status, shortIds(error.message));
-        } finally {write.disabled = false;}
+      const prompt = field(
+        MindexI18n.msg(value.kind === "cover" ? "ui.music_cover_prompt" : "ui.music_prompt"),
+        value.prompt ?? "",
+        "textarea",
+      );
+      prompt.input.rows = 2;
+      prompt.input.maxLength = value.kind === "cover" ? 300 : 2000;
+      MindexI18n.setAttr(
+        prompt.input,
+        "placeholder",
+        MindexI18n.msg("ui.music_prompt_placeholder"),
+      );
+      prompt.input.addEventListener("input", () => {
+        value.prompt = prompt.input.value.trim() ? prompt.input.value : null;
       });
-      section.append(lyrics.wrap, write, status);
+      section.append(prompt.wrap);
+      if (value.kind === "generate") {
+        const wrap = el("label", "", "check");
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = value.instrumental !== false;
+        box.addEventListener("change", () => {
+          value.instrumental = box.checked;
+          redraw();
+        });
+        wrap.append(box, el("span", MindexI18n.msg("ui.music_instrumental")));
+        section.append(wrap);
+      }
+      if (value.kind === "cover" || value.instrumental === false) {
+        const lyrics = field(MindexI18n.msg("ui.music_lyrics"), value.lyrics ?? "", "textarea");
+        lyrics.input.rows = 6;
+        lyrics.input.maxLength = 3500;
+        MindexI18n.setAttr(
+          lyrics.input,
+          "placeholder",
+          MindexI18n.msg("ui.music_lyrics_placeholder"),
+        );
+        lyrics.input.addEventListener("input", () => {
+          value.lyrics = lyrics.input.value.trim() ? lyrics.input.value : null;
+        });
+        const status = el("p", "", "muted");
+        status.setAttribute("role", "status");
+        const write = button(MindexI18n.msg("ui.music_write_lyrics"), async () => {
+          write.disabled = true;
+          MindexI18n.setText(status, MindexI18n.msg("ui.music_writing_lyrics"));
+          try {
+            const result = await api(
+              `${base()}/music/lyrics`,
+              "POST",
+              value.lyrics
+                ? { mode: "edit", prompt: value.prompt || "", lyrics: value.lyrics }
+                : { mode: "write_full_song", prompt: value.prompt || "" },
+            );
+            value.lyrics = result.lyrics;
+            lyrics.input.value = result.lyrics;
+            MindexI18n.setText(
+              status,
+              MindexI18n.msg("ui.music_lyrics_done", {
+                p0: result.title || "",
+                p1: result.style_tags || "",
+              }),
+            );
+          } catch (error) {
+            MindexI18n.setText(status, shortIds(error.message));
+          } finally {
+            write.disabled = false;
+          }
+        });
+        section.append(lyrics.wrap, write, status);
+      }
+      if (value.kind === "cover")
+        section.append(
+          mediaSlot(
+            sid,
+            null,
+            null,
+            "audio",
+            MindexI18n.msg("ui.music_cover_audio"),
+            value.audio_id,
+            (id) => {
+              value.audio_id = id;
+            },
+            redraw,
+            () => state.musicDrafts.get(key) === draft,
+          ),
+        );
     }
-    if (value.kind === "cover")
-    section.append(mediaSlot(sid, null, null, "audio", MindexI18n.msg("ui.music_cover_audio"), value.audio_id,
-      (id) => {value.audio_id = id;}, redraw, () => state.musicDrafts.get(key) === draft));
-    }
-    const volumeWrap = el("label", MindexI18n.msg("ui.music_volume", { p0: value.volume }), "form-field");
+    const volumeWrap = el(
+      "label",
+      MindexI18n.msg("ui.music_volume", { p0: value.volume }),
+      "form-field",
+    );
     const slider = document.createElement("input");
     slider.type = "range";
     slider.min = "0";
     slider.max = "1";
     slider.step = "0.05";
     slider.value = String(value.volume);
-    MindexI18n.setAttr(slider, "aria-label", MindexI18n.msg("ui.music_volume", { p0: value.volume }));
+    MindexI18n.setAttr(
+      slider,
+      "aria-label",
+      MindexI18n.msg("ui.music_volume", { p0: value.volume }),
+    );
     slider.addEventListener("input", () => {
       value.volume = Number(slider.value);
-      MindexI18n.setText(volumeWrap.firstChild, MindexI18n.msg("ui.music_volume", { p0: value.volume }));
+      MindexI18n.setText(
+        volumeWrap.firstChild,
+        MindexI18n.msg("ui.music_volume", { p0: value.volume }),
+      );
     });
     volumeWrap.append(slider);
     section.append(volumeWrap);
@@ -490,23 +769,38 @@ function renderMusicSection(body, sid) {
   const actions = el("div", "", "detail-actions");
   actions.append(mutationButton(MindexI18n.msg("ui.music_save"), () => saveMusic(sid, draft)));
   if (shotStages(sid).includes("music")) {
-    actions.append(mutationButton(MindexI18n.msg("ui.fb03cbd3e2da"), () => runNode("music", sid, false)),
-    mutationButton(MindexI18n.msg("ui.c6a70df5d5ee"), () => runNode("music", sid, true)));
+    actions.append(
+      mutationButton(MindexI18n.msg("ui.fb03cbd3e2da"), () => runNode("music", sid, false)),
+      mutationButton(MindexI18n.msg("ui.c6a70df5d5ee"), () => runNode("music", sid, true)),
+    );
   }
   section.append(actions);
   const item = ver(plan().shots[sid].music);
   if (item?.data?.kind === "library") {
-    section.append(el("p", MindexI18n.msg("ui.music_library_version", { p0: item.data.title || "", p1: item.data.attribution || "",
-      p2: secs(item.data.duration) }) + (item.status === "complete" ? "" : ` · ${statusText(item.status)}`),
-      item.status === "failed" ? "warn-text" : "muted"));
+    section.append(
+      el(
+        "p",
+        MindexI18n.msg("ui.music_library_version", {
+          p0: item.data.title || "",
+          p1: item.data.attribution || "",
+          p2: secs(item.data.duration),
+        }) + (item.status === "complete" ? "" : ` · ${statusText(item.status)}`),
+        item.status === "failed" ? "warn-text" : "muted",
+      ),
+    );
     if (item.error) section.append(el("p", shortIds(MindexI18n.system(item.error)), "warn-text"));
     if (item.files.music?.url) section.append(media("audio", item.files.music.url));
   } else if (item) {
     const modelName = item.parameters?.music_generator?.model || MindexI18n.msg("ui.9865b5e9b32d");
     // 成功的版本不再重复写“完成”，其余状态照常显示。
     const statusPart = item.status === "complete" ? "" : ` · ${statusText(item.status)}`;
-    section.append(el("p", `${MindexI18n.msg("ui.music_model_prefix", { p0: modelName })}${statusPart} · ${secs(item.data?.duration)}`,
-      item.status === "failed" ? "warn-text" : "muted"));
+    section.append(
+      el(
+        "p",
+        `${MindexI18n.msg("ui.music_model_prefix", { p0: modelName })}${statusPart} · ${secs(item.data?.duration)}`,
+        item.status === "failed" ? "warn-text" : "muted",
+      ),
+    );
     if (item.error) section.append(el("p", shortIds(MindexI18n.system(item.error)), "warn-text"));
     if (item.files.music?.url) section.append(media("audio", item.files.music.url));
   }
@@ -516,8 +810,9 @@ function renderMusicSection(body, sid) {
 // 曲库选曲：下拉列出曲库曲目（过期曲目不可选），“按文案推荐”调用推荐接口给出本段的候选与理由。
 function musicLibraryPicker(sid, value) {
   const box = el("div", "", "music-library-picker");
-  const pick = field(MindexI18n.msg("ui.music_library_track"), value.track_id || "", "text",
-    [["", MindexI18n.msg("ui.music_library_loading")]]);
+  const pick = field(MindexI18n.msg("ui.music_library_track"), value.track_id || "", "text", [
+    ["", MindexI18n.msg("ui.music_library_loading")],
+  ]);
   pick.input.dataset.musicTrack = sid;
   const select = pick.input;
   const hint = el("p", "", "muted");
@@ -526,47 +821,79 @@ function musicLibraryPicker(sid, value) {
     select.replaceChildren();
     const empty = document.createElement("option");
     empty.value = "";
-    MindexI18n.setText(empty, MindexI18n.msg(items.length ? "ui.music_library_choose" : "ui.music_library_empty"));
+    MindexI18n.setText(
+      empty,
+      MindexI18n.msg(items.length ? "ui.music_library_choose" : "ui.music_library_empty"),
+    );
     select.append(empty);
     for (const item of items) {
       const option = document.createElement("option");
       option.value = item.id;
       option.disabled = Boolean(item.expired);
       const bpm = item.bpm ? ` · ${Math.round(item.bpm)} BPM` : "";
-      const moods = (item.moods || []).map((key) => MindexI18n.msg(`ui.music_mood_${key}`)).join("、");
-      MindexI18n.setText(option, `${item.title}${item.artist ? ` — ${item.artist}` : ""} · ${secs(item.duration)}${bpm}${moods ? ` · ${moods}` : ""}${item.expired ? ` · ${MindexI18n.msg("ui.music_library_expired")}` : ""}`);
+      const moods = (item.moods || [])
+        .map((key) => MindexI18n.msg(`ui.music_mood_${key}`))
+        .join("、");
+      MindexI18n.setText(
+        option,
+        `${item.title}${item.artist ? ` — ${item.artist}` : ""} · ${secs(item.duration)}${bpm}${moods ? ` · ${moods}` : ""}${item.expired ? ` · ${MindexI18n.msg("ui.music_library_expired")}` : ""}`,
+      );
       select.append(option);
     }
     select.value = chosen || "";
   };
   // 音乐组筛选与音乐库同款默认全选（=不限），部分选择后过滤曲目与推荐范围。
-  const groups = MindexGroups.picker("music", [], () => loadTracks(), "ui.groups_music_filter", {defaultAll: true});
+  const groups = MindexGroups.picker("music", [], () => loadTracks(), "ui.groups_music_filter", {
+    defaultAll: true,
+  });
   box.append(groups.wrap);
   function loadTracks() {
     const query = new URLSearchParams();
     for (const id of groups.values()) query.append("music_group_ids", id);
-    return MindexApi.json(`/api/studio/music-library?${query}`).then((result) => {
-    fill(result.items, value.track_id);
-    if (value.track_id && !result.items.some((item) => item.id === value.track_id))
-    MindexI18n.setText(hint, MindexI18n.msg("ui.music_library_missing"));
-  }).catch((error) => MindexI18n.setText(hint, shortIds(error.message)));
+    return MindexApi.json(`/api/studio/music-library?${query}`)
+      .then((result) => {
+        fill(result.items, value.track_id);
+        if (value.track_id && !result.items.some((item) => item.id === value.track_id))
+          MindexI18n.setText(hint, MindexI18n.msg("ui.music_library_missing"));
+      })
+      .catch((error) => MindexI18n.setText(hint, shortIds(error.message)));
   }
   loadTracks();
-  select.addEventListener("change", () => {value.track_id = select.value || null;});
+  select.addEventListener("change", () => {
+    value.track_id = select.value || null;
+  });
   const recommend = button(MindexI18n.msg("ui.music_library_recommend"), async () => {
     recommend.disabled = true;
     MindexI18n.setText(hint, MindexI18n.msg("ui.music_library_recommending"));
     try {
-      const result = await api("/api/studio/music-library/recommend", "POST", { job_id: state.id, plan_id: plan().id, shot_id: sid, music_group_ids: groups.values() });
-      if (!result.items.length) {MindexI18n.setText(hint, MindexI18n.msg("ui.music_library_no_match"));return;}
+      const result = await api("/api/studio/music-library/recommend", "POST", {
+        job_id: state.id,
+        plan_id: plan().id,
+        shot_id: sid,
+        music_group_ids: groups.values(),
+      });
+      if (!result.items.length) {
+        MindexI18n.setText(hint, MindexI18n.msg("ui.music_library_no_match"));
+        return;
+      }
       fill(result.items, result.items[0].id);
       value.track_id = result.items[0].id;
-      const moods = (result.moods || []).map((key) => MindexI18n.msg(`ui.music_mood_${key}`)).join("、") || "—";
+      const moods =
+        (result.moods || []).map((key) => MindexI18n.msg(`ui.music_mood_${key}`)).join("、") || "—";
       const range = result.bpm_range ? `${result.bpm_range[0]}–${result.bpm_range[1]}` : "—";
-      MindexI18n.setText(hint, MindexI18n.msg("ui.music_library_recommended", { p0: moods, p1: range, p2: result.items[0].reasons.join("；") || "—" }));
+      MindexI18n.setText(
+        hint,
+        MindexI18n.msg("ui.music_library_recommended", {
+          p0: moods,
+          p1: range,
+          p2: result.items[0].reasons.join("；") || "—",
+        }),
+      );
     } catch (error) {
       MindexI18n.setText(hint, shortIds(error.message));
-    } finally {recommend.disabled = false;}
+    } finally {
+      recommend.disabled = false;
+    }
   });
   const manage = el("a", MindexI18n.msg("ui.music_library_manage"), "quiet");
   manage.href = "/admin/music"; // 音乐库在素材管理页；新标签页打开，保留当前创作任务
@@ -578,19 +905,38 @@ function musicLibraryPicker(sid, value) {
   return box;
 }
 async function saveMusic(sid, draft) {
-  if (state.drafts.get(draftKey(sid))?.dirty) throw new Error(MindexI18n.msg("ui.music_content_dirty"));
+  if (state.drafts.get(draftKey(sid))?.dirty)
+    throw new Error(MindexI18n.msg("ui.music_content_dirty"));
   const value = draft.data;
   const shots = currentBoard();
   const shot = shots[order().indexOf(sid)];
-  if (!value.kind) delete shot.music;else
-  if (value.kind === "none") shot.music = { kind: "none", prompt: null, lyrics: null, instrumental: true, audio_id: null, volume: value.volume };else
-  if (value.kind === "library") {
+  if (!value.kind) delete shot.music;
+  else if (value.kind === "none")
+    shot.music = {
+      kind: "none",
+      prompt: null,
+      lyrics: null,
+      instrumental: true,
+      audio_id: null,
+      volume: value.volume,
+    };
+  else if (value.kind === "library") {
     if (!value.track_id) throw new Error(MindexI18n.msg("ui.music_library_pick_first"));
-    shot.music = { kind: "library", prompt: null, lyrics: null, instrumental: true, audio_id: null, track_id: value.track_id,
-      volume: value.volume };
+    shot.music = {
+      kind: "library",
+      prompt: null,
+      lyrics: null,
+      instrumental: true,
+      audio_id: null,
+      track_id: value.track_id,
+      volume: value.volume,
+    };
   } else {
-    shot.music = { ...value, lyrics: value.kind === "cover" || value.instrumental === false ? value.lyrics : null,
-      audio_id: value.kind === "cover" ? value.audio_id : null };
+    shot.music = {
+      ...value,
+      lyrics: value.kind === "cover" || value.instrumental === false ? value.lyrics : null,
+      audio_id: value.kind === "cover" ? value.audio_id : null,
+    };
     delete shot.music.track_id;
   }
   const scope = scopeKey();
@@ -603,23 +949,29 @@ async function saveMusic(sid, draft) {
 }
 async function regenerateColumn(stage, force = true) {
   if (busy() || hasDirtyDraft()) return;
-  const inputs_by_shot = {};
+  const inputsByShot = {};
   if (stage === PICTURE_COLUMN) {
     // 召回列：每个分镜执行各自的画面阶段（召回 / 生成图片 / 生成视频 / 生成动画）；上传素材的分镜不参与。
     for (const sid of order()) {
       const picture = pictureStage(sid);
-      if (picture) inputs_by_shot[sid] = nodeInputs(picture, sid);
+      if (picture) inputsByShot[sid] = nodeInputs(picture, sid);
     }
   } else if (stage !== "split")
-  // 只绑定包含该阶段的分镜（例如图片分镜没有召回与选片）。
-  for (const sid of order()) if (!STAGES.includes(stage) || shotStages(sid).includes(stage)) inputs_by_shot[sid] = nodeInputs(stage, sid);
+    // 只绑定包含该阶段的分镜（例如图片分镜没有召回与选片）。
+    for (const sid of order())
+      if (!STAGES.includes(stage) || shotStages(sid).includes(stage))
+        inputsByShot[sid] = nodeInputs(stage, sid);
   const url = planBase(),
-    body = { revision: state.data.revision, stage, inputs_by_shot, force };
+    body = { revision: state.data.revision, stage, inputs_by_shot: inputsByShot, force };
   state.submitting = true;
   render();
   try {
     await api(`${url}/${force ? "regenerate-column" : "execute-column"}`, "POST", body);
-    notice(MindexI18n.msg(force ? "ui.92157547f1b7" : "ui.execute_column_submitted", { p0: LABEL[stage] }));
+    notice(
+      MindexI18n.msg(force ? "ui.92157547f1b7" : "ui.execute_column_submitted", {
+        p0: LABEL[stage],
+      }),
+    );
   } finally {
     state.submitting = false;
     await refresh();
@@ -627,9 +979,7 @@ async function regenerateColumn(stage, force = true) {
 }
 function renderLogShell() {
   const key = scopeKey(),
-    build = [...state.data.builds].
-    reverse().
-    find((b) => b.plan_id === plan().id);
+    build = [...state.data.builds].reverse().find((b) => b.plan_id === plan().id);
   let view = state.logViews.get(key);
   if (!view || view.buildId !== build?.id) {
     view = { buildId: build?.id, seq: 0, lines: [], legacy: false };
@@ -638,9 +988,11 @@ function renderLogShell() {
   const box = $("execution-log");
   if (box.dataset.scope !== `${key}/${view.buildId || ""}`) {
     box.dataset.scope = `${key}/${view.buildId || ""}`;
-    MindexI18n.setText(box,
-    view.lines.join("\n") || (
-    build ? MindexI18n.msg("ui.7e123855bc1a") : MindexI18n.msg("ui.27b3fd17f4de")));
+    MindexI18n.setText(
+      box,
+      view.lines.join("\n") ||
+        (build ? MindexI18n.msg("ui.7e123855bc1a") : MindexI18n.msg("ui.27b3fd17f4de")),
+    );
     box.scrollTop = box.scrollHeight;
   }
 }
@@ -653,26 +1005,25 @@ async function refreshLogs() {
   let more = true;
   while (more) {
     const response = await api(
-      `/api/studio/jobs/${id}/builds/${view.buildId}/logs?after=${view.seq}`
+      `/api/studio/jobs/${id}/builds/${view.buildId}/logs?after=${view.seq}`,
     );
-    if (
-    id !== state.id ||
-    key !== scopeKey() ||
-    state.logViews.get(key) !== view)
-
-    return;
+    if (id !== state.id || key !== scopeKey() || state.logViews.get(key) !== view) return;
     const box = $("execution-log"),
       follow = box.scrollHeight - box.clientHeight - box.scrollTop < 32;
     for (const item of response.items)
-    view.lines.push(
-      shortIds(`${MindexI18n.date(new Date(item.at), true)}  ${item.shot_id ? MindexI18n.msg("ui.fdf052132bde", { p0: item.shot_id }) : ""}${item.stage ? `${LABEL[item.stage]} · ` : ""}${MindexI18n.system(item)}`)
-    );
+      view.lines.push(
+        shortIds(
+          `${MindexI18n.date(new Date(item.at), true)}  ${item.shot_id ? MindexI18n.msg("ui.fdf052132bde", { p0: item.shot_id }) : ""}${item.stage ? `${LABEL[item.stage]} · ` : ""}${MindexI18n.system(item)}`,
+        ),
+      );
     view.seq = response.next_seq;
     view.legacy = response.legacy;
     if (response.items.length || !view.lines.length)
-    MindexI18n.setText(box,
-    view.lines.join("\n") || (
-    response.legacy ? MindexI18n.msg("ui.0cbb72d3287e") : MindexI18n.msg("ui.29c54863449f")));
+      MindexI18n.setText(
+        box,
+        view.lines.join("\n") ||
+          (response.legacy ? MindexI18n.msg("ui.0cbb72d3287e") : MindexI18n.msg("ui.29c54863449f")),
+      );
     if (follow) box.scrollTop = box.scrollHeight;
     more = response.has_more;
   }
@@ -680,15 +1031,19 @@ async function refreshLogs() {
 
 function historyCell(stage, sid, preferred = null) {
   const box = el("div", "", "version-history");
-  const items = Object.values(state.data.versions).
-  filter((v) => v.stage === stage && v.shot_id === sid).
-  reverse();
+  const items = Object.values(state.data.versions)
+    .filter((v) => v.stage === stage && v.shot_id === sid)
+    .reverse();
   const select = document.createElement("select");
-  MindexI18n.setAttr(select, "aria-label", MindexI18n.msg("ui.3339e0dc57f7", { p0: shortId(sid), p1: LABEL[stage] }));
+  MindexI18n.setAttr(
+    select,
+    "aria-label",
+    MindexI18n.msg("ui.3339e0dc57f7", { p0: shortId(sid), p1: LABEL[stage] }),
+  );
   for (const item of items) {
     const o = el(
       "option",
-      `${item.id.slice(0, 8)} · ${statusText(item.status)} · ${MindexI18n.date(new Date(item.created_at), false)}`
+      `${item.id.slice(0, 8)} · ${statusText(item.status)} · ${MindexI18n.date(new Date(item.created_at), false)}`,
     );
     o.value = item.id;
     select.append(o);
@@ -698,31 +1053,30 @@ function historyCell(stage, sid, preferred = null) {
   const selected = sid ? plan().shots?.[sid]?.[stage] : null;
   const wanted = items.some((item) => item.id === preferred) ? preferred : selected;
   if (items.some((item) => item.id === wanted)) select.value = wanted;
-  const choose = mutationButton(MindexI18n.msg("ui.1dd40d446b45"),
+  const choose = mutationButton(
+    MindexI18n.msg("ui.1dd40d446b45"),
 
-  async () => {
-    await accept(
-      await api(`${planBase()}/select-version`, "POST", {
-        revision: state.data.revision,
-        version_id: select.value,
-        stage,
-        shot_id: sid
-      })
-    );
-    notice(MindexI18n.msg("ui.e401d5ed1d5c"));
-  },
-  ver(select.value).status !== "complete"
+    async () => {
+      await accept(
+        await api(`${planBase()}/select-version`, "POST", {
+          revision: state.data.revision,
+          version_id: select.value,
+          stage,
+          shot_id: sid,
+        }),
+      );
+      notice(MindexI18n.msg("ui.e401d5ed1d5c"));
+    },
+    ver(select.value).status !== "complete",
   );
   select.addEventListener("change", () => {
-    choose.dataset.unavailable = String(
-      ver(select.value).status !== "complete"
-    );
+    choose.dataset.unavailable = String(ver(select.value).status !== "complete");
     updateLocks();
   });
   box.append(
     select,
     button(MindexI18n.msg("ui.753c35ac28e9"), () => showVersion(select.value)),
-    choose
+    choose,
   );
   return box;
 }
@@ -738,10 +1092,16 @@ function nodeInputs(stage, sid) {
     inputs.tts = s.tts || null;
     if (present.includes("generate")) inputs.generate = s.generate || null;
     if (present.includes("invoke")) inputs.invoke = s.invoke || null;
-    if (present.includes("recall") && (!plan().ranges[sid] || plan().ranges[sid].anchor_ref)) inputs.recall = s.recall || null;
+    if (present.includes("recall") && (!plan().ranges[sid] || plan().ranges[sid].anchor_ref))
+      inputs.recall = s.recall || null;
   }
   if (stage === "render") {
-    Object.assign(inputs, present.includes("select") ? { select: s.select || null, tts: s.tts || null } : { tts: s.tts || null });
+    Object.assign(
+      inputs,
+      present.includes("select")
+        ? { select: s.select || null, tts: s.tts || null }
+        : { tts: s.tts || null },
+    );
     if (present.includes("animate")) inputs.animate = s.animate || null;
     if (present.includes("draw")) inputs.draw = s.draw || null;
     if (present.includes("invoke") && !present.includes("select")) inputs.invoke = s.invoke || null;
@@ -754,7 +1114,7 @@ async function runNode(stage, sid, force) {
     shot_id: sid || null,
     force,
     revision: state.data.revision,
-    inputs: nodeInputs(stage, sid)
+    inputs: nodeInputs(stage, sid),
   };
   state.submitting = true;
   render();
@@ -774,7 +1134,8 @@ function animationUrl(vid) {
   return `${base()}/versions/${vid}/animation.html`;
 }
 function animationFrame(vid, width, height) {
-  const w = Number(width) || 1280, h = Number(height) || 720;
+  const w = Number(width) || 1280,
+    h = Number(height) || 720;
   const scale = Math.min(1, ANIMATION_PREVIEW_WIDTH / w);
   const box = el("div", "", "animation-preview");
   box.style.width = `${Math.round(w * scale)}px`;
@@ -788,7 +1149,9 @@ function animationFrame(vid, width, height) {
   frame.height = String(h);
   frame.style.transform = `scale(${scale})`;
   frame.src = animationUrl(vid);
-  const replay = button(MindexI18n.msg("ui.animate_replay"), () => {frame.src = animationUrl(vid);});
+  const replay = button(MindexI18n.msg("ui.animate_replay"), () => {
+    frame.src = animationUrl(vid);
+  });
   const wrap = el("div", "", "animation-preview-wrap");
   box.append(frame);
   wrap.append(box, replay);
@@ -804,11 +1167,13 @@ requestAnimationFrame(function frame(t) { /* t：毫秒 */ requestAnimationFrame
 </body></html>`;
 // 源码编辑对话框：等宽文本框，保存 → PATCH（服务端静态校验，未通过时在对话框顶部显示违规项）。
 async function openAnimationEditor(sid) {
-  const vid = plan().shots[sid].animate, item = ver(vid);
+  const vid = plan().shots[sid].animate,
+    item = ver(vid);
   let source = ANIMATION_TEMPLATE;
   if (item?.status === "complete" && item.files.animation) {
     const response = await fetch(animationUrl(vid));
-    if (!response.ok) throw new Error(MindexI18n.msg("ui.animate_load_failed", { p0: response.status }));
+    if (!response.ok)
+      throw new Error(MindexI18n.msg("ui.animate_load_failed", { p0: response.status }));
     source = await response.text();
   }
   const scope = scopeKey();
@@ -820,19 +1185,26 @@ async function openAnimationEditor(sid) {
   editor.input.spellcheck = false;
   editor.input.classList.add("code-editor");
   const counter = el("p", "", "muted");
-  const count = () => MindexI18n.setText(counter, MindexI18n.msg("ui.animate_chars", { p0: editor.input.value.length }));
+  const count = () =>
+    MindexI18n.setText(
+      counter,
+      MindexI18n.msg("ui.animate_chars", { p0: editor.input.value.length }),
+    );
   editor.input.addEventListener("input", count);
   count();
   const actions = el("div", "", "detail-actions");
   actions.append(
     button(MindexI18n.msg("ui.animate_save"), async () => {
       if (scope !== scopeKey()) throw new Error(MindexI18n.msg("ui.animate_scope_changed"));
-      const data = await api(`${planBase()}/shots/${sid}/animation`, "PATCH", { revision: state.data.revision, html: editor.input.value });
+      const data = await api(`${planBase()}/shots/${sid}/animation`, "PATCH", {
+        revision: state.data.revision,
+        html: editor.input.value,
+      });
       closeDialog();
       await accept(data);
       notice(MindexI18n.msg("ui.animate_saved"));
     }),
-    button(MindexI18n.msg("ui.4d0b4688c787"), closeDialog)
+    button(MindexI18n.msg("ui.4d0b4688c787"), closeDialog),
   );
   body.append(editor.wrap, counter, actions);
 }

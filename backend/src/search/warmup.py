@@ -18,8 +18,8 @@ from collections.abc import Callable
 from pathlib import Path
 from time import perf_counter
 
-from mindex.shared.backends.context import resource_scope
-from mindex.shared.config import Config
+from shared.backends.context import resource_scope
+from shared.config import Config
 
 log = logging.getLogger(__name__)
 
@@ -41,8 +41,8 @@ def _step(name: str, action) -> None:
 def _warm_model_files(config: Config) -> None:
     if config.embedding.backend != "llama_cpp":
         return
-    from mindex.models import compatibility, llama_cpp
-    from mindex.models.deployment import verified_file
+    from models import compatibility, llama_cpp
+    from models.deployment import verified_file
 
     pinned = llama_cpp.manifest(config.embedding, "embedding")
     if pinned["schema"] == 2:
@@ -60,10 +60,10 @@ def warm_up(config: Config, index_id: str | None = None, *, startup: bool = True
     """config 须是已合并设置页覆盖的生效配置。startup=False 为重新预热：跳过词典与模型文件校验。"""
     import jieba
 
-    from mindex.persons.persons import Persons
-    from mindex.processing.indexing import VectorIndex
-    from mindex.search.search import lexical_search, tokens
-    from mindex.shared.storage import Store
+    from persons.persons import Persons
+    from processing.indexing import VectorIndex
+    from search.search import lexical_search, tokens
+    from shared.storage import Store
 
     store = Store.open(config)
     active = store.index_version(index_id) if index_id else store.active_index()
@@ -92,7 +92,7 @@ def warm_up(config: Config, index_id: str | None = None, *, startup: bool = True
             return
         # SQL 词法路径直接读派生倒排表，不再需要进程内全量分词（plans §6.1）；
         # 派生索引缺失/版本不一致时保留参考路径的语料预热。
-        from mindex.shared.lexical_store import lexical_ready
+        from shared.lexical_store import lexical_ready
 
         if lexical_ready(store, active["id"]):
             log.info("派生词法索引可用，跳过 BM25 语料分词预热")
@@ -105,10 +105,11 @@ def warm_up(config: Config, index_id: str | None = None, *, startup: bool = True
             lexical_search("预热", documents, 1)
 
     def vectors():
-        from mindex.processing.indexing import vector_client
+        from processing.indexing import vector_client
 
-        index = VectorIndex(store.root, active["id"],
-                            client=vector_client(config, library_id=store.library_id))
+        index = VectorIndex(
+            store.root, active["id"], client=vector_client(config, library_id=store.library_id)
+        )
         if not store.pg:
             index._representation_map()
         collection = index.collection
@@ -129,17 +130,22 @@ def retire_superseded(store, target: dict, index_id: str | None) -> dict:
 
     保留：目标索引；固定预览模式下还保留活动指针所指的索引（Studio 等仍按活动索引查询）。
     """
-    from mindex.persons.persons import Persons
-    from mindex.processing.indexing import retain_representation_maps
+    from persons.persons import Persons
+    from processing.indexing import retain_representation_maps
 
     keep_indexes = {target["id"]}
-    releases = [Persons(store).release_for(
-        target["id"], pinned=index_id is not None, release_id=target.get("search_release_id"))]
+    releases = [
+        Persons(store).release_for(
+            target["id"], pinned=index_id is not None, release_id=target.get("search_release_id")
+        )
+    ]
     if index_id:
         pointer = store.active_index()
         if pointer:
             keep_indexes.add(pointer["id"])
-            releases.append(Persons(store).release_for(pointer["id"], release_id=pointer.get("search_release_id")))
+            releases.append(
+                Persons(store).release_for(pointer["id"], release_id=pointer.get("search_release_id"))
+            )
     keep_people = {r["person_id"] for r in releases if r and r.get("person_id")}
     removed = {
         "快照": store.retain_snapshots(keep_indexes),
@@ -158,18 +164,21 @@ def serving_signature(store, index_id: str | None = None) -> tuple:
     以及该索引的发布记录数与最新记录（发布人物版本会新增记录）。固定预览（index_id）不看活动指针。
     """
     keys = ("snapshots.rev",) if index_id else ("active", "active.release", "snapshots.rev")
-    settings = tuple(sorted(
-        (row["key"], row["value"])
-        for row in store.rows(
-            f"SELECT key,value FROM settings WHERE key IN ({','.join('?' * len(keys))})", keys
+    settings = tuple(
+        sorted(
+            (row["key"], row["value"])
+            for row in store.rows(
+                f"SELECT key,value FROM settings WHERE key IN ({','.join('?' * len(keys))})", keys
+            )
         )
-    ))
+    )
     target = index_id or dict(settings).get("active")
     if target is None:
         return (settings, None)
     version = store.one("SELECT status FROM index_versions WHERE id=?", (target,))
     releases = store.one(
-        "SELECT count(*) AS n, COALESCE(max(rowid),0) AS latest FROM search_releases WHERE content_id=?", (target,)
+        "SELECT count(*) AS n, COALESCE(max(rowid),0) AS latest FROM search_releases WHERE content_id=?",
+        (target,),
     )
     return (settings, target, version["status"] if version else None, releases["n"], releases["latest"])
 
@@ -189,8 +198,8 @@ def watch_and_rewarm(
 
     last 是已预热状态的签名；预热期间又发生的变化会在下一轮被发现并再预热一次。
     """
-    from mindex.settings.runtime_settings import RuntimeConfig
-    from mindex.shared.storage import Store
+    from settings.runtime_settings import RuntimeConfig
+    from shared.storage import Store
 
     store = Store.open(config)
     warm = warm or warm_up
@@ -210,14 +219,18 @@ def watch_and_rewarm(
 
 
 def warm_up_in_background(
-    config: Config, index_id: str | None = None, *, watch: bool = True, interval: float = WATCH_INTERVAL_SECONDS
+    config: Config,
+    index_id: str | None = None,
+    *,
+    watch: bool = True,
+    interval: float = WATCH_INTERVAL_SECONDS,
 ) -> threading.Thread:
     """启动后台线程：先做一次完整预热，之后（watch=True）持续监听发布并自动重新预热。
 
     线程是 daemon，随进程退出；线程对象上的 stop_event 可用来停止监听（测试用）。
     """
-    from mindex.settings.runtime_settings import RuntimeConfig
-    from mindex.shared.storage import Store
+    from settings.runtime_settings import RuntimeConfig
+    from shared.storage import Store
 
     stop = threading.Event()
 

@@ -7,10 +7,10 @@ import os
 from itertools import pairwise
 from pathlib import Path
 
-from mindex.models import adapters
-from mindex.models.adapters import ModelError
-from mindex.shared.config import Config
-from mindex.shared.media import frame_timestamps, probe
+from models import adapters
+from models.adapters import ModelError
+from shared.config import Config
+from shared.media import frame_timestamps, probe
 
 log = logging.getLogger(__name__)
 

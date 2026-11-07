@@ -13,10 +13,7 @@ def declared() -> set[str]:
 
 def test_backend_packages_are_declared():
     src = ROOT / "backend/src"
-    found = {
-        ".".join(("mindex", *path.parent.relative_to(src).parts))
-        for path in src.rglob("*/__init__.py")
-    }
+    found = {".".join(("mindex", *path.parent.relative_to(src).parts)) for path in src.rglob("*/__init__.py")}
     assert {"mindex.studio.workspace", "mindex.studio.workspace.handlers"} <= found  # 嵌套子包同样要声明
     assert found | {"mindex"} <= declared()
 
@@ -30,11 +27,7 @@ def test_studio_template_data_is_packaged():
 
 
 def test_frontend_page_groups_are_declared():
-    found = {
-        f"mindex.web.{path.name}"
-        for path in (ROOT / "frontend/src").iterdir()
-        if path.is_dir()
-    }
+    found = {f"mindex.web.{path.name}" for path in (ROOT / "frontend/src").iterdir() if path.is_dir()}
     assert found
     assert found | {"mindex.web"} <= declared()
 

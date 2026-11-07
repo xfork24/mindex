@@ -13,17 +13,16 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from mindex.models.adapters import make_animator
-from mindex.models.animator import ANIMATOR_PROMPT_VERSION, AnimationRejected, validate_animation
-from mindex.shared.config import fingerprint
-from mindex.studio import studio
-from mindex.studio.studio_artifacts import digest
-from mindex.studio.studio_logs import active_log
-
-from .. import sources
-from ..plans import canvas_render, choose
-from ..stages import StageHandler, register, shot_content
-from ..versions import add_version, file_info, root
+from models.adapters import make_animator
+from models.animator import ANIMATOR_PROMPT_VERSION, AnimationRejected, validate_animation
+from shared.config import fingerprint
+from studio import studio
+from studio.artifacts import digest
+from studio.logs import active_log
+from studio.workspace import sources
+from studio.workspace.plans import canvas_render, choose
+from studio.workspace.stages import StageHandler, register, shot_content
+from studio.workspace.versions import add_version, file_info, root
 
 ANIMATE_VERSION = 1
 NOT_CONFIGURED = "未配置动画生成服务，请在设置页激活动画生成档案"
@@ -51,8 +50,13 @@ def animation_request(config, w, p, sid) -> dict:
     if speech and speech["status"] == "complete" and speech["data"].get("duration"):
         seconds = round(speech["data"]["duration"] / (p["options"]["atempo"] or 1.0), 3)
     render = canvas_render(config, p)[0]
-    return {"brief": brief, "seconds": seconds, "width": render.width, "height": render.height,
-            "fps": render.fps}
+    return {
+        "brief": brief,
+        "seconds": seconds,
+        "width": render.width,
+        "height": render.height,
+        "fps": render.fps,
+    }
 
 
 def check(config, html: str) -> str:
@@ -75,7 +79,7 @@ def save_manual(config, job_id, w, p, sid, html: str) -> str:
     """人工保存动画源码：校验 → 新的 origin=manual 版本 → 选用（下游 render/compose 随之过期）。
 
     手改版本的签名由源码摘要与当前规格派生，不会被按签名的复用误选；它只经「钉住」规则在选用期间复用。"""
-    from ..signatures import specification
+    from studio.workspace.signatures import specification
 
     source = sources.plan_source(w, p, sid)
     if not source or source["kind"] != "animation":
@@ -86,13 +90,26 @@ def save_manual(config, job_id, w, p, sid, html: str) -> str:
     vid = uuid4().hex
     target = _write(config, job_id, vid, html)
     sha = digest(target)
-    data = {"origin": "manual", "chars": len(html), "brief": request["brief"], "seconds": request["seconds"],
-            "width": request["width"], "height": request["height"], "fps": request["fps"],
-            "based_on": p["shots"][sid].get("animate")}
+    data = {
+        "origin": "manual",
+        "chars": len(html),
+        "brief": request["brief"],
+        "seconds": request["seconds"],
+        "width": request["width"],
+        "height": request["height"],
+        "fps": request["fps"],
+        "based_on": p["shots"][sid].get("animate"),
+    }
     add_version(
-        config, job_id, w, "animate", sid, data=data,
+        config,
+        job_id,
+        w,
+        "animate",
+        sid,
+        data=data,
         files={"animation": file_info(config, job_id, target)},
-        inputs=spec["inputs"], parameters={**spec["parameters"], "origin": "manual"},
+        inputs=spec["inputs"],
+        parameters={**spec["parameters"], "origin": "manual"},
         signature=fingerprint({"stage": "animate", "manual": sha, "specification": spec["signature"]}),
         version_id=vid,
     )
@@ -138,8 +155,13 @@ class AnimateHandler(StageHandler):
         log = active_log.get()
         if log:
             log.emit(f"正在生成动画源码（{request['seconds']:g} 秒，{request['width']}×{request['height']}）")
-        html = animator.animate(request["brief"], seconds=request["seconds"], width=request["width"],
-                                height=request["height"], fps=request["fps"])
+        html = animator.animate(
+            request["brief"],
+            seconds=request["seconds"],
+            width=request["width"],
+            height=request["height"],
+            fps=request["fps"],
+        )
         check(ctx.config, html)
         target = _write(ctx.config, ctx.job_id, ctx.version_id, html)
         ctx.diagnostics.record("animation", {"chars": len(html), "brief": request["brief"]})
@@ -152,7 +174,9 @@ class AnimateHandler(StageHandler):
         after = expected["parameters"].get("animator") or {}
         for field, label in (("backend", "动画生成服务"), ("model", "动画生成模型")):
             if before.get(field) != after.get(field):
-                found.append(f"{label}已变化：{before.get(field) or '未记录'} → {after.get(field) or '未设置'}")
+                found.append(
+                    f"{label}已变化：{before.get(field) or '未记录'} → {after.get(field) or '未设置'}"
+                )
         if item["parameters"].get("prompt_version") != expected["parameters"].get("prompt_version"):
             found.append("动画生成提示词已更新")
         return found

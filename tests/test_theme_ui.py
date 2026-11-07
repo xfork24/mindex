@@ -1,11 +1,12 @@
 """Theme cycle, persistence and i18n labels across pages."""
+
 import os
 import subprocess
 
 import pytest
-from test_agent_panel_ui import ROOT, playwright_available, serve
 
-from mindex.api import create_app
+from api import create_app
+from test_agent_panel_ui import ROOT, playwright_available, serve
 
 
 @pytest.mark.slow
@@ -13,9 +14,15 @@ from mindex.api import create_app
 def test_theme_toggle_cycles_and_persists(config):
     server, thread, url = serve(create_app(config))
     try:
-        result = subprocess.run(['node', 'tests/theme_ui.cjs'], cwd=ROOT,
-                                env={**os.environ, 'MINDEX_THEME_URL': url}, capture_output=True,
-                                text=True, timeout=120, check=False)
+        result = subprocess.run(
+            ["node", "tests/theme_ui.cjs"],
+            cwd=ROOT,
+            env={**os.environ, "MINDEX_THEME_URL": url},
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
         assert result.returncode == 0, result.stdout + result.stderr
     finally:
         server.should_exit = True

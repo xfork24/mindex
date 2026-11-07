@@ -17,7 +17,7 @@ import os
 import time
 from contextlib import contextmanager
 
-LOGGER = logging.getLogger("mindex.persons.profile")
+LOGGER = logging.getLogger("persons.profile")
 ENV_FLAG = "MINDEX_PROFILE_PERSONS"
 _current: contextvars.ContextVar[Profile | None] = contextvars.ContextVar("person_profile", default=None)
 

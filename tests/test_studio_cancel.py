@@ -6,19 +6,19 @@ import time
 import uuid
 
 import pytest
-from conftest import FixtureSpeaker, FixtureStoryboarder
 from fastapi.testclient import TestClient
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+
+from api import create_app
+from conftest import FixtureSpeaker, FixtureStoryboarder
+from studio import executor, studio
+from studio import workspace as ws
+from studio.logs import read_events
+from studio.workspace import builder, signatures
 from test_studio_api import create_legacy_job
 from test_studio_columns import request_body
 from test_studio_workspace import setup_workspace, wait_build
-
-from mindex.api import create_app
-from mindex.studio import executor, studio
-from mindex.studio import workspace as ws
-from mindex.studio.studio_logs import read_events
-from mindex.studio.workspace import builder, signatures
 
 KEYS = [("tts", "a"), ("tts", "b"), ("select", "a"), ("select", "b")]
 
@@ -144,7 +144,9 @@ def test_cancel_build_endpoint_finishes_running_node_and_blocks_rest(config):
     jid, w, p = setup_workspace(config)
     client = TestClient(create_app(config, speaker=Blocking(config)))
     base = f"/api/studio/jobs/{jid}"
-    response = client.post(f"{base}/plans/{p['id']}/regenerate-column", json=request_body(config, jid, w, p, "tts"))
+    response = client.post(
+        f"{base}/plans/{p['id']}/regenerate-column", json=request_body(config, jid, w, p, "tts")
+    )
     assert response.status_code == 202, response.text
     bid = response.json()["id"]
     try:
@@ -253,7 +255,8 @@ def test_delete_plan_rejected_while_build_running(config):
     assert ws.path(config, jid).read_bytes() == before
 
 
-# ---------------------------------------------------------------- 集成：重启恢复、进程外取消、终态拒绝、删除边界
+# ---------------------------------------------------------------- 集成：重启恢复、进程外取消、终态拒绝、
+# 删除边界
 
 
 def start_blocked_build(config):
@@ -269,7 +272,9 @@ def start_blocked_build(config):
     jid, w, p = setup_workspace(config)
     client = TestClient(create_app(config, speaker=Blocking(config)))
     base = f"/api/studio/jobs/{jid}"
-    response = client.post(f"{base}/plans/{p['id']}/regenerate-column", json=request_body(config, jid, w, p, "tts"))
+    response = client.post(
+        f"{base}/plans/{p['id']}/regenerate-column", json=request_body(config, jid, w, p, "tts")
+    )
     assert response.status_code == 202, response.text
     assert entered.wait(5)
     return client, jid, base, response.json()["id"], release
@@ -339,7 +344,7 @@ def test_cancel_finished_build_rejected_without_side_effects(config, status):
 def test_delete_plan_boundaries(config):
     from filelock import FileLock
 
-    from mindex.studio.studio_logs import ExecutionLog
+    from studio.logs import ExecutionLog
 
     jid, _w, p = setup_workspace(config)
     client = TestClient(create_app(config, storyboarder=FixtureStoryboarder(config)))
@@ -419,8 +424,11 @@ def test_cancel_legacy_during_last_step_finishes_normally(config):
 def test_remove_plan_picks_latest_created(config):
     w = {
         "active_plan": "a",
-        "plans": {"a": {"id": "a", "created_at": "2"}, "b": {"id": "b", "created_at": "3"},
-                  "c": {"id": "c", "created_at": "1"}},
+        "plans": {
+            "a": {"id": "a", "created_at": "2"},
+            "b": {"id": "b", "created_at": "3"},
+            "c": {"id": "c", "created_at": "1"},
+        },
         "versions": {"v": {}},
     }
     assert ws.remove_plan(w, "a") == "b" and set(w["plans"]) == {"b", "c"}
@@ -501,13 +509,25 @@ def test_property_cancel_state(config, monkeypatch):
 
         monkeypatch.setattr(signatures, "match", lambda *a, **k: None)
         monkeypatch.setattr(builder, "execute", execute)
-        w["builds"].append({
-            "id": bid, "plan_id": p["id"], "status": "running", "force": False, "auto_split": False,
-            "nodes": [
-                {"key": f"{stage}:{sid}", "stage": stage, "shot_id": sid, "action": action, "status": "pending"}
-                for (stage, sid), action, _bad in specs
-            ],
-        })
+        w["builds"].append(
+            {
+                "id": bid,
+                "plan_id": p["id"],
+                "status": "running",
+                "force": False,
+                "auto_split": False,
+                "nodes": [
+                    {
+                        "key": f"{stage}:{sid}",
+                        "stage": stage,
+                        "shot_id": sid,
+                        "action": action,
+                        "status": "pending",
+                    }
+                    for (stage, sid), action, _bad in specs
+                ],
+            }
+        )
         ws.persist(config, jid, w)
         if cancel_at == 0:
             request()
@@ -554,12 +574,17 @@ plan_sets = st.lists(st.integers(0, 5), min_size=2, max_size=6).flatmap(
 @settings(max_examples=100, deadline=None)
 @given(
     setup=plan_sets,
-    versions=st.dictionaries(st.text("0123456789abcdef", min_size=4, max_size=8),
-                             st.fixed_dictionaries({"stage": st.sampled_from(ws.STAGES), "status": st.just("ok")}),
-                             max_size=5),
-    builds=st.lists(st.fixed_dictionaries({"id": st.uuids().map(str), "status": st.sampled_from(["complete",
-                                                                                               "cancelled"])}),
-                    max_size=3),
+    versions=st.dictionaries(
+        st.text("0123456789abcdef", min_size=4, max_size=8),
+        st.fixed_dictionaries({"stage": st.sampled_from(ws.STAGES), "status": st.just("ok")}),
+        max_size=5,
+    ),
+    builds=st.lists(
+        st.fixed_dictionaries(
+            {"id": st.uuids().map(str), "status": st.sampled_from(["complete", "cancelled"])}
+        ),
+        max_size=3,
+    ),
     data=st.data(),
 )
 def test_property_remove_plan_keeps_versions(setup, versions, builds, data):

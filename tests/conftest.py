@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# 查询根目录修正:包内组件以短名导入(shared.media / cli 等)。
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend" / "src"))
+
 import io
 import math
 import struct
@@ -9,9 +15,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from mindex.shared.config import Config
-from mindex.shared.media import command
-from mindex.shared.types import Annotation, ShotDraft
+from shared.config import Config
+from shared.media import command
+from shared.types import Annotation, ShotDraft
 
 pytest_plugins = ["ci_selection"]
 
@@ -235,7 +241,7 @@ class FixtureWriter:
 @pytest.fixture(autouse=True)
 def no_default_profiles(monkeypatch):
     """默认档案卡（GLM/MiniMax/ComfyUI）只在专门的用例里建：其余用例按空档案表断言。"""
-    from mindex.settings import runtime_settings
+    from settings import runtime_settings
 
     monkeypatch.setattr(runtime_settings, "ensure_default_profiles", lambda store: [])
 
@@ -243,7 +249,7 @@ def no_default_profiles(monkeypatch):
 @pytest.fixture(autouse=True)
 def fixture_writer(monkeypatch):
     """Studio builds now start with script writing; never reach a real writer in tests."""
-    from mindex.models import adapters
+    from models import adapters
 
     monkeypatch.setattr(adapters, "make_writer", lambda config: FixtureWriter(config))
 
@@ -254,7 +260,7 @@ def convert_to_legacy(config: Config, job_id: str) -> dict:
     Jobs created before script writing exist on disk in this shape and keep working through
     the step state machine and the workspace migration; tests for those paths build them here.
     """
-    from mindex.studio import studio
+    from studio import studio
 
     state = studio.load_job(config, job_id)
     state["input_text"] = state.pop("outline")
@@ -265,7 +271,7 @@ def convert_to_legacy(config: Config, job_id: str) -> dict:
 
 
 def legacy_job(config: Config, text: str, **kwargs) -> dict:
-    from mindex.studio import studio
+    from studio import studio
 
     return convert_to_legacy(config, studio.create_job(config, text, **kwargs)["id"])
 
@@ -283,20 +289,30 @@ class FixtureStoryboarder:
         return "测试创作标题"
 
     def suggest_query(
-        self, text: str, visual: str, context: tuple[str, str], vocabulary: list[str] | None, *, language: str = "zh"
+        self,
+        text: str,
+        visual: str,
+        context: tuple[str, str],
+        vocabulary: list[str] | None,
+        *,
+        language: str = "zh",
     ) -> str:
         """确定性地由输入派生召回词：visual 的前两个词 + “画面”，相同输入逐字节相同。"""
-        self.suggestions.append({
-            "text": text,
-            "visual": visual,
-            "context": tuple(context),
-            "vocabulary": None if vocabulary is None else list(vocabulary),
-        })
+        self.suggestions.append(
+            {
+                "text": text,
+                "visual": visual,
+                "context": tuple(context),
+                "vocabulary": None if vocabulary is None else list(vocabulary),
+            }
+        )
         words = (visual or "").split() or (text or "").split()
         head = " ".join(words[:2])[:40]
         return f"{head} 画面".strip()
 
-    def split(self, text: str, vocabulary: list[str] | None = None, *, language: str = "zh") -> list[ShotDraft]:
+    def split(
+        self, text: str, vocabulary: list[str] | None = None, *, language: str = "zh"
+    ) -> list[ShotDraft]:
         self.calls += 1
         self.vocabularies.append(None if vocabulary is None else list(vocabulary))
         parts: list[str] = []

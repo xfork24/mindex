@@ -8,10 +8,10 @@ from pathlib import Path
 
 import numpy as np
 
-from mindex.models import adapters
-from mindex.models.adapters import ModelError
-from mindex.shared.config import Config, fingerprint
-from mindex.shared.media import frame_data, probe
+from models import adapters
+from models.adapters import ModelError
+from shared.config import Config, fingerprint
+from shared.media import frame_data, probe
 
 
 class HTTPEmbedder:

@@ -7,27 +7,58 @@ from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
-from test_studio_workspace import build, prepared, setup_workspace  # noqa: F401 — prepared 是夹具
 
-from mindex.shared.config import Config, RenderConfig, SubtitleConfig
-from mindex.shared.media import command
-from mindex.studio import studio_render
-from mindex.studio import workspace as ws
+from shared.config import Config, RenderConfig, SubtitleConfig
+from shared.media import command
+from studio import render as studio_render
+from studio import workspace as ws
+from test_studio_workspace import build, prepared, setup_workspace  # noqa: F401 — prepared 是夹具
 
 CANVASES = {"9:16": (90, 160), "1:1": (120, 120)}
 
 
 def dims(path):
-    raw = json.loads(command(["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_frames",
-                              "-show_entries", "stream=width,height,nb_read_frames", "-of", "json", str(path)]))
+    raw = json.loads(
+        command(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-count_frames",
+                "-show_entries",
+                "stream=width,height,nb_read_frames",
+                "-of",
+                "json",
+                str(path),
+            ]
+        )
+    )
     stream = raw["streams"][0]
     return stream["width"], stream["height"], int(stream["nb_read_frames"])
 
 
 def top_rgb(path):
     """首帧最上面两行像素的平均色。"""
-    return command(["ffmpeg", "-v", "error", "-i", str(path), "-frames:v", "1", "-vf",
-                    "crop=iw:2:0:0,scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+    return command(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            str(path),
+            "-frames:v",
+            "1",
+            "-vf",
+            "crop=iw:2:0:0,scale=1:1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-",
+        ]
+    )
 
 
 # ---------------------------------------------------------------- 配置与参数（快速）
@@ -39,8 +70,12 @@ def test_canvas_config_defaults_validation_and_dump():
     custom = RenderConfig.model_validate({"width": 640, "height": 360, "canvases": {"1:1": [480, 480]}})
     assert custom.size("16:9") == (640, 360) and custom.size("1:1") == (480, 480)
     assert custom.size("9:16") == (720, 1280)
-    for bad in ({"canvases": {"1:1": [481, 480]}}, {"canvases": {"4:3": [640, 480]}},
-                {"canvases": {"16:9": [640, 360]}}, {"canvases": {"1:1": ["480", 480]}}):
+    for bad in (
+        {"canvases": {"1:1": [481, 480]}},
+        {"canvases": {"4:3": [640, 480]}},
+        {"canvases": {"16:9": [640, 360]}},
+        {"canvases": {"1:1": ["480", 480]}},
+    ):
         with pytest.raises(ValidationError):
             RenderConfig.model_validate(bad)
     assert RenderConfig.model_validate({"canvases": {"16:9": [1280, 720]}}).size("16:9") == (1280, 720)
@@ -70,8 +105,9 @@ def test_plan_options_canvas_and_default_signature_parameters(config):
         crop = ws.settings(config, {"options": {**p["options"], "fit": "crop"}}, stage)
         assert crop["fit"] == "crop" and crop["render"] == default["render"]
     for stage in ("script", "tts", "select"):
-        assert ws.settings(config, p, stage) == ws.settings(config, {"options": {**p["options"],
-                                                                                "canvas": "1:1"}}, stage)
+        assert ws.settings(config, p, stage) == ws.settings(
+            config, {"options": {**p["options"], "canvas": "1:1"}}, stage
+        )
 
 
 def test_subtitle_style_scales_only_for_non_default_canvas():
@@ -79,11 +115,14 @@ def test_subtitle_style_scales_only_for_non_default_canvas():
     assert studio_render.canvas_subtitle_style("16:9", 1280, 720, subtitle) is None
     assert studio_render.canvas_subtitle_style("1:1", 1080, 1080, subtitle) == {"FontSize": "8"}
     assert studio_render.canvas_subtitle_style("9:16", 720, 1280, subtitle) == {
-        "FontSize": "4.5", "MarginV": str(studio_render.PORTRAIT_MARGIN_V)}
+        "FontSize": "4.5",
+        "MarginV": str(studio_render.PORTRAIT_MARGIN_V),
+    }
     default = studio_render.subtitle_filter(studio_render.Path("/tmp/a.srt"), subtitle)
     assert default.endswith(":force_style='FontName=Noto Sans CJK SC,FontSize=8'")
-    styled = studio_render.subtitle_filter(studio_render.Path("/tmp/a.srt"), subtitle,
-                                           style={"FontSize": "4.5", "MarginV": "36"})
+    styled = studio_render.subtitle_filter(
+        studio_render.Path("/tmp/a.srt"), subtitle, style={"FontSize": "4.5", "MarginV": "36"}
+    )
     assert styled.endswith(":force_style='FontName=Noto Sans CJK SC,FontSize=4.5,MarginV=36'")
 
 

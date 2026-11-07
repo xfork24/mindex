@@ -1,4 +1,5 @@
 """持续检查业务 Store 构造，防止共享后端配置静默回落 SQLite。"""
+
 from __future__ import annotations
 
 import importlib.util

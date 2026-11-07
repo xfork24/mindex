@@ -2,9 +2,10 @@
 
 验证：data_dir / deployment_manifest / font_file 相对化到 data_dir.parent；
 data_dir 外路径保持绝对；相对↔绝对往返一致；历史后缀兼容。"""
+
 from pathlib import Path
 
-from mindex.shared.config import absolutize_config_paths, relativize_config_paths
+from shared.config import absolutize_config_paths, relativize_config_paths
 
 
 def test_relativize_internal_paths(config):
@@ -16,7 +17,10 @@ def test_relativize_internal_paths(config):
     }
     result = relativize_config_paths(config.data_dir, snapshot)
     assert result["data_dir"] == config.data_dir.name  # e.g. "data"
-    assert result["analyzer"]["deployment_manifest"] == f"{config.data_dir.name}/config-dependencies/abc/analyzer.json"
+    assert (
+        result["analyzer"]["deployment_manifest"]
+        == f"{config.data_dir.name}/config-dependencies/abc/analyzer.json"
+    )
     assert result["studio"]["subtitle"]["font_file"] == "fonts/subtitle.ttf"
 
 
@@ -52,7 +56,10 @@ def test_absolutize_rebases_to_moved_data_dir(config, tmp_path):
     moved = tmp_path / "renamed" / "data"
     restored = absolutize_config_paths(moved, relative)
     assert Path(restored["data_dir"]) == moved
-    assert Path(restored["analyzer"]["deployment_manifest"]) == moved.parent / "data/config-dependencies/abc/analyzer.json"
+    assert (
+        Path(restored["analyzer"]["deployment_manifest"])
+        == moved.parent / "data/config-dependencies/abc/analyzer.json"
+    )
 
 
 def test_historical_suffix_preserved_for_fingerprint_stability(config):

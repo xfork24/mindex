@@ -11,10 +11,10 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from mindex.agent.registry import ToolContext, ToolError, ToolOutput, ToolSpec
-from mindex.agent.tools.common import check, clip
-from mindex.agent.tools.media import item, segment_media
-from mindex.shared.config import StrictModel
+from agent.registry import ToolContext, ToolError, ToolOutput, ToolSpec
+from agent.tools.common import check, clip
+from agent.tools.media import item, segment_media
+from shared.config import StrictModel
 
 ATTACHMENT_PREFIX = "attachment://"
 MAX_FRAMES = 12
@@ -25,7 +25,9 @@ GRANULARITY_FIELD = Field(default="moment", description="shot=镜头；moment=�
 
 
 class SearchFilters(StrictModel):
-    source_group_ids: list[str] = Field(default_factory=list, description="素材组 ID：多组取并集，与素材及其他限制取交集；空组无候选")
+    source_group_ids: list[str] = Field(
+        default_factory=list, description="素材组 ID：多组取并集，与素材及其他限制取交集；空组无候选"
+    )
     """与检索页筛选一致；未给出的条件不过滤。"""
 
     min_duration: float | None = Field(default=None, ge=0, description="片段最短时长（秒）")
@@ -50,15 +52,24 @@ class SearchMedia(StrictModel):
     text: str = Field(default="", max_length=400, description="中文检索描述，例如：城市 夜景 灯光")
     granularity: Granularity = GRANULARITY_FIELD
     limit: int = Field(default=8, ge=1, le=20)
-    source_group_ids: list[str] = Field(default_factory=list, description="多组取并集，与素材及其他条件取交集；空组无候选")
+    source_group_ids: list[str] = Field(
+        default_factory=list, description="多组取并集，与素材及其他条件取交集；空组无候选"
+    )
     source_ids: list[str] | None = Field(default=None, description="只在这些素材里检索")
-    person_ids: list[str] | None = Field(default=None, max_length=30, description="要求出现的人物（演员或角色 ID）")
+    person_ids: list[str] | None = Field(
+        default=None, max_length=30, description="要求出现的人物（演员或角色 ID）"
+    )
     person_mode: Literal["auto", "onscreen", "mentioned"] | None = Field(
-        default=None, description="人物匹配方式：auto=自动；onscreen=画面出镜；mentioned=对白提及")
+        default=None, description="人物匹配方式：auto=自动；onscreen=画面出镜；mentioned=对白提及"
+    )
     person_relation: Literal["all", "any"] | None = Field(
-        default=None, description="多个人物时：all=同时出现；any=任一出现")
+        default=None, description="多个人物时：all=同时出现；any=任一出现"
+    )
     channels: list[Literal["visual", "dialogue", "analysis"]] | None = Field(
-        default=None, min_length=1, description="召回渠道：visual=画面；dialogue=对白；analysis=分析描述；缺省为全部")
+        default=None,
+        min_length=1,
+        description="召回渠道：visual=画面；dialogue=对白；analysis=分析描述；缺省为全部",
+    )
     filters: SearchFilters | None = None
 
     @model_validator(mode="after")
@@ -75,9 +86,13 @@ def result_rows(data: dict) -> tuple[list[dict], list[dict], list[str]]:
     for rank, raw in enumerate(data.get("results", []), 1):
         annotation = raw.get("annotation") or {}
         row = {
-            "rank": rank, "segment_id": raw["id"], "source_id": raw.get("source_id"),
-            "source_name": raw.get("source_name"), "kind": raw.get("kind"),
-            "start": raw.get("start"), "end": raw.get("end"),
+            "rank": rank,
+            "segment_id": raw["id"],
+            "source_id": raw.get("source_id"),
+            "source_name": raw.get("source_name"),
+            "kind": raw.get("kind"),
+            "start": raw.get("start"),
+            "end": raw.get("end"),
             "description": clip(annotation.get("description") or raw.get("description"), 80),
             "score": round(float(raw.get("score", 0)), 4),
         }
@@ -101,14 +116,24 @@ def result_text(lines: list[str], data: dict) -> str:
     return text
 
 
-def search_output(data: dict, lines: list[str], rows: list[dict], media: list[dict], focus: dict,
-                  **extra) -> ToolOutput:
-    value = {"results": rows, "warnings": data.get("warnings") or [], "degraded": bool(data.get("degraded")),
-             **extra}
+def search_output(
+    data: dict, lines: list[str], rows: list[dict], media: list[dict], focus: dict, **extra
+) -> ToolOutput:
+    value = {
+        "results": rows,
+        "warnings": data.get("warnings") or [],
+        "degraded": bool(data.get("degraded")),
+        **extra,
+    }
     if data.get("channels") is not None:
         value["channels"] = data["channels"]
-    return ToolOutput(value, text=result_text(lines, data), meta={"kind": "search", "count": len(rows)},
-                      focus=focus, media=media)
+    return ToolOutput(
+        value,
+        text=result_text(lines, data),
+        meta={"kind": "search", "count": len(rows)},
+        focus=focus,
+        media=media,
+    )
 
 
 async def search_media(args: SearchMedia, ctx: ToolContext) -> ToolOutput:
@@ -122,18 +147,32 @@ async def search_media(args: SearchMedia, ctx: ToolContext) -> ToolOutput:
             body[key] = value
     data = check(await ctx.client.post("/api/search/text", body), "检索")
     rows, media, lines = result_rows(data)
-    return search_output(data, lines, rows, media,
-                         {"page": "search", "query": {"text": args.text, "granularity": args.granularity,
-                             **({"filters": filters} if filters.get("source_group_ids") else {})}})
+    return search_output(
+        data,
+        lines,
+        rows,
+        media,
+        {
+            "page": "search",
+            "query": {
+                "text": args.text,
+                "granularity": args.granularity,
+                **({"filters": filters} if filters.get("source_group_ids") else {}),
+            },
+        },
+    )
 
 
 class SearchByMedia(StrictModel):
     attachment: str = Field(pattern=r"^attachment://", description="图片或视频附件引用 attachment://…")
     kind: Literal["image", "video"] | None = Field(
-        default=None, description="附件类型；缺省按附件的内容类型推断")
+        default=None, description="附件类型；缺省按附件的内容类型推断"
+    )
     granularity: Granularity = GRANULARITY_FIELD
     limit: int = Field(default=8, ge=1, le=20)
-    source_group_ids: list[str] = Field(default_factory=list, description="多组取并集，与素材及其他条件取交集；空组无候选")
+    source_group_ids: list[str] = Field(
+        default_factory=list, description="多组取并集，与素材及其他条件取交集；空组无候选"
+    )
     source_ids: list[str] | None = Field(default=None, description="只在这些素材里检索")
     filters: SearchFilters | None = None
 
@@ -141,33 +180,50 @@ class SearchByMedia(StrictModel):
 def upload_check(result: dict, what: str) -> object:
     """multipart 回环结果检查：附件引用无效时转为 ``attachment_invalid``。"""
     if not result["ok"] and result.get("code") == "attachment_invalid":
-        raise ToolError(f"附件不可用：{result['error']}", code="attachment_invalid",
-                        value={"status": result["status"], "error": result["error"]})
+        raise ToolError(
+            f"附件不可用：{result['error']}",
+            code="attachment_invalid",
+            value={"status": result["status"], "error": result["error"]},
+        )
     return check(result, what)
 
 
 async def attachment_kind(ctx: ToolContext, ref: str) -> Literal["image", "video"]:
-    token = ref[len(ATTACHMENT_PREFIX):]
+    token = ref[len(ATTACHMENT_PREFIX) :]
     result = await ctx.client.get(f"/api/agent/attachments/{token}")
     if not result["ok"]:
-        raise ToolError(f"附件不可用：{result['error']}", code="attachment_invalid",
-                        value={"status": result["status"], "error": result["error"]})
+        raise ToolError(
+            f"附件不可用：{result['error']}",
+            code="attachment_invalid",
+            value={"status": result["status"], "error": result["error"]},
+        )
     ctype = str((result["data"] or {}).get("content_type") or "").lower()
     if ctype.startswith("image/"):
         return "image"
     if ctype.startswith("video/"):
         return "video"
-    raise ToolError(f"无法从内容类型 {ctype or '未知'} 判断附件是图片还是视频：请显式指定 kind=image 或 video",
-                    code="invalid_arguments")
+    raise ToolError(
+        f"无法从内容类型 {ctype or '未知'} 判断附件是图片还是视频：请显式指定 kind=image 或 video",
+        code="invalid_arguments",
+    )
 
 
 async def search_by_media(args: SearchByMedia, ctx: ToolContext) -> ToolOutput:
     kind = args.kind or await attachment_kind(ctx, args.attachment)
-    data = upload_check(await ctx.client.upload(
-        f"/api/search/{kind}", files={"file": args.attachment},
-        data={"granularity": args.granularity, "limit": str(args.limit),
-              "filters": json.dumps(filters_body(args.filters, args.source_ids, args.source_group_ids), ensure_ascii=False)},
-    ), "以图搜索" if kind == "image" else "以视频搜索")
+    data = upload_check(
+        await ctx.client.upload(
+            f"/api/search/{kind}",
+            files={"file": args.attachment},
+            data={
+                "granularity": args.granularity,
+                "limit": str(args.limit),
+                "filters": json.dumps(
+                    filters_body(args.filters, args.source_ids, args.source_group_ids), ensure_ascii=False
+                ),
+            },
+        ),
+        "以图搜索" if kind == "image" else "以视频搜索",
+    )
     rows, media, lines = result_rows(data)
     output = search_output(data, lines, rows, media, {"page": "search"}, kind=kind)
     # 视觉输入：以图搜索时附上查询图片本身，再加前几条结果的缩略图，便于模型核对是否相似。
@@ -180,7 +236,9 @@ class FindSimilar(StrictModel):
     segment_id: str = Field(min_length=1, description="种子片段 ID（来自检索结果的 segment_id）")
     granularity: Granularity | None = Field(default=None, description="结果粒度；缺省沿用种子片段的粒度")
     limit: int = Field(default=8, ge=1, le=20)
-    source_group_ids: list[str] = Field(default_factory=list, description="多组取并集，与素材及其他条件取交集；空组无候选")
+    source_group_ids: list[str] = Field(
+        default_factory=list, description="多组取并集，与素材及其他条件取交集；空组无候选"
+    )
     source_ids: list[str] | None = Field(default=None, description="只在这些素材里找")
     filters: SearchFilters | None = None
 
@@ -202,12 +260,21 @@ async def find_similar(args: FindSimilar, ctx: ToolContext) -> ToolOutput:
     result = await ctx.client.post("/api/search/similar", body)
     if not result["ok"] and result["status"] in SIMILAR_HINTS:
         status = result["status"]
-        raise ToolError(f"找相似失败（HTTP {status}）：{result['error']}（{SIMILAR_HINTS[status]}）",
-                        code=f"http_{status}", value={"status": status, "error": result["error"]})
+        raise ToolError(
+            f"找相似失败（HTTP {status}）：{result['error']}（{SIMILAR_HINTS[status]}）",
+            code=f"http_{status}",
+            value={"status": status, "error": result["error"]},
+        )
     data = check(result, "找相似")
     rows, media, lines = result_rows(data)
-    output = search_output(data, lines, rows, media, {"page": "search"},
-                           seed_segment_id=data.get("seed_segment_id", args.segment_id))
+    output = search_output(
+        data,
+        lines,
+        rows,
+        media,
+        {"page": "search"},
+        seed_segment_id=data.get("seed_segment_id", args.segment_id),
+    )
     output.text = f"与片段 {args.segment_id} 画面相似的片段：\n" + output.text
     return output
 
@@ -216,7 +283,9 @@ class SampleFrames(StrictModel):
     source_id: str | None = Field(default=None, description="素材 ID；与 segment_id 二选一")
     segment_id: str | None = Field(default=None, description="片段 ID；给出时使用该片段的时间区间")
     start: float | None = Field(default=None, ge=0, description="区间起点（秒，仅配合 source_id）；缺省为 0")
-    end: float | None = Field(default=None, gt=0, description="区间终点（秒，仅配合 source_id）；缺省为素材结尾")
+    end: float | None = Field(
+        default=None, gt=0, description="区间终点（秒，仅配合 source_id）；缺省为素材结尾"
+    )
     count: int = Field(default=6, ge=1, le=MAX_FRAMES, description="帧数（1–12）")
     width: int = Field(default=768, ge=16, le=1024, description="帧宽度（像素）")
 
@@ -260,7 +329,9 @@ async def sample_frames(args: SampleFrames, ctx: ToolContext) -> ToolOutput:
         source_id, start, end = segment["source_id"], float(segment["start"]), float(segment["end"])
         name = segment.get("source_name") or source_id
     else:
-        source = check(await ctx.client.get(f"/api/admin/sources/{args.source_id}", detail="summary"), "读取素材")
+        source = check(
+            await ctx.client.get(f"/api/admin/sources/{args.source_id}", detail="summary"), "读取素材"
+        )
         source_id, name = source["id"], source.get("name") or args.source_id
         duration = float((source.get("media") or {}).get("duration") or 0)
         start = args.start if args.start is not None else 0.0
@@ -274,42 +345,83 @@ async def sample_frames(args: SampleFrames, ctx: ToolContext) -> ToolOutput:
     media = [item("image", f["url"], f"{name} {f['t']:.1f}s", collapsed=False) for f in frames]
     images = [f["url"] for f in frames]
     # 引用同时放在结果值中（兼容既有调用方）；ToolOutput.images 供视觉开启时交给模型。
-    value = {"source_id": source_id, "segment_id": args.segment_id, "start": start, "end": end,
-             "timestamps": [f["t"] for f in frames], "frames": frames, "images": images}
-    text = (f"{name} {start:.1f}–{end:.1f}s 均匀抽取 {len(frames)} 帧："
-            + "、".join(f"{f['t']:.2f}s" for f in frames) + "（画面已在面板展示）")
-    return ToolOutput(value, text=text, meta={"kind": "frames", "count": len(frames)},
-                      focus={"page": "admin", "source_id": source_id}, media=[m for m in media if m],
-                      images=images)
+    value = {
+        "source_id": source_id,
+        "segment_id": args.segment_id,
+        "start": start,
+        "end": end,
+        "timestamps": [f["t"] for f in frames],
+        "frames": frames,
+        "images": images,
+    }
+    text = (
+        f"{name} {start:.1f}–{end:.1f}s 均匀抽取 {len(frames)} 帧："
+        + "、".join(f"{f['t']:.2f}s" for f in frames)
+        + "（画面已在面板展示）"
+    )
+    return ToolOutput(
+        value,
+        text=text,
+        meta={"kind": "frames", "count": len(frames)},
+        focus={"page": "admin", "source_id": source_id},
+        media=[m for m in media if m],
+        images=images,
+    )
 
 
 class SystemStatus(StrictModel):
-    include_embedding: bool = Field(default=False, description="同时检查当前嵌入身份是否与活动索引匹配（较慢）")
+    include_embedding: bool = Field(
+        default=False, description="同时检查当前嵌入身份是否与活动索引匹配（较慢）"
+    )
 
 
 async def get_system_status(args: SystemStatus, ctx: ToolContext) -> ToolOutput:
-    # 渠道覆盖只在完整状态中计算（summary 模式下为空），因此不加 summary 参数；health 探测由 include_embedding 单独完成。
+    # 渠道覆盖只在完整状态中计算（summary 模式下为空），因此不加 summary 参数；
+    # health 探测由 include_embedding 单独完成。
     data = check(await ctx.client.get("/api/status"), "读取系统状态")
     active = data.get("active_index") or None
     index = None
     if active:
         spec = active.get("spec") or {}
-        index = {"id": active.get("id"), "status": active.get("status"), "mode": spec.get("mode"),
-                 "format": spec.get("format", 1), "created_at": active.get("created_at"),
-                 "search_release_id": active.get("search_release_id")}
+        index = {
+            "id": active.get("id"),
+            "status": active.get("status"),
+            "mode": spec.get("mode"),
+            "format": spec.get("format", 1),
+            "created_at": active.get("created_at"),
+            "search_release_id": active.get("search_release_id"),
+        }
     counts = {row["kind"]: row["count"] for row in data.get("segment_counts") or []}
-    coverage = {name: {"indexed": c.get("indexed_segments", 0), "total": c.get("total_segments", 0),
-                       "coverage": round(float(c.get("coverage", 0)), 4)}
-                for name, c in (data.get("channel_coverage") or {}).items()}
-    value = {"active_index": index, "source_count": len(data.get("sources") or []), "segment_counts": counts,
-             "channel_coverage": coverage}
-    lines = [f"活动索引：{index['id']}（{index['status']}，模式 {index['mode']}）" if index else "活动索引：无（尚未发布）",
-             f"素材数：{value['source_count']}（不含隐藏素材）",
-             "片段数：" + ("、".join(f"{k} {v}" for k, v in sorted(counts.items())) or "0")]
+    coverage = {
+        name: {
+            "indexed": c.get("indexed_segments", 0),
+            "total": c.get("total_segments", 0),
+            "coverage": round(float(c.get("coverage", 0)), 4),
+        }
+        for name, c in (data.get("channel_coverage") or {}).items()
+    }
+    value = {
+        "active_index": index,
+        "source_count": len(data.get("sources") or []),
+        "segment_counts": counts,
+        "channel_coverage": coverage,
+    }
+    lines = [
+        f"活动索引：{index['id']}（{index['status']}，模式 {index['mode']}）"
+        if index
+        else "活动索引：无（尚未发布）",
+        f"素材数：{value['source_count']}（不含隐藏素材）",
+        "片段数：" + ("、".join(f"{k} {v}" for k, v in sorted(counts.items())) or "0"),
+    ]
     labels = {"visual": "画面", "dialogue": "对白", "analysis": "分析"}
     if coverage:
-        lines.append("渠道覆盖：" + "、".join(
-            f"{labels.get(k, k)} {c['indexed']}/{c['total']}（{c['coverage']:.0%}）" for k, c in coverage.items()))
+        lines.append(
+            "渠道覆盖："
+            + "、".join(
+                f"{labels.get(k, k)} {c['indexed']}/{c['total']}（{c['coverage']:.0%}）"
+                for k, c in coverage.items()
+            )
+        )
     if args.include_embedding:
         result = await ctx.client.get("/api/settings/embedding-status")
         embedding = result["data"] if result["ok"] else {"error": result["error"], "matches_index": None}
@@ -320,26 +432,56 @@ async def get_system_status(args: SystemStatus, ctx: ToolContext) -> ToolOutput:
             lines.append("嵌入身份：与活动索引一致，检索可用")
         else:
             reason = f"（{clip(embedding['error'], 120)}）" if embedding.get("error") else ""
-            lines.append(f"嵌入身份：与活动索引不一致或不可用{reason}；画面检索可能降级，可用 list_index_versions 查看版本")
+            lines.append(
+                f"嵌入身份：与活动索引不一致或不可用{reason}；画面检索可能降级，可用 list_index_versions "
+                f"查看版本"
+            )
     return ToolOutput(value, text="\n".join(lines), meta={"kind": "status"}, focus={"page": "search"})
 
 
 def specs() -> list[ToolSpec]:
     return [
-        ToolSpec("search_media", "search",
-                 "按文字描述和/或人物检索素材片段（与检索页相同的多渠道检索），可指定粒度、渠道、人物匹配方式与筛选条件，"
-                 "返回素材、时间区间、片段 ID 与描述。",
-                 SearchMedia, "read", search_media),
-        ToolSpec("search_by_media", "search",
-                 "以图搜视频或以视频搜相似：用用户上传的图片/视频附件（attachment://…）检索素材片段。",
-                 SearchByMedia, "read", search_by_media),
-        ToolSpec("find_similar", "search",
-                 "用库内已有片段（检索结果的 segment_id）找画面相似的其他片段，不需要重新上传；自动排除种子及同源重叠片段。",
-                 FindSimilar, "read", find_similar),
-        ToolSpec("sample_frames", "search",
-                 "在素材区间或某个片段内均匀抽取 1–12 帧画面展示给用户（source_id 加可选 start/end，或 segment_id）。",
-                 SampleFrames, "read", sample_frames),
-        ToolSpec("get_system_status", "search",
-                 "查看检索系统是否就绪：活动索引、渠道覆盖、素材与片段数量；可选检查嵌入身份是否与活动索引匹配。",
-                 SystemStatus, "read", get_system_status),
+        ToolSpec(
+            "search_media",
+            "search",
+            "按文字描述和/或人物检索素材片段（与检索页相同的多渠道检索），可指定粒度、渠道、人物匹配方式与筛选条件，"
+            "返回素材、时间区间、片段 ID 与描述。",
+            SearchMedia,
+            "read",
+            search_media,
+        ),
+        ToolSpec(
+            "search_by_media",
+            "search",
+            "以图搜视频或以视频搜相似：用用户上传的图片/视频附件（attachment://…）检索素材片段。",
+            SearchByMedia,
+            "read",
+            search_by_media,
+        ),
+        ToolSpec(
+            "find_similar",
+            "search",
+            "用库内已有片段（检索结果的 "
+            "segment_id）找画面相似的其他片段，不需要重新上传；自动排除种子及同源重叠片段。",
+            FindSimilar,
+            "read",
+            find_similar,
+        ),
+        ToolSpec(
+            "sample_frames",
+            "search",
+            "在素材区间或某个片段内均匀抽取 1–12 帧画面展示给用户（source_id 加可选 start/end，或 "
+            "segment_id）。",
+            SampleFrames,
+            "read",
+            sample_frames,
+        ),
+        ToolSpec(
+            "get_system_status",
+            "search",
+            "查看检索系统是否就绪：活动索引、渠道覆盖、素材与片段数量；可选检查嵌入身份是否与活动索引匹配。",
+            SystemStatus,
+            "read",
+            get_system_status,
+        ),
     ]

@@ -1,46 +1,164 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-  <script src="/assets/shared/i18n-boot.js?v=bf7e8b3c7c"></script>
-  <script src="/assets/shared/theme.js?v=ba2154c954"></script>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title data-i18n="[[0,&quot;ui.b3d92be3921b&quot;]]">Mindex · 素材管理</title><link rel="icon" href="/assets/shared/favicon.svg?v=8d7f9242de" type="image/svg+xml">
-  <link rel="stylesheet" href="/assets/shared/style.css?v=87b28bc99b"><link rel="stylesheet" href="/assets/shared/agent-panel.css?v=4284eb0eb0"><link rel="stylesheet" href="/assets/admin/admin.css?v=ef3d67328a">
-  <script src="/assets/shared/messages.js?v=6a8ef772ae" defer></script><script src="/assets/shared/i18n.js?v=e981ac227d" defer></script><script src="/assets/shared/analysis-text.js?v=b4293c5b26" defer></script><script src="/assets/shared/api.js?v=f9ecd754db" defer></script><script src="/assets/shared/control-layout.js?v=8295190463" defer></script><script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script><script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script><script src="/assets/shared/agent-markdown.js?v=8f0018e90a" defer></script><script src="/assets/shared/agent-panel.js?v=2e639588c0" defer></script><script src="/assets/shared/feedback.js?v=4630718c9e" defer></script><script src="/assets/shared/multiselect.js?v=f02ca7cc76" defer></script><script src="/assets/admin/groups.js?v=8ba70e3aff" defer></script>
-<script src="/assets/shared/shot-player.js?v=0d7ae3ceb4"></script>
-  <link rel="stylesheet" href="/assets/shared/sidebar.css?v=dd2c815e5f">
-  <script src="/assets/shared/sidebar.js?v=f094192f60" defer></script>
-<link rel="stylesheet" href="/assets/admin/groups.css?v=8a22d29042">
-</head>
-<body class="admin groups-page">
-  <header><a class="brand" href="/">m<span>index</span><i></i></a><nav class="page-nav" aria-label="页面导航" data-i18n-aria-label="ui.main_navigation"><a class="quiet nav-link" href="/search" data-i18n="[[0,&quot;ui.c9b1e68e3537&quot;]]">视频检索</a><a class="quiet nav-link" href="/" data-i18n="[[0,&quot;ui.b6fc3cef0bd0&quot;]]">创作</a><a class="quiet nav-link" href="/admin" aria-current="page" data-i18n="[[0,&quot;ui.f517302fec0d&quot;]]">素材管理</a><a class="quiet nav-link" href="/persons" data-i18n="[[0,&quot;ui.0973ef28d791&quot;]]">人物库</a><a class="quiet nav-link" href="/settings" data-i18n="[[0,&quot;ui.7debf9cb0372&quot;]]">设置</a></nav><div class="header-actions"><button hidden type="button" class="quiet" id="reload" data-i18n="[[0,&quot;ui.162d2697ca9c&quot;]]">刷新素材</button><button type="button" class="quiet theme-toggle" data-theme-toggle></button><button type="button" class="quiet language-switch" data-language-toggle aria-label="中文 / English"><span data-language="zh" lang="zh-CN">文</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en" lang="en">En</span></button></div></header>
-  <main class="admin-main">
-    <nav class="studio-tabs admin-tabs" aria-label="素材管理分区" data-i18n-aria-label="ui.admin_tabs_aria"><a class="studio-tab" href="/admin" data-i18n="[[0,&quot;ui.admin_tab_sources&quot;]]">素材</a><a class="studio-tab" href="/admin/music" data-i18n="[[0,&quot;ui.admin_tab_music&quot;]]">音乐库</a><a class="studio-tab" href="/admin/groups" aria-current="page" data-i18n="[[0,&quot;ui.groups_manage&quot;]]">管理</a></nav>
-    <section class="admin-intro"><h1 data-i18n="[[0,&quot;ui.groups_page_title&quot;]]">组管理</h1><p data-i18n="[[0,&quot;ui.groups_help&quot;]]">维护素材组与音乐组，用作检索与创作流程的范围筛选；多选取并集，不选表示不限。</p></section>
-    <div id="groups-error" role="alert"></div>
-    <div class="workspace">
-      <aside class="source-panel"><label for="groups-kind" data-i18n="[[0,&quot;ui.groups_manage&quot;]]">管理</label><select id="groups-kind"><option value="source" data-i18n="[[0,&quot;ui.groups_source&quot;]]">素材组</option><option value="music" data-i18n="[[0,&quot;ui.groups_music&quot;]]">音乐组</option></select><div id="groups-list"></div><button id="groups-new" type="button" data-i18n="[[0,&quot;ui.groups_new&quot;]]">新建组</button></aside>
-      <section class="segment-panel">
-        <form id="groups-form" class="group-fields">
-          <label data-i18n="[[0,&quot;ui.groups_name&quot;]]">组名称<input id="groups-name" required maxlength="200"></label>
-          <label class="group-description-field" data-i18n="[[0,&quot;ui.groups_description&quot;]]">说明<textarea id="groups-description" maxlength="4000" rows="2"></textarea></label>
-          <div class="group-actions"><button type="submit" data-i18n="[[0,&quot;ui.groups_save&quot;]]">保存组信息</button><button type="button" id="groups-delete" data-i18n="[[0,&quot;ui.groups_delete&quot;]]">删除组</button></div>
-        </form>
-        <div class="group-member-columns">
-          <section class="group-member-section">
-            <h2 id="groups-member-title"></h2>
-            <div id="groups-members"></div>
-            <div class="group-actions"><button id="groups-remove" type="button" data-i18n="[[0,&quot;ui.groups_remove&quot;]]">移除所选成员</button><button id="groups-prev" type="button" data-i18n="[[0,&quot;ui.groups_prev&quot;]]">上一页</button><span id="groups-member-page"></span><button id="groups-next" type="button" data-i18n="[[0,&quot;ui.groups_next&quot;]]">下一页</button></div>
-          </section>
-          <section class="group-member-section">
-            <h2 data-i18n="[[0,&quot;ui.groups_add_heading&quot;]]">添加成员</h2>
-            <label for="groups-results" data-i18n="[[0,&quot;ui.groups_library_choices&quot;]]">从现有库中多选</label><select id="groups-results" multiple size="8" data-i18n-aria-label="ui.groups_library_choices"></select>
-            <p id="groups-library-status" class="muted" role="status"></p><p id="groups-library-count" class="muted" aria-live="polite"></p>
-            <div class="group-actions"><button id="groups-select-visible" type="button" data-i18n="[[0,&quot;ui.groups_select_visible&quot;]]">全选当前结果</button><button id="groups-clear-selection" type="button" data-i18n="[[0,&quot;ui.groups_clear_selection&quot;]]">清空选择</button><button id="groups-add" type="button" data-i18n="[[0,&quot;ui.groups_add&quot;]]">添加所选成员</button></div>
-          </section>
-        </div>
+  <head>
+    <script src="/assets/shared/i18n-boot.js?v=6ad8b45125"></script>
+    <script src="/assets/shared/theme.js?v=06b5a45391"></script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title data-i18n='[[0,"ui.b3d92be3921b"]]'>Mindex · 素材管理</title>
+    <link rel="icon" href="/assets/shared/favicon.svg?v=8d7f9242de" type="image/svg+xml" />
+    <link rel="stylesheet" href="/assets/shared/style.css?v=7303c8f392" />
+    <link rel="stylesheet" href="/assets/shared/agent-panel.css?v=4402a24df2" />
+    <link rel="stylesheet" href="/assets/admin/admin.css?v=aa5308bf0f" />
+    <script src="/assets/shared/messages.js?v=6a8ef772ae" defer></script>
+    <script src="/assets/shared/i18n.js?v=71113d017f" defer></script>
+    <script src="/assets/shared/analysis-text.js?v=b3250c4c3c" defer></script>
+    <script src="/assets/shared/api.js?v=799acf885b" defer></script>
+    <script src="/assets/shared/control-layout.js?v=1278e93f03" defer></script>
+    <script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script>
+    <script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script>
+    <script src="/assets/shared/agent-markdown.js?v=9dd4d8c653" defer></script>
+    <script src="/assets/shared/agent-panel.js?v=11ba8e2e53" defer></script>
+    <script src="/assets/shared/feedback.js?v=a83918f9e5" defer></script>
+    <script src="/assets/shared/multiselect.js?v=580ad4713c" defer></script>
+    <script src="/assets/admin/groups.js?v=57dddccaca" defer></script>
+    <script src="/assets/shared/shot-player.js?v=855e64534e"></script>
+    <link rel="stylesheet" href="/assets/shared/sidebar.css?v=ae3a90c0f4" />
+    <script src="/assets/shared/sidebar.js?v=25662ce192" defer></script>
+    <link rel="stylesheet" href="/assets/admin/groups.css?v=e058aa31b2" />
+  </head>
+  <body class="admin groups-page">
+    <header>
+      <a class="brand" href="/">m<span>index</span><i></i></a>
+      <nav class="page-nav" aria-label="页面导航" data-i18n-aria-label="ui.main_navigation">
+        <a class="quiet nav-link" href="/search" data-i18n='[[0,"ui.c9b1e68e3537"]]'>视频检索</a
+        ><a class="quiet nav-link" href="/" data-i18n='[[0,"ui.b6fc3cef0bd0"]]'>创作</a
+        ><a
+          class="quiet nav-link"
+          href="/admin"
+          aria-current="page"
+          data-i18n='[[0,"ui.f517302fec0d"]]'
+          >素材管理</a
+        ><a class="quiet nav-link" href="/persons" data-i18n='[[0,"ui.0973ef28d791"]]'>人物库</a
+        ><a class="quiet nav-link" href="/settings" data-i18n='[[0,"ui.7debf9cb0372"]]'>设置</a>
+      </nav>
+      <div class="header-actions">
+        <button hidden type="button" class="quiet" id="reload" data-i18n='[[0,"ui.162d2697ca9c"]]'>
+          刷新素材</button
+        ><button type="button" class="quiet theme-toggle" data-theme-toggle></button
+        ><button
+          type="button"
+          class="quiet language-switch"
+          data-language-toggle
+          aria-label="中文 / English"
+        >
+          <span data-language="zh" lang="zh-CN">文</span
+          ><span class="language-divider" aria-hidden="true">/</span
+          ><span data-language="en" lang="en">En</span>
+        </button>
+      </div>
+    </header>
+    <main class="admin-main">
+      <nav
+        class="studio-tabs admin-tabs"
+        aria-label="素材管理分区"
+        data-i18n-aria-label="ui.admin_tabs_aria"
+      >
+        <a class="studio-tab" href="/admin" data-i18n='[[0,"ui.admin_tab_sources"]]'>素材</a
+        ><a class="studio-tab" href="/admin/music" data-i18n='[[0,"ui.admin_tab_music"]]'>音乐库</a
+        ><a
+          class="studio-tab"
+          href="/admin/groups"
+          aria-current="page"
+          data-i18n='[[0,"ui.groups_manage"]]'
+          >管理</a
+        >
+      </nav>
+      <section class="admin-intro">
+        <h1 data-i18n='[[0,"ui.groups_page_title"]]'>组管理</h1>
+        <p data-i18n='[[0,"ui.groups_help"]]'>
+          维护素材组与音乐组，用作检索与创作流程的范围筛选；多选取并集，不选表示不限。
+        </p>
       </section>
-    </div>
-  </main>
-<script src="/assets/shared/group-controls.js?v=c33cc964b5" defer></script><footer><span data-i18n="[[0,&quot;ui.footer_groups&quot;]]">Mindex / 素材管理</span><span data-i18n="[[0,&quot;ui.footer_groups_hint&quot;]]">组用于检索与创作的范围筛选</span></footer>
-</body></html>
+      <div id="groups-error" role="alert"></div>
+      <div class="workspace">
+        <aside class="source-panel">
+          <label for="groups-kind" data-i18n='[[0,"ui.groups_manage"]]'>管理</label
+          ><select id="groups-kind">
+            <option value="source" data-i18n='[[0,"ui.groups_source"]]'>素材组</option>
+            <option value="music" data-i18n='[[0,"ui.groups_music"]]'>音乐组</option>
+          </select>
+          <div id="groups-list"></div>
+          <button id="groups-new" type="button" data-i18n='[[0,"ui.groups_new"]]'>新建组</button>
+        </aside>
+        <section class="segment-panel">
+          <form id="groups-form" class="group-fields">
+            <label data-i18n='[[0,"ui.groups_name"]]'
+              >组名称<input id="groups-name" required maxlength="200"
+            /></label>
+            <label class="group-description-field" data-i18n='[[0,"ui.groups_description"]]'
+              >说明<textarea id="groups-description" maxlength="4000" rows="2"></textarea>
+            </label>
+            <div class="group-actions">
+              <button type="submit" data-i18n='[[0,"ui.groups_save"]]'>保存组信息</button
+              ><button type="button" id="groups-delete" data-i18n='[[0,"ui.groups_delete"]]'>
+                删除组
+              </button>
+            </div>
+          </form>
+          <div class="group-member-columns">
+            <section class="group-member-section">
+              <h2 id="groups-member-title"></h2>
+              <div id="groups-members"></div>
+              <div class="group-actions">
+                <button id="groups-remove" type="button" data-i18n='[[0,"ui.groups_remove"]]'>
+                  移除所选成员</button
+                ><button id="groups-prev" type="button" data-i18n='[[0,"ui.groups_prev"]]'>
+                  上一页</button
+                ><span id="groups-member-page"></span
+                ><button id="groups-next" type="button" data-i18n='[[0,"ui.groups_next"]]'>
+                  下一页
+                </button>
+              </div>
+            </section>
+            <section class="group-member-section">
+              <h2 data-i18n='[[0,"ui.groups_add_heading"]]'>添加成员</h2>
+              <label for="groups-results" data-i18n='[[0,"ui.groups_library_choices"]]'
+                >从现有库中多选</label
+              ><select
+                id="groups-results"
+                multiple
+                size="8"
+                data-i18n-aria-label="ui.groups_library_choices"
+              ></select>
+              <p id="groups-library-status" class="muted" role="status"></p>
+              <p id="groups-library-count" class="muted" aria-live="polite"></p>
+              <div class="group-actions">
+                <button
+                  id="groups-select-visible"
+                  type="button"
+                  data-i18n='[[0,"ui.groups_select_visible"]]'
+                >
+                  全选当前结果</button
+                ><button
+                  id="groups-clear-selection"
+                  type="button"
+                  data-i18n='[[0,"ui.groups_clear_selection"]]'
+                >
+                  清空选择</button
+                ><button id="groups-add" type="button" data-i18n='[[0,"ui.groups_add"]]'>
+                  添加所选成员
+                </button>
+              </div>
+            </section>
+          </div>
+        </section>
+      </div>
+    </main>
+    <script src="/assets/shared/group-controls.js?v=200a6e2ce7" defer></script>
+    <footer>
+      <span data-i18n='[[0,"ui.footer_groups"]]'>Mindex / 素材管理</span
+      ><span data-i18n='[[0,"ui.footer_groups_hint"]]'>组用于检索与创作的范围筛选</span>
+    </footer>
+  </body>
+</html>

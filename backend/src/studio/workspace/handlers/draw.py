@@ -2,23 +2,23 @@
 
 - 提示词缺省用画面意象，再缺省用召回查询；给出主体参考图（reference_id）时为图生图；
 - 宽高比按方案画幅（MiniMax 取最接近的 aspect_ratio，ComfyUI 直接映射宽高）；
-- 签名：提示词、主体参考图摘要、seed、提示词优化开关、画幅尺寸与生成服务（backend/model，ComfyUI 另含工作流摘要）；
+- 签名：提示词、主体参考图摘要、seed、提示词优化开关、画幅尺寸与生成服务（backend/model，ComfyUI
+另含工作流摘要）；
   运动方式与强度只影响渲染，不在这里；
 - 产物：``versions/<vid>/image.png``（经 ``image_png`` 规范化）与 ``request.json``（脱敏请求）。
 """
 
 from __future__ import annotations
 
-from mindex.models.adapters import make_image_generator
-from mindex.models.image_generators import ImageRequest, nearest_aspect
-from mindex.shared.images import image_png
-from mindex.studio import studio
-from mindex.studio.studio_artifacts import sanitized
-
-from .. import sources
-from ..plans import canvas_render
-from ..stages import StageHandler, register, shot_content
-from ..versions import file_info
+from models.adapters import make_image_generator
+from models.image_generators import ImageRequest, nearest_aspect
+from shared.images import image_png
+from studio import studio
+from studio.artifacts import sanitized
+from studio.workspace import sources
+from studio.workspace.plans import canvas_render
+from studio.workspace.stages import StageHandler, register, shot_content
+from studio.workspace.versions import file_info
 
 DRAW_VERSION = 1
 NOT_CONFIGURED = "未配置图片生成服务，请在设置页激活图片生成档案"
@@ -79,14 +79,24 @@ class DrawHandler(StageHandler):
         source = sources.plan_source(ctx.w, ctx.p, ctx.sid) or {}
         reference = sources.reference_image(ctx.config, ctx.job_id, source, "reference_id")
         record_path = ctx.directory / "request.json"
-        record = {"request": request, "generator": ctx.spec["parameters"].get("image_generator"),
-                  "submitted_at": studio.now(), "finished_at": None}
+        record = {
+            "request": request,
+            "generator": ctx.spec["parameters"].get("image_generator"),
+            "submitted_at": studio.now(),
+            "finished_at": None,
+        }
         studio.save(record_path, sanitized(record))
-        payload = generator.generate(ImageRequest(
-            prompt=request["prompt"], aspect_ratio=nearest_aspect(request["width"], request["height"]),
-            reference=reference, seed=request["seed"], prompt_optimizer=request["prompt_optimizer"],
-            width=request["width"], height=request["height"],
-        ))
+        payload = generator.generate(
+            ImageRequest(
+                prompt=request["prompt"],
+                aspect_ratio=nearest_aspect(request["width"], request["height"]),
+                reference=reference,
+                seed=request["seed"],
+                prompt_optimizer=request["prompt_optimizer"],
+                width=request["width"],
+                height=request["height"],
+            )
+        )
         raw = ctx.directory / "download.bin"
         studio.save_bytes(raw, payload)
         try:
@@ -104,10 +114,17 @@ class DrawHandler(StageHandler):
 
         with Image.open(target) as image:
             width, height = image.size
-        data = {"prompt": request["prompt"], "width": width, "height": height,
-                "reference": request["reference"], "seed": request["seed"]}
-        return data, {"image": file_info(ctx.config, ctx.job_id, target),
-                      "request": file_info(ctx.config, ctx.job_id, record_path)}
+        data = {
+            "prompt": request["prompt"],
+            "width": width,
+            "height": height,
+            "reference": request["reference"],
+            "seed": request["seed"],
+        }
+        return data, {
+            "image": file_info(ctx.config, ctx.job_id, target),
+            "request": file_info(ctx.config, ctx.job_id, record_path),
+        }
 
     def conflict_labels(self, config, w, item, expected, messages):
         found = []
@@ -115,7 +132,9 @@ class DrawHandler(StageHandler):
         after = expected["parameters"].get("image_generator") or {}
         for field, label in (("backend", "图片生成服务"), ("model", "图片生成模型")):
             if before.get(field) != after.get(field):
-                found.append(f"{label}已变化：{before.get(field) or '未记录'} → {after.get(field) or '未设置'}")
+                found.append(
+                    f"{label}已变化：{before.get(field) or '未记录'} → {after.get(field) or '未设置'}"
+                )
         if before.get("workflow") != after.get("workflow"):
             found.append("ComfyUI 工作流已变化")
         return found

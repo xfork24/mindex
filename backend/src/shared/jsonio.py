@@ -20,7 +20,7 @@ def save_bytes(path: Path, payload: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, name = tempfile.mkstemp(dir=path.parent, prefix="." + path.name + ".", suffix=".partial")
     temporary = Path(name)
-    from mindex.shared.work_budget import GrowingReservation, current
+    from shared.work_budget import GrowingReservation, current
 
     budget = current()
     if budget is not None:

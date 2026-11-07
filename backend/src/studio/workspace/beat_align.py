@@ -46,7 +46,7 @@ def render_payload(w, p, sid) -> float | None:
 
 
 def compose_payload(p) -> dict | None:
-    from mindex.studio import beats
+    from studio import beats
 
     found = tolerance(p)
     if found is None:
@@ -55,7 +55,10 @@ def compose_payload(p) -> dict | None:
 
 
 def beat_grid(beats: list[float], period: float, start: float, until: float) -> list[float]:
-    """段落从 ``start`` 秒起循环播放一首节拍为 ``beats``、长 ``period`` 秒的音乐，``until`` 之前的全部节拍时间。"""
+    (
+        """段落从 ``start`` 秒起循环播放一首节拍为 ``beats``、长 ``period`` 秒的音乐，``until`` """
+        """之前的全部节拍时间。"""
+    )
     if not beats or period <= 0:
         return []
     found, offset = [], start
@@ -65,11 +68,20 @@ def beat_grid(beats: list[float], period: float, start: float, until: float) -> 
     return found
 
 
-def delays(frames: list[int], handles: list[int], sids: list[str], segments: list[dict], analyses: dict,
-           fps: Fraction, tolerance_seconds: float, skip: set[str]) -> list[int]:
+def delays(
+    frames: list[int],
+    handles: list[int],
+    sids: list[str],
+    segments: list[dict],
+    analyses: dict,
+    fps: Fraction,
+    tolerance_seconds: float,
+    skip: set[str],
+) -> list[int]:
     """逐个切点计算推迟帧数（与 ``frames`` 等长，末镜恒为 0）。
 
-    ``segments`` 为 ``music.segments`` 的结果，``analyses[cue] = (beats, duration)``；``skip`` 为有重叠转场的分镜。"""
+    ``segments`` 为 ``music.segments`` 的结果，``analyses[cue] = (beats, duration)``；
+    ``skip`` 为有重叠转场的分镜。"""
     owner = {}
     for segment in segments:
         for sid in segment["shots"]:

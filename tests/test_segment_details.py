@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from mindex.api import create_app
-from mindex.processing.pipeline import Pipeline
-from mindex.shared.storage import dumps
-from mindex.shared.types import Annotation
+from api import create_app
+from processing.pipeline import Pipeline
+from shared.storage import dumps
+from shared.types import Annotation
 
 
 def test_detail_independent_asr_subtitle_and_llm_with_time_clipping(config, video_file, monkeypatch):
@@ -31,7 +31,8 @@ def test_detail_independent_asr_subtitle_and_llm_with_time_clipping(config, vide
     )
     # Current dialogue is subtitle-first; it must not erase stored ASR in details.
     store.execute(
-        "INSERT INTO channel_data(source_id,channel,profile,status,data) VALUES(?,'dialogue','sub','complete',?)",
+        "INSERT INTO channel_data(source_id,channel,profile,status,data) "
+        "VALUES(?,'dialogue','sub','complete',?)",
         (
             source,
             dumps(
@@ -54,18 +55,32 @@ def test_detail_independent_asr_subtitle_and_llm_with_time_clipping(config, vide
             ).model_dump()
         },
     )
-    from mindex.processing.subtitle_archive import archive_path
-    archive_path(store, source).write_text(dumps({
-        "version": 1, "files": {},
-        "tracks": [
-            {"index": 2, "codec": "subrip", "text": True, "language": "zho", "title": "中文"},
-            {"index": 3, "codec": "hdmv_pgs_subtitle", "text": False, "language": "eng", "title": "English"},
-        ],
-        "utterances": {"2": [
-            {"start": 0, "end": 1, "text": "字幕前镜头"},
-            {"start": 1.2, "end": 2.2, "text": "字幕本镜头"},
-        ]},
-    }))
+    from processing.subtitle_archive import archive_path
+
+    archive_path(store, source).write_text(
+        dumps(
+            {
+                "version": 1,
+                "files": {},
+                "tracks": [
+                    {"index": 2, "codec": "subrip", "text": True, "language": "zho", "title": "中文"},
+                    {
+                        "index": 3,
+                        "codec": "hdmv_pgs_subtitle",
+                        "text": False,
+                        "language": "eng",
+                        "title": "English",
+                    },
+                ],
+                "utterances": {
+                    "2": [
+                        {"start": 0, "end": 1, "text": "字幕前镜头"},
+                        {"start": 1.2, "end": 2.2, "text": "字幕本镜头"},
+                    ]
+                },
+            }
+        )
+    )
     client = TestClient(create_app(config))
     endpoint = f"/api/admin/segments/{shot['id']}/details"
     data = client.get(endpoint).json()
@@ -132,8 +147,8 @@ def test_missing_source_media_preserves_stored_llm_and_asr(config, video_file):
 
 
 def test_person_details_merge_clip_coverage_count_evidence_without_publication(config, video_file):
-    from mindex.persons.person_models import Entity
-    from mindex.persons.persons import Persons
+    from persons.person_models import Entity
+    from persons.persons import Persons
 
     pipeline = Pipeline(config)
     source = pipeline.prepare(video_file)

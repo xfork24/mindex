@@ -15,21 +15,21 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from mindex.api import create_app
-from mindex.models import adapters
-from mindex.models.adapters import ModelError, make_video_generator
-from mindex.models.video_generators import (
+from api import create_app
+from models import adapters
+from models.adapters import ModelError, make_video_generator
+from models.video_generators import (
     ComfyUIVideoGenerator,
     DashScopeVideoGenerator,
     MiniMaxVideoGenerator,
     VideoContentRejected,
     VideoRequest,
 )
-from mindex.shared import trace
-from mindex.shared.comfyui import validate_workflow
-from mindex.shared.config import VideoGeneratorConfig
-from mindex.studio import studio
-from mindex.studio.workspace.handlers import generate
+from shared import trace
+from shared.comfyui import validate_workflow
+from shared.config import VideoGeneratorConfig
+from studio import studio
+from studio.workspace.handlers import generate
 
 KEY = "sk-video-test-key-0123456789"
 VIDEO = b"\x00\x00\x00\x18ftypmp42fake-video-bytes"
@@ -113,8 +113,13 @@ def minimax_handler(states, *, submit=None, query_code=0):
                 payload["file_id"] = "f-9"
             return httpx.Response(200, json=payload)
         if path.endswith("/files/retrieve"):
-            return httpx.Response(200, json={"file": {"download_url": "https://cdn.example/v.mp4?Expires=1&sig=s"},
-                                             "base_resp": {"status_code": 0}})
+            return httpx.Response(
+                200,
+                json={
+                    "file": {"download_url": "https://cdn.example/v.mp4?Expires=1&sig=s"},
+                    "base_resp": {"status_code": 0},
+                },
+            )
         if request.url.host == "cdn.example":
             return httpx.Response(200, content=VIDEO)
         return httpx.Response(404)
@@ -123,15 +128,22 @@ def minimax_handler(states, *, submit=None, query_code=0):
 
 
 def test_minimax_success_polls_queue_then_downloads(config, stub, audit, tmp_path):
-    configure(config, backend="minimax", base_url="https://api.minimax.example/v1", model="MiniMax-Hailuo-2.3")
+    configure(
+        config, backend="minimax", base_url="https://api.minimax.example/v1", model="MiniMax-Hailuo-2.3"
+    )
     calls = stub(minimax_handler(["Preparing", "Queueing", "Processing", "Success"]))
     generator = make_video_generator(config)
     assert isinstance(generator, MiniMaxVideoGenerator)
-    task = generator.submit(VideoRequest(prompt="雨夜街道", negative_prompt="模糊", image=image_file(tmp_path),
-                                         seconds=6.0, seed=3))
+    task = generator.submit(
+        VideoRequest(
+            prompt="雨夜街道", negative_prompt="模糊", image=image_file(tmp_path), seconds=6.0, seed=3
+        )
+    )
     assert task == "mm-1"
     sent = body(calls[0])
-    assert calls[0].url.path == "/v1/video_generation" and calls[0].headers["authorization"] == f"Bearer {KEY}"
+    assert (
+        calls[0].url.path == "/v1/video_generation" and calls[0].headers["authorization"] == f"Bearer {KEY}"
+    )
     assert sent["model"] == "MiniMax-Hailuo-2.3" and sent["prompt"] == "雨夜街道" and sent["duration"] == 6
     assert sent["first_frame_image"].startswith("data:image/png;base64,")
     assert "negative_prompt" not in sent and "seed" not in sent  # 接口不支持，忽略
@@ -149,8 +161,12 @@ def test_minimax_success_polls_queue_then_downloads(config, stub, audit, tmp_pat
 def test_minimax_maps_moderation_auth_quota_and_failure(config, stub):
     configure(config, backend="minimax", base_url="https://api.minimax.example/v1", model="m")
     generator = make_video_generator(config)
-    for code, cls, words in ((1026, VideoContentRejected, "内容审核未通过"), (1004, ModelError, "鉴权失败"),
-                             (1008, ModelError, "余额或额度不足"), (2013, ModelError, "参数无效")):
+    for code, cls, words in (
+        (1026, VideoContentRejected, "内容审核未通过"),
+        (1004, ModelError, "鉴权失败"),
+        (1008, ModelError, "余额或额度不足"),
+        (2013, ModelError, "参数无效"),
+    ):
         stub(minimax_handler([], submit={"base_resp": {"status_code": code, "status_msg": "x"}}))
         with pytest.raises(cls, match=words):
             generator.submit(VideoRequest(prompt="p"))
@@ -184,8 +200,9 @@ def dashscope_handler(states, *, submit=None, task_error=None):
         if path.endswith("/video-synthesis"):
             if submit is not None:
                 return submit
-            return httpx.Response(200, json={"output": {"task_id": "ds-1", "task_status": "PENDING"},
-                                             "request_id": "r"})
+            return httpx.Response(
+                200, json={"output": {"task_id": "ds-1", "task_status": "PENDING"}, "request_id": "r"}
+            )
         if path.endswith("/cancel"):
             return httpx.Response(400, json={"code": "UnsupportedOperation", "message": "running"})
         if path.startswith("/api/v1/tasks/"):
@@ -196,7 +213,9 @@ def dashscope_handler(states, *, submit=None, task_error=None):
             if status == "SUCCEEDED":
                 output["video_url"] = "https://oss.example/v.mp4?Expires=1&Signature=s"
             if status == "FAILED":
-                output.update(code="DataInspectionFailed", message="Output data may contain inappropriate content.")
+                output.update(
+                    code="DataInspectionFailed", message="Output data may contain inappropriate content."
+                )
             return httpx.Response(200, json={"output": output, "request_id": "r"})
         if request.url.host == "oss.example":
             return httpx.Response(200, content=VIDEO)
@@ -210,14 +229,25 @@ def test_dashscope_text_and_image_requests_follow_async_protocol(config, stub, a
     calls = stub(dashscope_handler(["PENDING", "RUNNING", "SUCCEEDED"]))
     generator = make_video_generator(config)
     assert isinstance(generator, DashScopeVideoGenerator)
-    assert generator.submit(VideoRequest(prompt="海边", negative_prompt="人群", seconds=5, width=1280, height=720,
-                                         seed=42)) == "ds-1"
+    assert (
+        generator.submit(
+            VideoRequest(prompt="海边", negative_prompt="人群", seconds=5, width=1280, height=720, seed=42)
+        )
+        == "ds-1"
+    )
     first = calls[0]
     assert first.url.path == "/api/v1/services/aigc/video-generation/video-synthesis"
-    assert first.headers["x-dashscope-async"] == "enable" and first.headers["authorization"] == f"Bearer {KEY}"
-    assert body(first) == {"model": "wan2.6-t2v", "input": {"prompt": "海边", "negative_prompt": "人群"},
-                           "parameters": {"duration": 5, "size": "1280*720", "seed": 42}}
-    generator.submit(VideoRequest(prompt="海边", image=image_file(tmp_path), seconds=5, width=720, height=1280))
+    assert (
+        first.headers["x-dashscope-async"] == "enable" and first.headers["authorization"] == f"Bearer {KEY}"
+    )
+    assert body(first) == {
+        "model": "wan2.6-t2v",
+        "input": {"prompt": "海边", "negative_prompt": "人群"},
+        "parameters": {"duration": 5, "size": "1280*720", "seed": 42},
+    }
+    generator.submit(
+        VideoRequest(prompt="海边", image=image_file(tmp_path), seconds=5, width=720, height=1280)
+    )
     second = body(calls[1])
     assert second["input"]["img_url"].startswith("data:image/png;base64,")
     assert second["parameters"] == {"duration": 5, "resolution": "720P"}
@@ -253,17 +283,29 @@ def test_dashscope_errors_failure_and_cancel(config, stub):
 
 def test_dashscope_health_never_submits(config, stub):
     configure(config, backend="dashscope", base_url="https://dashscope.example", model="wan")
-    calls = stub(dashscope_handler([], task_error=httpx.Response(404, json={"code": "NotFound", "message": "x"})))
+    calls = stub(
+        dashscope_handler([], task_error=httpx.Response(404, json={"code": "NotFound", "message": "x"}))
+    )
     assert make_video_generator(config).health()["ready"] is True
     assert [c.method for c in calls] == ["GET"]
-    stub(dashscope_handler([], task_error=httpx.Response(401, json={"code": "InvalidApiKey", "message": "bad"})))
+    stub(
+        dashscope_handler(
+            [], task_error=httpx.Response(401, json={"code": "InvalidApiKey", "message": "bad"})
+        )
+    )
     with pytest.raises(ModelError, match="鉴权失败"):
         make_video_generator(config).health()
 
 
 def test_polling_times_out_against_stub(config, stub):
-    configure(config, backend="dashscope", base_url="https://dashscope.example", model="wan",
-              poll_interval=0.01, max_wait=0.05)
+    configure(
+        config,
+        backend="dashscope",
+        base_url="https://dashscope.example",
+        model="wan",
+        poll_interval=0.01,
+        max_wait=0.05,
+    )
     calls = stub(dashscope_handler(["RUNNING"] * 1000))
     generator = make_video_generator(config)
     with pytest.raises(studio.StudioError, match="视频生成超时"):
@@ -282,21 +324,30 @@ WORKFLOW = {
     "12": {"class_type": "LoadImage", "inputs": {"image": "example.png"}},
     "20": {"class_type": "VHS_VideoCombine", "inputs": {"frame_rate": 16}},
 }
-MAPPING = {"prompt": "6.inputs.text", "negative": "7.inputs.text", "seed": "3.inputs.seed",
-           "frames": "9.inputs.length", "width": "9.inputs.width", "height": "9.inputs.height",
-           "image": "12.inputs.image"}
+MAPPING = {
+    "prompt": "6.inputs.text",
+    "negative": "7.inputs.text",
+    "seed": "3.inputs.seed",
+    "frames": "9.inputs.length",
+    "width": "9.inputs.width",
+    "height": "9.inputs.height",
+    "image": "12.inputs.image",
+}
 
 
-@pytest.mark.parametrize(("workflow", "mapping", "words"), [
-    ({"nodes": [], "links": []}, MAPPING, "界面格式"),
-    ({"1": {"inputs": {}}}, {"prompt": "1.inputs.text"}, "不是 API 格式"),
-    (WORKFLOW, {}, "不能为空"),
-    (WORKFLOW, {"negative": "7.inputs.text"}, "缺少 prompt"),
-    (WORKFLOW, {**MAPPING, "steps": "3.inputs.steps"}, "未知字段 steps"),
-    (WORKFLOW, {"prompt": "6.text"}, "映射 prompt（正向提示词）：格式应为"),
-    (WORKFLOW, {"prompt": "99.inputs.text"}, "工作流中没有节点 99"),
-    (WORKFLOW, {"prompt": "6.inputs.txt"}, "节点 6（CLIPTextEncode）没有输入 txt"),
-])
+@pytest.mark.parametrize(
+    ("workflow", "mapping", "words"),
+    [
+        ({"nodes": [], "links": []}, MAPPING, "界面格式"),
+        ({"1": {"inputs": {}}}, {"prompt": "1.inputs.text"}, "不是 API 格式"),
+        (WORKFLOW, {}, "不能为空"),
+        (WORKFLOW, {"negative": "7.inputs.text"}, "缺少 prompt"),
+        (WORKFLOW, {**MAPPING, "steps": "3.inputs.steps"}, "未知字段 steps"),
+        (WORKFLOW, {"prompt": "6.text"}, "映射 prompt（正向提示词）：格式应为"),
+        (WORKFLOW, {"prompt": "99.inputs.text"}, "工作流中没有节点 99"),
+        (WORKFLOW, {"prompt": "6.inputs.txt"}, "节点 6（CLIPTextEncode）没有输入 txt"),
+    ],
+)
 def test_comfyui_mapping_validation_errors_are_chinese(workflow, mapping, words):
     with pytest.raises(ValueError, match=words):
         validate_workflow(workflow, mapping)
@@ -330,25 +381,52 @@ def comfy_handler(history_sequence, *, queue=None):
         if path == "/view":
             return httpx.Response(200, content=VIDEO)
         if path == "/system_stats":
-            return httpx.Response(200, json={"system": {"comfyui_version": "0.3.60"}, "devices": [{"name": "cuda"}]})
+            return httpx.Response(
+                200, json={"system": {"comfyui_version": "0.3.60"}, "devices": [{"name": "cuda"}]}
+            )
         return httpx.Response(404)
 
     return handler
 
 
 def test_comfyui_maps_inputs_polls_queue_and_downloads(config, stub, audit, tmp_path):
-    configure(config, backend="comfyui", base_url="http://comfy.local:8188", fps=16,
-              comfyui_workflow=WORKFLOW, comfyui_mapping=MAPPING)
-    queues = iter([{"queue_pending": [[1, "c-1", {}]], "queue_running": []},
-                   {"queue_pending": [], "queue_running": [[1, "c-1", {}]]}])
-    done = {"c-1": {"status": {"status_str": "success", "completed": True},
-                    "outputs": {"20": {"gifs": [{"filename": "mindex_00001.mp4", "subfolder": "v", "type": "output"}]},
-                                "21": {"images": [{"filename": "preview.png", "type": "temp"}]}}}}
+    configure(
+        config,
+        backend="comfyui",
+        base_url="http://comfy.local:8188",
+        fps=16,
+        comfyui_workflow=WORKFLOW,
+        comfyui_mapping=MAPPING,
+    )
+    queues = iter(
+        [
+            {"queue_pending": [[1, "c-1", {}]], "queue_running": []},
+            {"queue_pending": [], "queue_running": [[1, "c-1", {}]]},
+        ]
+    )
+    done = {
+        "c-1": {
+            "status": {"status_str": "success", "completed": True},
+            "outputs": {
+                "20": {"gifs": [{"filename": "mindex_00001.mp4", "subfolder": "v", "type": "output"}]},
+                "21": {"images": [{"filename": "preview.png", "type": "temp"}]},
+            },
+        }
+    }
     calls = stub(comfy_handler([{}, {}, done], queue=lambda: next(queues)))
     generator = make_video_generator(config)
     assert isinstance(generator, ComfyUIVideoGenerator)
-    task = generator.submit(VideoRequest(prompt="竹林", negative_prompt="文字", image=image_file(tmp_path),
-                                         seconds=2.0, width=640, height=360, seed=11))
+    task = generator.submit(
+        VideoRequest(
+            prompt="竹林",
+            negative_prompt="文字",
+            image=image_file(tmp_path),
+            seconds=2.0,
+            width=640,
+            height=360,
+            seed=11,
+        )
+    )
     assert task == "c-1"
     assert calls[0].url.path == "/upload/image"
     prompt = body(calls[1])["prompt"]
@@ -365,15 +443,33 @@ def test_comfyui_maps_inputs_polls_queue_and_downloads(config, stub, audit, tmp_
     generator.fetch(states[-1], target)
     assert target.read_bytes() == VIDEO
     assert_audit_clean(audit)
-    recorded = next(value for kind, value in audit.items if kind == "model-request" and value["url"].endswith("/prompt"))
+    recorded = next(
+        value for kind, value in audit.items if kind == "model-request" and value["url"].endswith("/prompt")
+    )
     assert recorded["json"]["inputs"]["prompt"] == "竹林" and "workflow" in recorded["json"]
 
 
 def test_comfyui_failure_missing_task_and_seed_default(config, stub):
-    configure(config, backend="comfyui", base_url="http://comfy.local:8188",
-              comfyui_workflow=WORKFLOW, comfyui_mapping={"prompt": "6.inputs.text", "seed": "3.inputs.seed"})
-    error = {"c-1": {"status": {"status_str": "error", "completed": False, "messages": [
-        ["execution_start", {}], ["execution_error", {"exception_message": "CUDA out of memory"}]]}, "outputs": {}}}
+    configure(
+        config,
+        backend="comfyui",
+        base_url="http://comfy.local:8188",
+        comfyui_workflow=WORKFLOW,
+        comfyui_mapping={"prompt": "6.inputs.text", "seed": "3.inputs.seed"},
+    )
+    error = {
+        "c-1": {
+            "status": {
+                "status_str": "error",
+                "completed": False,
+                "messages": [
+                    ["execution_start", {}],
+                    ["execution_error", {"exception_message": "CUDA out of memory"}],
+                ],
+            },
+            "outputs": {},
+        }
+    }
     calls = stub(comfy_handler([error]))
     generator = make_video_generator(config)
     generator.submit(VideoRequest(prompt="p"))
@@ -407,18 +503,29 @@ def test_settings_role_profile_roundtrip_masks_key_and_activation_enables(config
     assert role["effective"]["backend"] == "comfyui" and role["effective"]["comfyui_workflow"] is None
     assert data["presets"]["minimax"]["video_generator"]["config"]["backend"] == "minimax_h3"
     assert data["presets"]["aliyun"]["video_generator"]["config"]["backend"] == "dashscope"
-    created = client.post("/api/settings/profiles", json={
-        "role": "video_generator", "name": "海螺", "provider": "minimax", "api_key": KEY,
-        "config": {"backend": "minimax", "base_url": "https://api.minimax.example/v1", "model": "MiniMax-Hailuo-2.3",
-                   "durations": [6, 10]},
-    })
+    created = client.post(
+        "/api/settings/profiles",
+        json={
+            "role": "video_generator",
+            "name": "海螺",
+            "provider": "minimax",
+            "api_key": KEY,
+            "config": {
+                "backend": "minimax",
+                "base_url": "https://api.minimax.example/v1",
+                "model": "MiniMax-Hailuo-2.3",
+                "durations": [6, 10],
+            },
+        },
+    )
     assert created.status_code == 201, created.text
     profile = created.json()
     assert profile["api_key"] == {"has_key": True, "hint": "…" + KEY[-4:]}
     assert KEY not in created.text
     assert client.post(f"/api/settings/profiles/{profile['id']}/activate").status_code == 200
-    effective = next(r for r in client.get("/api/settings").json()["roles"]
-                     if r["role"] == "video_generator")["effective"]
+    effective = next(
+        r for r in client.get("/api/settings").json()["roles"] if r["role"] == "video_generator"
+    )["effective"]
     assert effective["enabled"] is True and effective["durations"] == [6.0, 10.0]
     assert effective["api_key"]["has_key"] is True
     assert KEY not in client.get("/api/settings").text
@@ -430,17 +537,31 @@ def test_settings_role_profile_roundtrip_masks_key_and_activation_enables(config
 
 def test_settings_rejects_invalid_comfyui_mapping_in_chinese(config):
     client = TestClient(create_app(config))
-    response = client.post("/api/settings/profiles", json={
-        "role": "video_generator", "name": "本地", "provider": "self",
-        "config": {"backend": "comfyui", "base_url": "http://127.0.0.1:8188", "comfyui_workflow": WORKFLOW,
-                   "comfyui_mapping": {"prompt": "99.inputs.text"}},
-    })
+    response = client.post(
+        "/api/settings/profiles",
+        json={
+            "role": "video_generator",
+            "name": "本地",
+            "provider": "self",
+            "config": {
+                "backend": "comfyui",
+                "base_url": "http://127.0.0.1:8188",
+                "comfyui_workflow": WORKFLOW,
+                "comfyui_mapping": {"prompt": "99.inputs.text"},
+            },
+        },
+    )
     assert response.status_code == 422
     assert "工作流中没有节点 99" in response.json()["detail"]
-    response = client.post("/api/settings/profiles", json={
-        "role": "video_generator", "name": "本地", "provider": "self",
-        "config": {"backend": "comfyui", "enabled": True},
-    })
+    response = client.post(
+        "/api/settings/profiles",
+        json={
+            "role": "video_generator",
+            "name": "本地",
+            "provider": "self",
+            "config": {"backend": "comfyui", "enabled": True},
+        },
+    )
     assert response.status_code == 422 and "enabled" in response.json()["detail"]
 
 
@@ -455,14 +576,20 @@ def test_settings_test_connection_uses_health_only(config, monkeypatch):
         def submit(self, request):  # pragma: no cover - 测试连接绝不能走到这里
             raise AssertionError("测试连接不得提交生成")
 
-    import mindex.settings.settings_api as settings_api
+    import settings.api as settings_api
 
     monkeypatch.setattr(settings_api, "make_video_generator", lambda cfg: Probe())
     client = TestClient(create_app(config))
-    profile = client.post("/api/settings/profiles", json={
-        "role": "video_generator", "name": "海螺", "provider": "minimax", "api_key": KEY,
-        "config": {"backend": "minimax", "base_url": "https://api.minimax.example/v1", "model": "m"},
-    }).json()
+    profile = client.post(
+        "/api/settings/profiles",
+        json={
+            "role": "video_generator",
+            "name": "海螺",
+            "provider": "minimax",
+            "api_key": KEY,
+            "config": {"backend": "minimax", "base_url": "https://api.minimax.example/v1", "model": "m"},
+        },
+    ).json()
     result = client.post(f"/api/settings/profiles/{profile['id']}/test").json()
     assert result["ok"] is True and result["reply"] == "鉴权通过" and calls == ["health"]
 

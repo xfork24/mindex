@@ -1,8 +1,11 @@
-"""每日定时挖掘：``mindex serve`` 运行期间（Web 端常驻服务、桌面端窗口或托盘里的 sidecar）按档案的定时设置自动挖掘。
+"""每日定时挖掘：``mindex serve`` 运行期间（Web 端常驻服务、桌面端窗口或托盘里的 sidecar）
+按档案的定时设置自动挖掘。
 
 - ``due`` 是纯函数：档案开启定时、库内时间已过当天时刻、当天没有成功或进行中的自动任务、当天自动尝试少于
-  ``MAX_ATTEMPTS`` 次时返回触发方式；服务启动后的第一次检查记为 ``catchup``（补跑错过的定时），之后为 ``schedule``。
-- 线程每 ``topics.scheduler.interval_seconds`` 秒检查一次；提交经 ``TopicRuns``（全局 ``topics`` 锁），已有挖掘任务在运行
+  ``MAX_ATTEMPTS`` 次时返回触发方式；服务启动后的第一次检查记为 ``catchup``（补跑错过的定时），之后为
+``schedule``。
+- 线程每 ``topics.scheduler.interval_seconds`` 秒检查一次；提交经 ``TopicRuns``（全局 ``topics`` 锁），
+已有挖掘任务在运行
   时跳过，下一次检查再试；任何错误只记日志，不影响服务。
 - 运行记录的 ``created_at`` 是带时区 ISO 时间，"当天"按库绑定时区判断（本地缺省用系统时区）。
 """
@@ -14,8 +17,8 @@ import threading
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from mindex.topics import profiles
-from mindex.topics.common import parse_time
+from topics import profiles
+from topics.common import parse_time
 
 log = logging.getLogger(__name__)
 MAX_ATTEMPTS = 3
@@ -27,8 +30,10 @@ TIMEZONE_KEY = "topics.scheduler.timezone"
 def library_timezone(store, requested=None, *, persist=False):
     if persist and (store.pg or requested is not None):
         with store.connect() as db:
-            db.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO NOTHING",
-                       (TIMEZONE_KEY, requested or "UTC"))
+            db.execute(
+                "INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO NOTHING",
+                (TIMEZONE_KEY, requested or "UTC"),
+            )
     row = store.one("SELECT value FROM settings WHERE key=?", (TIMEZONE_KEY,))
     value = row["value"] if row else requested or ("UTC" if store.pg else None)
     if requested is not None and value != requested:
@@ -42,8 +47,11 @@ def scheduled_at(schedule, day, *, tz=None) -> datetime:
 
 
 def runs_on(store, profile_id: str, day, *, tz=None) -> list[dict]:
-    rows = store.rows("SELECT id,trigger,status,created_at FROM topic_runs WHERE source_id=? ORDER BY created_at DESC, rowid DESC",
-                      (profile_id,))
+    rows = store.rows(
+        "SELECT id,trigger,status,created_at FROM topic_runs WHERE source_id=? ORDER BY created_at DESC, "
+        "rowid DESC",
+        (profile_id,),
+    )
     found = []
     for row in rows:
         created = parse_time(row["created_at"])
@@ -82,13 +90,28 @@ def status(store, *, now: datetime | None = None, enabled: bool = True) -> dict:
         body = profiles.body_of(store, profile["id"])
         today = runs_on(store, profile["id"], now.date(), tz=now.tzinfo)
         cards = store.rows("SELECT created_at FROM topic_cards WHERE profile_id=?", (profile["id"],))
-        made = sum(1 for c in cards if (parse_time(c["created_at"]) or now).astimezone(now.tzinfo).date() == now.date())
-        latest = store.one("SELECT id,trigger,status,created_at,error FROM topic_runs WHERE source_id=? "
-                           "ORDER BY created_at DESC, rowid DESC LIMIT 1", (profile["id"],))
-        items.append({"profile_id": profile["id"], "name": profile["name"], "enabled": body.schedule.enabled,
-                      "time": body.schedule.time, "count": body.schedule.count,
-                      "next_run": next_run(body.schedule, now, today) if enabled else None,
-                      "today": {"runs": len(today), "cards": made}, "last_run": latest})
+        made = sum(
+            1
+            for c in cards
+            if (parse_time(c["created_at"]) or now).astimezone(now.tzinfo).date() == now.date()
+        )
+        latest = store.one(
+            "SELECT id,trigger,status,created_at,error FROM topic_runs WHERE source_id=? "
+            "ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            (profile["id"],),
+        )
+        items.append(
+            {
+                "profile_id": profile["id"],
+                "name": profile["name"],
+                "enabled": body.schedule.enabled,
+                "time": body.schedule.time,
+                "count": body.schedule.count,
+                "next_run": next_run(body.schedule, now, today) if enabled else None,
+                "today": {"runs": len(today), "cards": made},
+                "last_run": latest,
+            }
+        )
     return {"scheduler": enabled, "now": now.isoformat(timespec="seconds"), "items": items}
 
 
@@ -114,8 +137,7 @@ class TopicScheduler:
         submitted = []
         lease = None
         if self._leader is not None:
-            lease = self._leader.lease(LEADER_NAME, mode="exclusive",
-                                       ttl=max(self.interval * 2, 60), wait=0)
+            lease = self._leader.lease(LEADER_NAME, mode="exclusive", ttl=max(self.interval * 2, 60), wait=0)
             if lease is None:
                 log.info("调度 leader 租约被其他实例持有，本轮跳过")
                 return submitted
@@ -129,12 +151,19 @@ class TopicScheduler:
                         continue
                     if hasattr(self.runs, "start_scheduled"):
                         ordinal = 1 + sum(r["trigger"] in AUTO_TRIGGERS for r in today)
-                        run = self.runs.start_scheduled(profile["id"], period=now.date().isoformat(),
-                                                        ordinal=ordinal, trigger=trigger, created_at=now.isoformat())
+                        run = self.runs.start_scheduled(
+                            profile["id"],
+                            period=now.date().isoformat(),
+                            ordinal=ordinal,
+                            trigger=trigger,
+                            created_at=now.isoformat(),
+                        )
                     else:
                         run = self.runs.start(profile["id"], trigger=trigger)
                     submitted.append(run["id"])
-                    log.info("定时选题挖掘已启动：档案 %s（%s），任务 %s", profile["name"], trigger, run["id"])
+                    log.info(
+                        "定时选题挖掘已启动：档案 %s（%s），任务 %s", profile["name"], trigger, run["id"]
+                    )
                 except Exception as exc:  # noqa: BLE001 — 调度失败只记日志，下次检查再试
                     detail = getattr(exc, "detail", None) or exc
                     log.info("定时选题挖掘暂未启动：档案 %s：%s", profile["name"], detail)
@@ -170,13 +199,20 @@ def install(app, store, runs, config) -> TopicScheduler:
 
     leader = None
     if getattr(config, "locks", None) and config.locks.backend == "postgres":
-        from mindex.shared.db.locks_pg import PgLockProvider
+        from shared.db.locks_pg import PgLockProvider
 
-        library_id = getattr(store, "library_id", None) or (
-            store.one("SELECT value FROM settings WHERE key='library.id'") or {"value": ""})["value"]
+        library_id = (
+            getattr(store, "library_id", None)
+            or (store.one("SELECT value FROM settings WHERE key='library.id'") or {"value": ""})["value"]
+        )
         leader = PgLockProvider(store.backend, library_id=library_id)
-    scheduler = TopicScheduler(store, runs, interval=config.topics.scheduler.interval_seconds,
-                               leader=leader, timezone=config.topics.scheduler.timezone)
+    scheduler = TopicScheduler(
+        store,
+        runs,
+        interval=config.topics.scheduler.interval_seconds,
+        leader=leader,
+        timezone=config.topics.scheduler.timezone,
+    )
     previous = app.router.lifespan_context
 
     @contextlib.asynccontextmanager

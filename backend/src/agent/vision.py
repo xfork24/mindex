@@ -24,7 +24,7 @@ from typing import Any, Literal
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from mindex.agent.llm.types import new_id, resolved_image_block, text_block
+from agent.llm.types import new_id, resolved_image_block, text_block
 
 Protocol = Literal["openai", "anthropic"]
 Loader = Callable[[str], Awaitable[bytes]]
@@ -53,7 +53,8 @@ def is_image_ref(ref: Any) -> bool:
     """只接受附件引用或本站 ``/api/`` 相对地址（拒绝 ``//host`` 等协议相对地址）。"""
     return isinstance(ref, str) and (
         ref.startswith(ATTACHMENT_PREFIX)
-        or (ref.startswith("/api/") and "\\" not in ref and ".." not in ref.split("?", 1)[0]))
+        or (ref.startswith("/api/") and "\\" not in ref and ".." not in ref.split("?", 1)[0])
+    )
 
 
 def image_count(messages: list[dict]) -> int:
@@ -66,7 +67,10 @@ def image_count(messages: list[dict]) -> int:
 
 
 def encode_jpeg(data: bytes, max_side: int = MAX_SIDE) -> bytes:
-    """解码任意 Pillow 支持的静态图片，按 EXIF 摆正、透明底铺白，缩到最长边不超过 ``max_side``，编码为 JPEG。"""
+    (
+        """解码任意 Pillow 支持的静态图片，按 EXIF 摆正、透明底铺白，缩到最长边不超过 ``max_side``，编码为 """
+        """JPEG。"""
+    )
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
@@ -85,8 +89,13 @@ def encode_jpeg(data: bytes, max_side: int = MAX_SIDE) -> bytes:
                 return output.getvalue()
     except VisionError:
         raise
-    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError,
-            Image.DecompressionBombWarning) as exc:
+    except (
+        UnidentifiedImageError,
+        OSError,
+        ValueError,
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+    ) as exc:
         raise VisionError("图片无法解码或文件损坏") from exc
 
 
@@ -148,8 +157,9 @@ def _strip(messages: list[dict]) -> list[dict]:
     return result
 
 
-async def materialize(messages: list[dict], *, enabled: bool, limit: int, load: Loader,
-                      protocol: Protocol = "openai") -> list[dict]:
+async def materialize(
+    messages: list[dict], *, enabled: bool, limit: int, load: Loader, protocol: Protocol = "openai"
+) -> list[dict]:
     """返回发给模型的新消息列表；输入（来自事件日志）保持不变。"""
     if not enabled:
         return _strip(messages)
@@ -186,8 +196,14 @@ async def materialize(messages: list[dict], *, enabled: bool, limit: int, load: 
         for call_id, blocks in pending:
             content.append(text_block(f"工具调用 {call_id} 的图片："))
             content.extend(blocks)
-        result.append({"id": new_id("msg"), "role": "user", "content": content,
-                       "source": {"kind": "context", "origin": "tool-images"}})
+        result.append(
+            {
+                "id": new_id("msg"),
+                "role": "user",
+                "content": content,
+                "source": {"kind": "context", "origin": "tool-images"},
+            }
+        )
         pending.clear()
 
     for mi, message in enumerate(messages):

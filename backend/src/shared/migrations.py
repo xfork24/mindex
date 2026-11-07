@@ -44,7 +44,9 @@ def execute_script(conn: sqlite3.Connection, script: str, *, skip_existing_colum
                 skip = False
                 if skip_existing_columns:
                     match = re.fullmatch(r"ALTER TABLE (\w+) ADD COLUMN (\w+) .+", body, re.S)
-                    if match and match[2] in {row[1] for row in conn.execute(f"PRAGMA table_info({match[1]})")}:
+                    if match and match[2] in {
+                        row[1] for row in conn.execute(f"PRAGMA table_info({match[1]})")
+                    }:
                         skip = True
                 if not skip:
                     conn.execute(statement)

@@ -52,7 +52,9 @@ def segment_seconds(w, p, sid) -> int:
     """以提示点 ``sid`` 起始的段落的预估时长（各分镜 estimated_seconds 之和，向上取整到 5 秒）。"""
     for segment in segments(w, p):
         if segment["cue"] == sid:
-            total = sum(version(w, p["shots"][s]["content"])["data"]["estimated_seconds"] for s in segment["shots"])
+            total = sum(
+                version(w, p["shots"][s]["content"])["data"]["estimated_seconds"] for s in segment["shots"]
+            )
             return max(10, int(math.ceil(total / 5) * 5))
     return 30
 

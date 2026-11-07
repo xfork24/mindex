@@ -13,7 +13,9 @@ function studioScripts() {
 }
 
 function studioSource() {
-  return studioScripts().map((file) => fs.readFileSync(file, "utf8")).join("");
+  return studioScripts()
+    .map((file) => fs.readFileSync(file, "utf8"))
+    .join("");
 }
 
 module.exports = { studioScripts, studioSource };

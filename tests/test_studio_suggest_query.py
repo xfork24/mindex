@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 
 import pytest
-from conftest import FixtureStoryboarder
 
-from mindex.models.adapters import ModelError
-from mindex.models.storyboard import QUERY_RULES, VOCABULARY_HEADER, VOCABULARY_RULE, QwenStoryboarder
+from conftest import FixtureStoryboarder
+from models.adapters import ModelError
+from models.storyboard import QUERY_RULES, VOCABULARY_HEADER, VOCABULARY_RULE, QwenStoryboarder
 
 
 def chat_payload(content: str) -> dict:
@@ -22,7 +22,7 @@ def _capture(monkeypatch, content: str) -> list[dict]:
         calls.append(kwargs["json"])
         return chat_payload(content)
 
-    monkeypatch.setattr("mindex.models.adapters.request", fake_request)
+    monkeypatch.setattr("models.adapters.request", fake_request)
     return calls
 
 
@@ -45,8 +45,10 @@ def test_suggest_query_sends_json_context_and_vocabulary_once(config, monkeypatc
     assert QUERY_RULES in system and VOCABULARY_RULE in system
     user = _texts(messages[-1])
     assert json.loads(user[0]) == {
-        "text": "to bustling night markets", "visual": "人头攒动的夜市摊位",
-        "previous": "From trails", "next": "and noodles,",
+        "text": "to bustling night markets",
+        "visual": "人头攒动的夜市摊位",
+        "previous": "From trails",
+        "next": "and noodles,",
     }
     assert "人头攒动" in user[0]  # ensure_ascii=False
     assert VOCABULARY_HEADER + "夜市、摊位" in user
@@ -86,6 +88,9 @@ def test_fixture_suggest_query_is_deterministic_and_recorded(config):
     first = fixture.suggest_query(*args)
     assert first == fixture.suggest_query(*args) == "湖边 安静的 画面"
     assert fixture.suggestions[0] == {
-        "text": "text here", "visual": "湖边 安静的 村落", "context": ("前", "后"), "vocabulary": ["湖畔"],
+        "text": "text here",
+        "visual": "湖边 安静的 村落",
+        "context": ("前", "后"),
+        "vocabulary": ["湖畔"],
     }
     assert fixture.suggest_query("t", "", ("", ""), None)  # 永远非空

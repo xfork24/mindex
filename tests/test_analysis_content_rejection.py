@@ -1,36 +1,40 @@
 """内容拒绝只跳过当前片段，检查点、场景、发布和 API 保持可用。"""
 
-
 import httpx
 import pytest
-from conftest import FixtureAnalyzer, FixtureEmbedder
 from fastapi.testclient import TestClient
 
-from mindex.admin.source_tasks import SourceTasks, WorkOptions
-from mindex.api import create_app
-from mindex.models import adapters
-from mindex.models.adapters import AnalysisContentRejected, ModelError
-from mindex.models.qwen import QwenAnalyzer
-from mindex.processing.channel_index import snapshots_for
-from mindex.processing.indexing import IndexBuilder, check_index
-from mindex.processing.pipeline import Pipeline
-from mindex.settings.runtime_settings import RuntimeConfig
-from mindex.shared.types import Annotation
+from admin.source_tasks import SourceTasks, WorkOptions
+from api import create_app
+from conftest import FixtureAnalyzer, FixtureEmbedder
+from models import adapters
+from models.adapters import AnalysisContentRejected, ModelError
+from models.qwen import QwenAnalyzer
+from processing.channel_index import snapshots_for
+from processing.indexing import IndexBuilder, check_index
+from processing.pipeline import Pipeline
+from settings.runtime_settings import RuntimeConfig
+from shared.types import Annotation
 
 pytestmark = pytest.mark.slow  # 重媒体用例：CI 快速回归跳过，每晚完整运行
 
-REASON = "系统检测到输入或生成内容可能包含不安全或敏感内容，请您避免输入易产生敏感内容的提示语，感谢您的配合。"
+REASON = (
+    "系统检测到输入或生成内容可能包含不安全或敏感内容，请您避免输入易产生敏感内容的提示语，感谢您的配合。"
+)
 
 
-@pytest.mark.parametrize("status,body,rejected", [
-    (400, {"error": {"code": "1301", "message": REASON}}, True),
-    (400, {"error": {"message": REASON}}, True),
-    (403, {"error": {"code": "content_policy_violation"}}, True),
-    (400, {"error": {"message": "invalid max_tokens"}}, False),
-    (401, {"error": {"message": "invalid API key"}}, False),
-    (403, {"error": {"message": "access denied"}}, False),
-    (400, {"error": {"message": "sensitive parameter is not supported"}}, False),
-])
+@pytest.mark.parametrize(
+    "status,body,rejected",
+    [
+        (400, {"error": {"code": "1301", "message": REASON}}, True),
+        (400, {"error": {"message": REASON}}, True),
+        (403, {"error": {"code": "content_policy_violation"}}, True),
+        (400, {"error": {"message": "invalid max_tokens"}}, False),
+        (401, {"error": {"message": "invalid API key"}}, False),
+        (403, {"error": {"message": "access denied"}}, False),
+        (400, {"error": {"message": "sensitive parameter is not supported"}}, False),
+    ],
+)
 def test_explicit_content_error_is_not_retried(config, monkeypatch, status, body, rejected):
     calls = []
 
@@ -46,13 +50,18 @@ def test_explicit_content_error_is_not_retried(config, monkeypatch, status, body
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("message,finish", [
-    ({"content": None}, "content_filter"),
-    ({"content": None}, "sensitive"),
-    ({"refusal": "Cannot process this content", "content": None}, "stop"),
-])
+@pytest.mark.parametrize(
+    "message,finish",
+    [
+        ({"content": None}, "content_filter"),
+        ({"content": None}, "sensitive"),
+        ({"refusal": "Cannot process this content", "content": None}, "stop"),
+    ],
+)
 def test_chat_refusal_skips_without_json_retry(config, monkeypatch, message, finish):
-    monkeypatch.setattr(adapters, "request", lambda *a, **k: {"choices": [{"message": message, "finish_reason": finish}]})
+    monkeypatch.setattr(
+        adapters, "request", lambda *a, **k: {"choices": [{"message": message, "finish_reason": finish}]}
+    )
     monkeypatch.setattr(adapters.time, "sleep", lambda _: pytest.fail("拒绝不能通过修改提示词重试"))
     with pytest.raises(AnalysisContentRejected):
         QwenAnalyzer(config)._chat([], "测试指令")
@@ -65,8 +74,11 @@ def test_task_continues_after_rejection_and_publishes_without_rejected_text(conf
     pipeline = Pipeline(config)
     sid = pipeline.prepare(video_file)
     rejected = pipeline.store.segments(sid, "shot")[1]
-    rejected_paths = {pipeline.store.resolve_media(s["path"]) for s in pipeline.store.segments(sid)
-                      if s["start"] == rejected["start"] and s["end"] == rejected["end"]}
+    rejected_paths = {
+        pipeline.store.resolve_media(s["path"])
+        for s in pipeline.store.segments(sid)
+        if s["start"] == rejected["start"] and s["end"] == rejected["end"]
+    }
     calls, groups = [], []
 
     class Analyzer(FixtureAnalyzer):
@@ -81,7 +93,7 @@ def test_task_continues_after_rejection_and_publishes_without_rejected_text(conf
             assert all(u["end"] <= rejected["start"] or u["start"] >= rejected["end"] for u in units)
             return super().group_scenes(units)
 
-    monkeypatch.setattr("mindex.processing.pipeline.make_analyzer", lambda _: Analyzer(embedder))
+    monkeypatch.setattr("processing.pipeline.make_analyzer", lambda _: Analyzer(embedder))
     manager = SourceTasks(RuntimeConfig(config, pipeline.store), pipeline.store, embedder)
     task = finished(manager, manager.start(sid, "analysis", WorkOptions(publish=True)))
     # 处理与发布是独立任务：处理完成后排队发布，发布任务各自完成。
@@ -128,7 +140,9 @@ def test_all_rejected_scene_or_group_still_completes_and_reuses(config, video_fi
     class Analyzer:
         def analyze(self, path, dialogue):
             calls.append(path)
-            segment = next(s for s in pipeline.store.segments() if pipeline.store.resolve_media(s["path"]) == path)
+            segment = next(
+                s for s in pipeline.store.segments() if pipeline.store.resolve_media(s["path"]) == path
+            )
             if reject_stage == "all" or reject_stage == "scene" and segment["kind"] == "scene":
                 raise AnalysisContentRejected(REASON)
             return Annotation(description="工程测试画面")
@@ -178,5 +192,8 @@ def test_publishing_skip_removes_previous_analysis_channel(config, video_file):
     snapshot = next(s for s in pipeline.store.snapshots(published) if s["id"] == segment["id"])
     assert snapshot["annotation_status"] == "skipped" and "analysis" not in snapshot["indexed_views"]
     assert "video" in snapshot["indexed_views"]
-    assert "analysis" in next(s for s in pipeline.store.snapshots(previous) if s["id"] == segment["id"])["indexed_views"]
+    assert (
+        "analysis"
+        in next(s for s in pipeline.store.snapshots(previous) if s["id"] == segment["id"])["indexed_views"]
+    )
     assert not check_index(pipeline.store, published)

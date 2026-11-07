@@ -6,13 +6,13 @@ import sqlite3
 
 import pytest
 
-from mindex.agent import schema as agent_schema
-from mindex.agent.attachments import AttachmentStore
-from mindex.agent.changes import ChangeFeed
-from mindex.agent.session_store import SessionStore
-from mindex.maintenance.backup_db import upgrade_database
-from mindex.shared.migrations import execute_script, migrate, user_version
-from mindex.shared.storage import METADATA_STEPS, Store
+from agent import schema as agent_schema
+from agent.attachments import AttachmentStore
+from agent.changes import ChangeFeed
+from agent.session_store import SessionStore
+from maintenance.backup_db import upgrade_database
+from shared.migrations import execute_script, migrate, user_version
+from shared.storage import METADATA_STEPS, Store
 
 
 def columns(db, table):
@@ -75,7 +75,10 @@ def test_legacy_metadata_database_upgrades_with_data_preserved(tmp_path):
         assert "person_evidence" in tables(db)
     assert store.one("SELECT name FROM sources WHERE id='s1'")["name"] == "旧素材"
     assert store.one("SELECT document FROM representations")["document"] == "文档"
-    assert store.one("SELECT actor_id,role_id FROM person_references") == {"actor_id": "actor1", "role_id": None}
+    assert store.one("SELECT actor_id,role_id FROM person_references") == {
+        "actor_id": "actor1",
+        "role_id": None,
+    }
     assert store.one("SELECT value FROM settings WHERE key='active'")["value"] == "i1"
     assert store.one("SELECT value FROM settings WHERE key='migration.person-role-only-v3'")
 
@@ -87,6 +90,7 @@ def test_reopen_does_not_rerun_steps(tmp_path):
         def run(db):
             calls.append(name)
             db.execute(f"CREATE TABLE {name} (id INTEGER)")
+
         return run
 
     steps = [step("first"), step("second")]
@@ -140,7 +144,7 @@ def test_failed_step_rolls_back_and_resumes(tmp_path):
 
 def test_store_reopen_skips_schema_checks(tmp_path, monkeypatch):
     Store(tmp_path)
-    import mindex.shared.storage as storage
+    import shared.storage as storage
 
     def fail(db):
         raise AssertionError("已是最新版本时不应重跑迁移")
@@ -206,8 +210,10 @@ def test_agent_v1_upgrade_adds_window_index_without_changing_log(tmp_path):
     with sqlite3.connect(tmp_path / "agent.sqlite3") as db:
         db.executescript(agent_schema.SCHEMA_V1)
         db.execute("PRAGMA user_version=1")
-        db.execute("INSERT INTO agent_events(session_id,seq,time,type,data) VALUES(?,?,?,?,?)",
-                   ("session-old", 0, 1, "user/message", '{"text":"旧任务"}'))
+        db.execute(
+            "INSERT INTO agent_events(session_id,seq,time,type,data) VALUES(?,?,?,?,?)",
+            ("session-old", 0, 1, "user/message", '{"text":"旧任务"}'),
+        )
     store = SessionStore(tmp_path)
     assert store.events("session-old")[0]["data"] == {"text": "旧任务"}
     with store.store.connect() as db:

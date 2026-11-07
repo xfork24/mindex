@@ -187,12 +187,15 @@ def overlaps_for(segment, evidence, identifiers, relation):
     def hits(group):
         members = group if isinstance(group, list) else [group]
         if isinstance(evidence, EvidenceIndex):
-            positions = sorted({
-                position
-                for identifier in members
-                for position in evidence.overlapping(
-                    segment["source_id"], identifier, segment["start"], segment["end"])
-            })
+            positions = sorted(
+                {
+                    position
+                    for identifier in members
+                    for position in evidence.overlapping(
+                        segment["source_id"], identifier, segment["start"], segment["end"]
+                    )
+                }
+            )
             return [evidence.evidence[position] for position in positions]
         return [
             e

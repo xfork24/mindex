@@ -2,7 +2,8 @@
 
 隔离与确定性：
 
-- 每次录制使用全新的临时 user-data-dir（录制结束即删除），离线模式，``context.route`` 中止除 ``data:``/``blob:``/
+- 每次录制使用全新的临时 user-data-dir（录制结束即删除），离线模式，``context.route`` 中止除 ``data:``/``blob:
+``/
   ``about:`` 以外的全部请求，WebSocket 一律关闭，Service Worker 禁用，不接受下载；
 - 初始化脚本 ``VIRTUAL_CLOCK`` 在页面任何脚本之前接管 ``Date``、``performance.now``、
   ``requestAnimationFrame``/``cancelAnimationFrame``、``setTimeout``/``setInterval``/``clear*``、
@@ -28,7 +29,7 @@ import time
 from fractions import Fraction
 from pathlib import Path
 
-from mindex.shared.media import MediaError, ffmpeg_bin
+from shared.media import MediaError, ffmpeg_bin
 
 INSTALL_HINT = "AI 动画录制需要安装可选依赖：uv sync --extra animation && uv run playwright install chromium"
 # 桌面版（外壳设置 MINDEX_DESKTOP=1）已随包带 playwright，只缺浏览器：引导到设置页一键安装。
@@ -37,6 +38,8 @@ DESKTOP_INSTALL_HINT = "AI 动画录制需要先安装浏览器组件：在设�
 
 def install_hint() -> str:
     return DESKTOP_INSTALL_HINT if os.environ.get("MINDEX_DESKTOP") == "1" else INSTALL_HINT
+
+
 ALLOWED_SCHEMES = ("data:", "blob:", "about:")
 # 单次推进最多执行的定时器回调数：超过视为定时器风暴（例如 setTimeout(f, 0) 自我递归）。
 TIMER_BUDGET = 100000
@@ -80,7 +83,8 @@ VIRTUAL_CLOCK = r"""
   window.setTimeout = (cb, ms, ...args) => schedule(cb, ms, args, false);
   window.setInterval = (cb, ms, ...args) => schedule(cb, ms, args, true);
   window.clearTimeout = window.clearInterval = (id) => { timers.delete(id); };
-  window.requestIdleCallback = (cb) => schedule(cb, 0, [{ didTimeout: false, timeRemaining: () => 0 }], false);
+  window.requestIdleCallback = (cb) => schedule(cb, 0, [{ didTimeout: false, timeRemaining: () => 0 }], false)
+;
   window.cancelIdleCallback = (id) => { timers.delete(id); };
 
   let frames = new Map();
@@ -106,7 +110,8 @@ VIRTUAL_CLOCK = r"""
     for (;;) {
       let due = null;
       for (const timer of timers.values()) {
-        if (timer.at <= target && (!due || timer.at < due.at || (timer.at === due.at && timer.id < due.id))) due = timer;
+        if (timer.at <= target && (!due || timer.at < due.at || (timer.at === due.at && timer.id < due.id)))
+due = timer;
       }
       if (!due) break;
       if (--budget < 0) throw new Error("定时器回调过多（可能存在定时器死循环）");
@@ -144,13 +149,26 @@ def available() -> bool:
     return True
 
 
-def capture(html: str, *, seconds: float, width: int, height: int, fps: float, target: Path,
-            max_seconds: float, frame_timeout: float = 5, frames: int | None = None, transparent: bool = False) -> dict:
+def capture(
+    html: str,
+    *,
+    seconds: float,
+    width: int,
+    height: int,
+    fps: float,
+    target: Path,
+    max_seconds: float,
+    frame_timeout: float = 5,
+    frames: int | None = None,
+    transparent: bool = False,
+) -> dict:
     """录制 ``frames``（缺省 ``round(seconds × fps)``）帧到 ``target``（H.264/yuv420p MP4）。
 
-    ``transparent=True`` 时截图省略页面背景（页面自身须为透明背景），编码为带透明通道的 QuickTime RLE（argb）
-    MOV，供分镜渲染作为文字叠加层合成。第 i 帧对应虚拟时刻 ``i × 1000 / fps`` 毫秒（第 0 帧为加载完成时的画面）。
-    返回录制统计。"""
+        ``transparent=True`` 时截图省略页面背景（页面自身须为透明背景），
+        编码为带透明通道的 QuickTime RLE（argb）
+        MOV，供分镜渲染作为文字叠加层合成。第 i 帧对应虚拟时刻 ``i × 1000 / fps`` 毫秒（第 0
+    帧为加载完成时的画面）。
+        返回录制统计。"""
     sync_playwright, PlaywrightError = _playwright()
     rate = Fraction(str(fps))
     count = frames if frames is not None else max(1, round(seconds * float(rate)))
@@ -158,9 +176,24 @@ def capture(html: str, *, seconds: float, width: int, height: int, fps: float, t
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_name(target.stem + (".partial.mov" if transparent else ".partial.mp4"))
-    output = (["-c:v", "qtrle", "-pix_fmt", "argb", "-f", "mov"] if transparent else
-              ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags",
-               "+faststart", "-f", "mp4"])
+    output = (
+        ["-c:v", "qtrle", "-pix_fmt", "argb", "-f", "mov"]
+        if transparent
+        else [
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            "-f",
+            "mp4",
+        ]
+    )
     started = time.monotonic()
     blocked: list[str] = []
     profile = Path(tempfile.mkdtemp(prefix="mindex-animation-"))
@@ -182,12 +215,25 @@ def capture(html: str, *, seconds: float, width: int, height: int, fps: float, t
         with sync_playwright() as playwright:
             try:
                 context = playwright.chromium.launch_persistent_context(
-                    str(profile), headless=True, offline=True, java_script_enabled=True,
-                    viewport={"width": width, "height": height}, device_scale_factor=1,
-                    service_workers="block", accept_downloads=False, color_scheme="light",
-                    locale="zh-CN", timezone_id="Asia/Shanghai", reduced_motion="no-preference",
-                    args=["--disable-gpu", "--font-render-hinting=none", "--disable-lcd-text",
-                          "--disable-background-networking", "--no-first-run"],
+                    str(profile),
+                    headless=True,
+                    offline=True,
+                    java_script_enabled=True,
+                    viewport={"width": width, "height": height},
+                    device_scale_factor=1,
+                    service_workers="block",
+                    accept_downloads=False,
+                    color_scheme="light",
+                    locale="zh-CN",
+                    timezone_id="Asia/Shanghai",
+                    reduced_motion="no-preference",
+                    args=[
+                        "--disable-gpu",
+                        "--font-render-hinting=none",
+                        "--disable-lcd-text",
+                        "--disable-background-networking",
+                        "--no-first-run",
+                    ],
                 )
             except PlaywrightError as exc:
                 if "Executable doesn't exist" in str(exc) or "playwright install" in str(exc):
@@ -196,7 +242,8 @@ def capture(html: str, *, seconds: float, width: int, height: int, fps: float, t
             try:
                 context.route("**/*", route)
                 if hasattr(context, "route_web_socket"):
-                    # 接管全部 WebSocket 且从不连接服务器（处理器里不能同步调用 close，会与页面事件循环互等）。
+                    # 接管全部 WebSocket 且从不连接服务器（处理器里不能同步调用 close，
+                    # 会与页面事件循环互等）。
                     context.route_web_socket("**/*", lambda socket: blocked.append(socket.url[:200]))
                 context.add_init_script(VIRTUAL_CLOCK)
                 # 新页面才会执行初始化脚本（启动时自带的空白页早于 add_init_script）。
@@ -205,20 +252,41 @@ def capture(html: str, *, seconds: float, width: int, height: int, fps: float, t
                 try:
                     page.set_content(html, wait_until="load", timeout=frame_timeout * 1000)
                 except PlaywrightError as exc:
-                    raise MediaError(f"动画页面在 {frame_timeout:g} 秒内未加载完成（可能存在死循环）") from exc
+                    raise MediaError(
+                        f"动画页面在 {frame_timeout:g} 秒内未加载完成（可能存在死循环）"
+                    ) from exc
                 cdp = context.new_cdp_session(page)
                 encoder = subprocess.Popen(
-                    [ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-y", "-f", "image2pipe",
-                     "-framerate", f"{rate.numerator}/{rate.denominator}", "-c:v", "png", "-i", "-",
-                     "-frames:v", str(count), *output, str(partial)],
-                    stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                    [
+                        ffmpeg_bin(),
+                        "-hide_banner",
+                        "-loglevel",
+                        "error",
+                        "-y",
+                        "-f",
+                        "image2pipe",
+                        "-framerate",
+                        f"{rate.numerator}/{rate.denominator}",
+                        "-c:v",
+                        "png",
+                        "-i",
+                        "-",
+                        "-frames:v",
+                        str(count),
+                        *output,
+                        str(partial),
+                    ],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
                 )
                 for index in range(count):
                     check_wall()
                     _advance(cdp, 0 if index == 0 else step, frame_timeout, index)
                     try:
-                        shot = page.screenshot(type="png", timeout=frame_timeout * 1000,
-                                               omit_background=transparent)
+                        shot = page.screenshot(
+                            type="png", timeout=frame_timeout * 1000, omit_background=transparent
+                        )
                     except PlaywrightError as exc:
                         raise MediaError(f"第 {index + 1} 帧截图超时或失败") from exc
                     try:
@@ -248,8 +316,12 @@ def capture(html: str, *, seconds: float, width: int, height: int, fps: float, t
                     except OSError:  # 编码进程已被终止：缓冲区写不出去，丢弃即可
                         pass
         shutil.rmtree(profile, ignore_errors=True)
-    return {"frames": count, "fps": str(rate), "blocked_requests": blocked,
-            "wall_seconds": round(time.monotonic() - started, 3)}
+    return {
+        "frames": count,
+        "fps": str(rate),
+        "blocked_requests": blocked,
+        "wall_seconds": round(time.monotonic() - started, 3),
+    }
 
 
 def _advance(cdp, ms: float, frame_timeout: float, index: int) -> None:
@@ -258,11 +330,14 @@ def _advance(cdp, ms: float, frame_timeout: float, index: int) -> None:
 
     timeout = f"第 {index + 1} 帧在 {frame_timeout:g} 秒内未完成（动画脚本可能存在死循环）"
     try:
-        result = cdp.send("Runtime.evaluate", {
-            "expression": f"window.__mindexAdvance({json.dumps(ms)})",
-            "timeout": int(frame_timeout * 1000),
-            "returnByValue": True,
-        })
+        result = cdp.send(
+            "Runtime.evaluate",
+            {
+                "expression": f"window.__mindexAdvance({json.dumps(ms)})",
+                "timeout": int(frame_timeout * 1000),
+                "returnByValue": True,
+            },
+        )
     except PlaywrightError as exc:
         if "terminated" in str(exc).lower():
             raise MediaError(timeout) from exc

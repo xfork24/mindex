@@ -3,9 +3,9 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from mindex.api import create_app
-from mindex.persons import persons as persons_module
-from mindex.shared.storage import Store, dumps
+from api import create_app
+from persons import persons as persons_module
+from shared.storage import Store, dumps
 
 
 @pytest.fixture
@@ -20,21 +20,39 @@ def world(config):
         "INSERT INTO segments VALUES(?,?,?,?,?,?,?,?,?,?)",
         ("shot0", "source", "shot", 0, 1, "source.mp4", "thumb.jpg", "gen", None, "fixture"),
     )
-    for name, body in (("current.jpg", b"current"), ("new.jpg", b"newer-version"), ("old.jpg", b"older-version"),
-                       ("thumb.jpg", b"thumbnail")):
+    for name, body in (
+        ("current.jpg", b"current"),
+        ("new.jpg", b"newer-version"),
+        ("old.jpg", b"older-version"),
+        ("thumb.jpg", b"thumbnail"),
+    ):
         (store.root / name).write_bytes(body)
 
     def evidence(identifier, image_path):
         store.execute(
             "INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (identifier, "source", "shot0", None, None, None, 0.0, 0.4, "rejected",
-             dumps({"image_path": image_path} if image_path else {})),
+            (
+                identifier,
+                "source",
+                "shot0",
+                None,
+                None,
+                None,
+                0.0,
+                0.4,
+                "rejected",
+                dumps({"image_path": image_path} if image_path else {}),
+            ),
         )
 
     def version(identifier, created, evidence_rows):
         store.execute(
             "INSERT INTO person_versions(id,data,created_at) VALUES(?,?,?)",
-            (identifier, dumps({"format": 2, "entities": [], "coverage": [], "evidence": evidence_rows}), created),
+            (
+                identifier,
+                dumps({"format": 2, "entities": [], "coverage": [], "evidence": evidence_rows}),
+                created,
+            ),
         )
 
     def published(identifier, path):

@@ -27,7 +27,9 @@ def wait_idle(client: TestClient, sid: str, timeout: float = 30, status=("idle",
         if data["status"] == "waiting" and "waiting" in status:
             return events
         time.sleep(0.02)
-    raise AssertionError(f"会话 {sid} 未在 {timeout}s 内到达 {status}：{client.get(f'/api/agent/sessions/{sid}/log').json()}")
+    raise AssertionError(
+        f"会话 {sid} 未在 {timeout}s 内到达 {status}：{client.get(f'/api/agent/sessions/{sid}/log').json()}"
+    )
 
 
 def wait_pending(client: TestClient, sid: str, kind: str, timeout: float = 30) -> dict:
@@ -63,7 +65,9 @@ def result_text(data: dict) -> str:
 
 def final_text(events: list[dict]) -> str:
     messages = [e["data"]["message"] for e in events if e["type"] == "assistant/message"]
-    return "".join(b.get("text", "") for b in messages[-1]["content"] if b["type"] == "text") if messages else ""
+    return (
+        "".join(b.get("text", "") for b in messages[-1]["content"] if b["type"] == "text") if messages else ""
+    )
 
 
 def parse_sse(raw: str) -> list[tuple[str, dict]]:

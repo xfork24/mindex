@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from mindex.persons.person_models import Entity
-from mindex.persons.persons import Persons
-from mindex.shared.storage import Store, dumps
+from persons.person_models import Entity
+from persons.persons import Persons
+from shared.storage import Store, dumps
 
 
 @pytest.fixture
@@ -38,8 +38,18 @@ def scenario(config):
     evidence("cand-invalid", "shot1", x, None, "candidate", score=0.99)
     evidence("excluded", "shot2", None, None, "rejected", confirmation="shot_review", shot_excluded=True)
     evidence("rejected-then-marked", "shot3", a, r, "rejected", confirmation="shot_review")
-    evidence("mark", "shot3", a, r, "accepted", confirmation="shot_review", evidence_type="manual", score=1.0,
-             original_score=0.7, reviewed_at="2026-01-01T00:00:00+00:00")
+    evidence(
+        "mark",
+        "shot3",
+        a,
+        r,
+        "accepted",
+        confirmation="shot_review",
+        evidence_type="manual",
+        score=1.0,
+        original_score=0.7,
+        reviewed_at="2026-01-01T00:00:00+00:00",
+    )
     evidence("plain-rejected", "shot5", a, r, "rejected", score=0.2)  # 无 shot_review 标记，不算已排除
     store.execute(  # 无检测结果、只有覆盖记录的分镜
         "INSERT INTO person_coverage(source_id,cache_id,data) VALUES(?,?,?)",
@@ -51,13 +61,19 @@ def scenario(config):
 def states(persons, **scope):
     with persons.store.connect() as db:
         persons._build_review_tables(db, **scope)
-        return sorted(tuple(r) for r in db.execute(
-            "SELECT shot_id,source_id,accepted,candidate,rejected FROM review_states"))
+        return sorted(
+            tuple(r)
+            for r in db.execute("SELECT shot_id,source_id,accepted,candidate,rejected FROM review_states")
+        )
 
 
 def legacy_states(persons):
-    return sorted(tuple(r.values()) for r in persons.store.rows(
-        "SELECT shot_id,source_id,accepted,candidate,rejected FROM " + persons.SHOT_STATES + " k"))
+    return sorted(
+        tuple(r.values())
+        for r in persons.store.rows(
+            "SELECT shot_id,source_id,accepted,candidate,rejected FROM " + persons.SHOT_STATES + " k"
+        )
+    )
 
 
 def test_review_states_table_matches_shot_states_view(scenario):
@@ -70,8 +86,12 @@ def test_review_states_table_matches_shot_states_view(scenario):
 
 
 def test_covering_index_exists_and_listing_does_not_need_it(scenario):
-    names = {r["name"] for r in scenario.store.rows(
-        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='person_evidence'")}
+    names = {
+        r["name"]
+        for r in scenario.store.rows(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='person_evidence'"
+        )
+    }
     assert "person_evidence_review" in names
     scenario.store.execute("DROP INDEX person_evidence_review")  # 旧库在迁移前没有这个索引，结果必须相同
     assert scenario.review_shots("source", "accepted")["total"] == 2

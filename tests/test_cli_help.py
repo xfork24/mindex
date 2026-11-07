@@ -7,7 +7,7 @@ from typer.core import TyperGroup
 from typer.main import get_command
 from typer.testing import CliRunner
 
-from mindex import cli
+import cli
 
 
 def command_tree(command, path=()):

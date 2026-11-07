@@ -13,10 +13,10 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from mindex.cli import app
-from mindex.maintenance.clean import clean_library
-from mindex.shared.config import Config
-from mindex.shared.storage import Store
+from cli import app
+from maintenance.clean import clean_library
+from shared.config import Config
+from shared.storage import Store
 
 runner = CliRunner()
 OLD = datetime(2026, 1, 1, tzinfo=UTC).timestamp()
@@ -25,8 +25,7 @@ OLD = datetime(2026, 1, 1, tzinfo=UTC).timestamp()
 def make_config(tmp_path: Path) -> Path:
     path = tmp_path / "config.yaml"
     path.write_text(
-        f"data_dir: {tmp_path / 'data'}\n"
-        "runtime_overrides: false\n",
+        f"data_dir: {tmp_path / 'data'}\nruntime_overrides: false\n",
         encoding="utf-8",
     )
     return path
@@ -70,8 +69,18 @@ def add_segment(store: Store, source_id: str, segment_id: str, name: str) -> dic
             "INSERT OR REPLACE INTO segments"
             "(id,source_id,kind,start,end,path,thumbnail,generation,parent_id,reason) "
             "VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (segment_id, source_id, "moment", 0.0, 1.0, segment["path"],
-             segment["thumbnail"], "g", None, "test"),
+            (
+                segment_id,
+                source_id,
+                "moment",
+                0.0,
+                1.0,
+                segment["path"],
+                segment["thumbnail"],
+                "g",
+                None,
+                "test",
+            ),
         )
     return segment
 
@@ -176,7 +185,6 @@ def test_shot_media_cache_keeps_locked_files(tmp_path):
     assert names["item_count"] == 1 and names["kept"] == {"locked": 1}
 
 
-
 # ---------------------------------------------------------------- 孤儿判定
 
 
@@ -212,12 +220,18 @@ def test_orphan_voices_and_person_png(tmp_path):
     root = tmp_path / "data"
     store = Store(root)
     with store.connect() as db:
-        db.execute("INSERT INTO voices(name,kind,provider,voice_id,sample_path) "
-                   "VALUES('v','clone','self','vid','voices/v1.wav')")
-        db.execute("INSERT INTO person_references VALUES('r1','actor1',NULL,"
-                   "'persons/references/d1.png','d1','{}',NULL)")
-        db.execute("INSERT INTO person_imports VALUES('i1',?, 'confirmed')",
-                   (json.dumps({"images": [{"digest": "d3"}]}),))
+        db.execute(
+            "INSERT INTO voices(name,kind,provider,voice_id,sample_path) "
+            "VALUES('v','clone','self','vid','voices/v1.wav')"
+        )
+        db.execute(
+            "INSERT INTO person_references VALUES('r1','actor1',NULL,"
+            "'persons/references/d1.png','d1','{}',NULL)"
+        )
+        db.execute(
+            "INSERT INTO person_imports VALUES('i1',?, 'confirmed')",
+            (json.dumps({"images": [{"digest": "d3"}]}),),
+        )
     kept_voice = write(root / "voices" / "v1.wav")
     orphan_voice = age(write(root / "voices" / "orphan.wav"), 3)
     kept_ref = write(root / "persons" / "references" / "d1.png")
@@ -246,127 +260,149 @@ def test_unregistered_source_grace(tmp_path):
     assert fresh.exists() and not stale.exists()
 
 
-@pytest.mark.parametrize('kind', ['image', 'voice'])
+@pytest.mark.parametrize("kind", ["image", "voice"])
 def test_orphan_upload_cleanup_rechecks_references_and_grace(tmp_path, kind):
-    from mindex.maintenance.clean import Scan, orphan_person_png, orphan_voices
+    from maintenance.clean import Scan, orphan_person_png, orphan_voices
 
     config = Config(data_dir=tmp_path)
     store = Store(tmp_path)
-    rule = orphan_person_png if kind == 'image' else orphan_voices
-    relative = 'persons/references/digest.png' if kind == 'image' else 'voices/sample.wav'
+    rule = orphan_person_png if kind == "image" else orphan_voices
+    relative = "persons/references/digest.png" if kind == "image" else "voices/sample.wav"
     path = write(tmp_path / relative)
     now = datetime.now(UTC)
-    assert rule(Scan(config, store, now)) is None, '正在上传或检查的文件需要宽限期'
+    assert rule(Scan(config, store, now)) is None, "正在上传或检查的文件需要宽限期"
     age(path, 3)
     action = rule(Scan(config, store, now))
     assert action and len(action.items) == 1
-    if kind == 'image':
-        store.execute('INSERT INTO person_references VALUES(?,?,?,?,?,?,?)',
-                      ('ref', 'actor', None, relative, 'digest', '{}', None))
+    if kind == "image":
+        store.execute(
+            "INSERT INTO person_references VALUES(?,?,?,?,?,?,?)",
+            ("ref", "actor", None, relative, "digest", "{}", None),
+        )
     else:
-        store.execute('INSERT INTO voices(name,kind,provider,voice_id,sample_path) VALUES(?,?,?,?,?)',
-                      ('voice', 'clone', 'self', 'vid', relative))
-    assert action.execute() == {'deleted': 0}
-    assert path.exists(), '预览后建立引用的文件不能删除'
+        store.execute(
+            "INSERT INTO voices(name,kind,provider,voice_id,sample_path) VALUES(?,?,?,?,?)",
+            ("voice", "clone", "self", "vid", relative),
+        )
+    assert action.execute() == {"deleted": 0}
+    assert path.exists(), "预览后建立引用的文件不能删除"
 
 
 def test_nested_partial_cleanup_preserves_sources_and_rechecks_references(tmp_path):
-    from mindex.maintenance.clean import Scan, temp_crash
+    from maintenance.clean import Scan, temp_crash
 
     config = Config(data_dir=tmp_path)
     store = Store(tmp_path)
-    junk = write(tmp_path / 'analysis/source/annotation.json.random.partial')
-    referenced = write(tmp_path / 'clips/source/upload.partial')
-    add_segment(store, 's', 'shot', 's')
-    store.execute('UPDATE segments SET path=? WHERE id=?',
-                  ('clips/source/upload.partial', 'shot'))
-    late = write(tmp_path / 'transcripts/source/input.partial')
-    archived = write(tmp_path / 'studio/job/versions/preserved.partial')
+    junk = write(tmp_path / "analysis/source/annotation.json.random.partial")
+    referenced = write(tmp_path / "clips/source/upload.partial")
+    add_segment(store, "s", "shot", "s")
+    store.execute("UPDATE segments SET path=? WHERE id=?", ("clips/source/upload.partial", "shot"))
+    late = write(tmp_path / "transcripts/source/input.partial")
+    archived = write(tmp_path / "studio/job/versions/preserved.partial")
     action = temp_crash(Scan(config, store, datetime.now(UTC)))
     assert {item.path for item in action.items} == {
-        junk.relative_to(tmp_path).as_posix(), late.relative_to(tmp_path).as_posix()}
-    store.execute('UPDATE sources SET path=? WHERE id=?',
-                  (late.relative_to(tmp_path).as_posix(), 's'))
-    assert action.execute() == {'deleted': 1}
+        junk.relative_to(tmp_path).as_posix(),
+        late.relative_to(tmp_path).as_posix(),
+    }
+    store.execute("UPDATE sources SET path=? WHERE id=?", (late.relative_to(tmp_path).as_posix(), "s"))
+    assert action.execute() == {"deleted": 1}
     assert not junk.exists()
     assert referenced.exists() and late.exists() and archived.exists()
 
 
 def test_temp_cleanup_does_not_interrupt_online_queries(tmp_path):
-    from mindex.maintenance.clean import Scan, temp_crash
+    from maintenance.clean import Scan, temp_crash
 
     config = Config(data_dir=tmp_path)
     store = Store(tmp_path)
-    fresh = write(tmp_path / 'query-image-live/image.png')
-    empty = tmp_path / 'query-starting'
+    fresh = write(tmp_path / "query-image-live/image.png")
+    empty = tmp_path / "query-starting"
     empty.mkdir()
-    stale = write(tmp_path / 'query-window-crashed/window.mp4')
-    resumed = write(tmp_path / 'query-resumed/input.mp4')
+    stale = write(tmp_path / "query-window-crashed/window.mp4")
+    resumed = write(tmp_path / "query-resumed/input.mp4")
     for path in (stale, resumed):
         age(path, 3)
         age(path.parent, 3)
     scan = Scan(config, store, datetime.now(UTC))
     action = temp_crash(scan)
-    assert {item.path for item in action.items} == {'query-window-crashed', 'query-resumed'}
+    assert {item.path for item in action.items} == {"query-window-crashed", "query-resumed"}
     resumed.touch()
-    assert action.execute() == {'deleted': 1}
+    assert action.execute() == {"deleted": 1}
     assert fresh.exists() and empty.exists() and resumed.exists()
     assert not stale.exists()
 
 
 def test_index_cleanup_rechecks_studio_and_resumable_task_pins(tmp_path, monkeypatch):
-    from mindex.maintenance.clean import Scan
-    from mindex.maintenance.clean_index import index_versions_rule, retained_versions
+    from maintenance.clean import Scan
+    from maintenance.clean_index import index_versions_rule, retained_versions
 
     config = Config(data_dir=tmp_path)
     config.clean.index_keep_versions = 0
     store = Store(tmp_path)
-    for identifier in ('studio', 'release', 'resumable', 'junk'):
-        store.execute('INSERT INTO index_versions(id,spec,status,created_at) VALUES(?,?,?,?)',
-                      (identifier, '{}', 'ready', '2026-01-01'))
+    for identifier in ("studio", "release", "resumable", "junk"):
+        store.execute(
+            "INSERT INTO index_versions(id,spec,status,created_at) VALUES(?,?,?,?)",
+            (identifier, "{}", "ready", "2026-01-01"),
+        )
     action = index_versions_rule(Scan(config, store, datetime.now(UTC)))
     assert len(action.items) == 4
-    write(tmp_path / 'studio/job/workspace.json', json.dumps({'versions': [
-        {'parameters': {'index_id': 'studio', 'person_release': 'rel'}}]}).encode())
-    store.execute('INSERT INTO search_releases(id,content_id) VALUES(?,?)', ('rel', 'release'))
-    store.execute('INSERT INTO source_tasks(id,source_id,work,status,config,options,progress) '
-                  'VALUES(?,?,?,?,?,?,?)',
-                  ('task', 'source', 'visual', 'interrupted', '{}', '{}', '{"index_id":"resumable"}'))
+    write(
+        tmp_path / "studio/job/workspace.json",
+        json.dumps({"versions": [{"parameters": {"index_id": "studio", "person_release": "rel"}}]}).encode(),
+    )
+    store.execute("INSERT INTO search_releases(id,content_id) VALUES(?,?)", ("rel", "release"))
+    store.execute(
+        "INSERT INTO source_tasks(id,source_id,work,status,config,options,progress) VALUES(?,?,?,?,?,?,?)",
+        ("task", "source", "visual", "interrupted", "{}", "{}", '{"index_id":"resumable"}'),
+    )
     deleted = []
 
     def delete(store, identifier):
         deleted.append(identifier)
-        return {'deleted': identifier}
+        return {"deleted": identifier}
 
-    monkeypatch.setattr('mindex.maintenance.clean_index.delete_index_version', delete)
-    assert action.execute() == {'deleted': ['junk']}
-    assert deleted == ['junk']
-    assert set(retained_versions(store, 0)['keep']) == {'studio', 'release', 'resumable'}
-    write(tmp_path / 'studio/job/workspace.json', b'{interrupted write')
-    assert not retained_versions(store, 0)['deletable'], '无法读取引用时保守保留'
+    monkeypatch.setattr("maintenance.clean_index.delete_index_version", delete)
+    assert action.execute() == {"deleted": ["junk"]}
+    assert deleted == ["junk"]
+    assert set(retained_versions(store, 0)["keep"]) == {"studio", "release", "resumable"}
+    write(tmp_path / "studio/job/workspace.json", b"{interrupted write")
+    assert not retained_versions(store, 0)["deletable"], "无法读取引用时保守保留"
 
 
 def test_task_index_pins_expire_but_running_tasks_remain_protected(tmp_path):
-    from mindex.maintenance.clean_index import retained_versions
+    from maintenance.clean_index import retained_versions
 
     store = Store(tmp_path)
-    for identifier, status in (('stale', 'interrupted'), ('live', 'running')):
-        store.execute('INSERT INTO index_versions(id,spec,status,created_at) VALUES(?,?,?,?)',
-                      (identifier, '{}', 'building', '2025-01-01'))
-        store.execute('INSERT INTO source_tasks(id,source_id,work,status,config,options,progress,updated_at) '
-                      'VALUES(?,?,?,?,?,?,?,?)',
-                      (identifier, 'source', 'publish', status, '{}', '{}',
-                       json.dumps({'index_id': identifier}), '2025-01-01'))
+    for identifier, status in (("stale", "interrupted"), ("live", "running")):
+        store.execute(
+            "INSERT INTO index_versions(id,spec,status,created_at) VALUES(?,?,?,?)",
+            (identifier, "{}", "building", "2025-01-01"),
+        )
+        store.execute(
+            "INSERT INTO source_tasks(id,source_id,work,status,config,options,progress,updated_at) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (
+                identifier,
+                "source",
+                "publish",
+                status,
+                "{}",
+                "{}",
+                json.dumps({"index_id": identifier}),
+                "2025-01-01",
+            ),
+        )
     result = retained_versions(store, 0, building_max_age_days=7)
-    assert result['keep'] == ['live']
-    assert [v['id'] for v in result['deletable']] == ['stale']
+    assert result["keep"] == ["live"]
+    assert [v["id"] for v in result["deletable"]] == ["stale"]
 
 
 # ---------------------------------------------------------------- 索引版本
 
 
-def seed_index_version(store: Store, version_id: str, created_at: str, *,
-                       status: str = "ready", members: int = 1) -> None:
+def seed_index_version(
+    store: Store, version_id: str, created_at: str, *, status: str = "ready", members: int = 1
+) -> None:
     import chromadb
     from chromadb.config import Settings
 
@@ -376,24 +412,35 @@ def seed_index_version(store: Store, version_id: str, created_at: str, *,
     collection = client.get_or_create_collection(
         "idx-" + version_id, metadata={"hnsw:space": "cosine"}, embedding_function=None
     )
-    collection.upsert(ids=[f"{version_id}-0"], embeddings=[[0.1] * 8],
-                      documents=["d"], metadatas=[{"view": "video"}])
-    snapshot = json.dumps({"path": f"clips/x/{version_id}.mp4",
-                           "thumbnail": f"thumbnails/{version_id}.jpg"})
+    collection.upsert(
+        ids=[f"{version_id}-0"], embeddings=[[0.1] * 8], documents=["d"], metadatas=[{"view": "video"}]
+    )
+    snapshot = json.dumps({"path": f"clips/x/{version_id}.mp4", "thumbnail": f"thumbnails/{version_id}.jpg"})
     with store.connect() as db:
-        db.execute("INSERT OR REPLACE INTO index_versions(id,spec,status,created_at) "
-                   "VALUES(?,?,?,?)",
-                   (version_id, json.dumps({"space": {}}), status, created_at))
+        db.execute(
+            "INSERT OR REPLACE INTO index_versions(id,spec,status,created_at) VALUES(?,?,?,?)",
+            (version_id, json.dumps({"space": {}}), status, created_at),
+        )
         for i in range(members):
-            db.execute("INSERT OR REPLACE INTO index_members(index_id,segment_id,snapshot,complete) "
-                       "VALUES(?,?,?,1)",
-                       (version_id, f"seg-{version_id}-{i}", snapshot))
-            db.execute("INSERT OR REPLACE INTO representations"
-                       "(id,index_id,segment_id,view,document,cache_key) VALUES(?,?,?,?,?,?)",
-                       (f"rep-{version_id}-{i}", version_id, f"seg-{version_id}-{i}",
-                        "video", "d", f"cache-{version_id}-{i}"))
-        db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",
-                   ("index_report." + version_id, "{}"))
+            db.execute(
+                "INSERT OR REPLACE INTO index_members(index_id,segment_id,snapshot,complete) VALUES(?,?,?,1)",
+                (version_id, f"seg-{version_id}-{i}", snapshot),
+            )
+            db.execute(
+                "INSERT OR REPLACE INTO representations"
+                "(id,index_id,segment_id,view,document,cache_key) VALUES(?,?,?,?,?,?)",
+                (
+                    f"rep-{version_id}-{i}",
+                    version_id,
+                    f"seg-{version_id}-{i}",
+                    "video",
+                    "d",
+                    f"cache-{version_id}-{i}",
+                ),
+            )
+        db.execute(
+            "INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", ("index_report." + version_id, "{}")
+        )
 
 
 def test_index_versions_retention(tmp_path):
@@ -408,8 +455,9 @@ def test_index_versions_retention(tmp_path):
     seed_index_version(store, "v5", _recent(days=1), status="building")
     with store.connect() as db:
         db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('active','v1')")
-        db.execute("INSERT OR REPLACE INTO search_releases(id,content_id,person_id) "
-                   "VALUES('rel2','v2','pv2')")
+        db.execute(
+            "INSERT OR REPLACE INTO search_releases(id,content_id,person_id) VALUES('rel2','v2','pv2')"
+        )
         db.execute("INSERT OR REPLACE INTO person_versions(id,data) VALUES('pv2','{}')")
 
     report = report_of(invoke(config_path, "--apply"))
@@ -448,8 +496,10 @@ def test_profile_checkpoints_only_stale_and_foreign(tmp_path):
     store = Store(root)
     config = Config(data_dir=root)
     with store.connect() as db:
-        db.execute("INSERT OR REPLACE INTO channel_data VALUES('s1','dialogue','p-now',"
-                   "'complete','{}',CURRENT_TIMESTAMP)")
+        db.execute(
+            "INSERT OR REPLACE INTO channel_data VALUES('s1','dialogue','p-now',"
+            "'complete','{}',CURRENT_TIMESTAMP)"
+        )
     current_asr = age(write(root / "transcripts" / "s1" / config.asr_key / "0.json"), 40)
     stale_asr = age(write(root / "transcripts" / "s1" / "asr-old" / "0.json"), 40)
     fresh_foreign = write(root / "transcripts" / "s1" / "asr-old2" / "0.json")
@@ -474,8 +524,7 @@ def test_runs_history_prunes_completed_only(tmp_path):
     with store.connect() as db:
         db.execute("INSERT INTO runs(stage,status,finished_at) VALUES('detect','complete',?)", (old,))
         db.execute("INSERT INTO runs(stage,status) VALUES('detect','running')")
-        db.execute("INSERT INTO runs(stage,status,finished_at) VALUES('detect','failed',"
-                   "datetime('now'))")
+        db.execute("INSERT INTO runs(stage,status,finished_at) VALUES('detect','failed',datetime('now'))")
     remaining_running = store.one("SELECT * FROM runs WHERE status='running'")["id"]
 
     invoke(config_path, "--apply")
@@ -493,11 +542,16 @@ def test_runs_history_prunes_completed_only(tmp_path):
 def studio_job(root: Path, name: str, *, execution="idle", attempt="a1") -> Path:
     directory = root / "studio" / name
     directory.mkdir(parents=True, exist_ok=True)
-    (directory / "job.json").write_text(json.dumps({
-        "schema": 1,
-        "steps": {"recall": {"status": "complete", "attempt": attempt}},
-        "execution": {"status": execution},
-    }), encoding="utf-8")
+    (directory / "job.json").write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "steps": {"recall": {"status": "complete", "attempt": attempt}},
+                "execution": {"status": execution},
+            }
+        ),
+        encoding="utf-8",
+    )
     return directory
 
 
@@ -505,9 +559,14 @@ def test_studio_attempts_keep_referenced_and_latest(tmp_path):
     config_path = make_config(tmp_path)
     root = tmp_path / "data"
     job = studio_job(root, "j1")
-    (job / "checkpoints.json").write_text(json.dumps({
-        "candidates/shot-01.json": {"path": "attempts/recall-a2/candidates/shot-01.json"},
-    }), encoding="utf-8")
+    (job / "checkpoints.json").write_text(
+        json.dumps(
+            {
+                "candidates/shot-01.json": {"path": "attempts/recall-a2/candidates/shot-01.json"},
+            }
+        ),
+        encoding="utf-8",
+    )
     current = write(job / "attempts" / "recall-a1" / "x.json")
     referenced = write(job / "attempts" / "recall-a2" / "candidates" / "shot-01.json")
     stale = age(write(job / "attempts" / "recall-a3" / "x.json"), 40)
@@ -560,7 +619,7 @@ def test_pipeline_lock_conflict_exit_code(tmp_path):
     config_path = make_config(tmp_path)
     root = tmp_path / "data"
     write(root / ".DS_Store")
-    from mindex.shared.locks import SharedFileLock
+    from shared.locks import SharedFileLock
 
     with SharedFileLock(root / "pipeline.lock", exclusive=True):
         result = invoke(config_path, "--apply")
@@ -581,7 +640,8 @@ def test_subtitle_cache_keeps_uploads(tmp_path):
     assert upload.exists(), "用户上传字幕原件永不清理"
 
 
-# ---------------------------------------------------------------- chroma 孤儿目录 / 超期 building / person_features / VACUUM
+# ---------------------------------------------------------------- chroma 孤儿目录 / 超期 building /
+# person_features / VACUUM
 
 
 def _recent(days: int = 1) -> str:
@@ -592,9 +652,13 @@ def _segment_dirs_of(root: Path, collection: str) -> list[str]:
     import sqlite3
 
     with sqlite3.connect(root / "chroma" / "chroma.sqlite3") as db:
-        ids = [row[0] for row in db.execute(
-            "SELECT s.id FROM segments s JOIN collections c ON s.collection=c.id WHERE c.name=?",
-            (collection,))]
+        ids = [
+            row[0]
+            for row in db.execute(
+                "SELECT s.id FROM segments s JOIN collections c ON s.collection=c.id WHERE c.name=?",
+                (collection,),
+            )
+        ]
     # 每个集合有 VECTOR/METADATA 两个 segment，只有 VECTOR 落 HNSW 目录
     return [sid for sid in ids if (root / "chroma" / sid).is_dir()]
 
@@ -614,8 +678,7 @@ def test_chroma_orphan_segments_removed(tmp_path):
 
     report = report_of(invoke(config_path))  # 预览不删
     names = categories(report)
-    assert [item["path"] for item in names["chroma_orphan_segments"]["items"]] == [
-        f"chroma/{orphan.name}"]
+    assert [item["path"] for item in names["chroma_orphan_segments"]["items"]] == [f"chroma/{orphan.name}"]
     assert names["chroma_orphan_segments"]["level"] == "A"
     assert names["chroma_orphan_segments"]["bytes"] == 4096
     assert orphan.exists()
@@ -654,19 +717,25 @@ def test_orphan_person_features_pruned(tmp_path):
     root = tmp_path / "data"
     store = Store(root)
     with store.connect() as db:
-        db.execute("INSERT OR REPLACE INTO sources(id,name,path,media,layout_key,prepared) "
-                   "VALUES('s1','s1','sources/s1/a.mp4','{}','layout',1)")
+        db.execute(
+            "INSERT OR REPLACE INTO sources(id,name,path,media,layout_key,prepared) "
+            "VALUES('s1','s1','sources/s1/a.mp4','{}','layout',1)"
+        )
         db.executemany(
             "INSERT OR REPLACE INTO person_features(id,source_id,space,kind,data) VALUES(?,?,?,?,?)",
-            [("feat-alive", "s1", "{}", "shot", '"x"'),
-             ("feat-orphan", "s-gone", "{}", "shot", '"x"'),
-             ("feat-ref", None, "{}", "reference", '"x"')])
+            [
+                ("feat-alive", "s1", "{}", "shot", '"x"'),
+                ("feat-orphan", "s-gone", "{}", "shot", '"x"'),
+                ("feat-ref", None, "{}", "reference", '"x"'),
+            ],
+        )
 
     report = report_of(invoke(config_path))
 
     names = categories(report)
     assert [item["path"] for item in names["orphan_person_features"]["items"]] == [
-        "person_features#feat-orphan"]
+        "person_features#feat-orphan"
+    ]
     assert names["orphan_person_features"]["level"] == "A"
 
     report_of(invoke(config_path, "--apply"))
@@ -682,7 +751,8 @@ def test_vacuum_shrinks_metadata_database(tmp_path):
     with store.connect() as db:
         db.executemany(
             "INSERT OR REPLACE INTO person_features(id,source_id,space,kind,data) VALUES(?,?,?,?,?)",
-            [(f"big-{i}", None, "{}", "reference", "x" * 200_000) for i in range(50)])
+            [(f"big-{i}", None, "{}", "reference", "x" * 200_000) for i in range(50)],
+        )
         db.execute("DELETE FROM person_features")
 
     report = report_of(invoke(config_path, "--apply", "--vacuum"))
@@ -736,22 +806,25 @@ def test_days_replaces_age_thresholds(tmp_path):
     fresh = write(root / "cache" / "shot-media" / "abc.mp4")  # mtime = 现在
     just_finished = (datetime.now(UTC) - timedelta(seconds=5)).strftime("%Y-%m-%d %H:%M:%S")
     with store.connect() as db:
-        db.execute("INSERT INTO runs(stage,status,finished_at) VALUES('detect','complete',?)",
-                   (just_finished,))
+        db.execute(
+            "INSERT INTO runs(stage,status,finished_at) VALUES('detect','complete',?)", (just_finished,)
+        )
 
     report = report_of(invoke(config_path, "--apply", "--days", "7"))
 
     assert fresh.exists(), "--days 7 保留 7 天内的新缓存"
     assert "shot_media_cache" not in categories(report)
-    assert any(row["stage"] == "detect" for row in store.rows("SELECT stage FROM runs")), \
+    assert any(row["stage"] == "detect" for row in store.rows("SELECT stage FROM runs")), (
         "--days 7 不动刚完成的 runs 记录"
+    )
 
     report = report_of(invoke(config_path, "--apply", "--days", "0"))
 
     assert not fresh.exists(), "--days 0 清空全部按龄过期项"
     assert categories(report)["shot_media_cache"]["result"] == {"deleted": 1}
-    assert not [row for row in store.rows("SELECT stage FROM runs") if row["stage"] == "detect"], \
+    assert not [row for row in store.rows("SELECT stage FROM runs") if row["stage"] == "detect"], (
         "--days 0 连刚完成的 runs 记录也按龄清掉"
+    )
 
 
 def test_days_zero_keeps_hard_protections(tmp_path):
@@ -760,8 +833,10 @@ def test_days_zero_keeps_hard_protections(tmp_path):
     store = Store(root)
     upload = write(root / "subtitles" / "s1" / "uploads" / "sha" / "subtitle.srt")
     with store.connect() as db:
-        db.execute("INSERT OR REPLACE INTO channel_data VALUES('s1','dialogue','p-now',"
-                   "'complete','{}',CURRENT_TIMESTAMP)")
+        db.execute(
+            "INSERT OR REPLACE INTO channel_data VALUES('s1','dialogue','p-now',"
+            "'complete','{}',CURRENT_TIMESTAMP)"
+        )
     dialogue_now = age(write(root / "dialogue" / "s1" / "p-now" / "0.json"), 40)
     seed_index_version(store, "v1", "2026-01-01 00:00:00")
     with store.connect() as db:
@@ -794,37 +869,41 @@ def test_days_preview_deletes_nothing(tmp_path):
     assert categories(report)["shot_media_cache"]["item_count"] == 1
 
 
-@pytest.mark.parametrize('rule_name,relative', [
-    ('context_cache', 'context/scene.mp4'), ('shot_media_cache', 'cache/shot-media/scene.mp4')])
+@pytest.mark.parametrize(
+    "rule_name,relative",
+    [("context_cache", "context/scene.mp4"), ("shot_media_cache", "cache/shot-media/scene.mp4")],
+)
 def test_cache_cleanup_rechecks_lease_after_preview(tmp_path, rule_name, relative):
     from filelock import FileLock
 
-    from mindex.maintenance import clean
+    from maintenance import clean
 
-    root = tmp_path / 'data'
+    root = tmp_path / "data"
     store = Store(root)
     path = age(write(root / relative), 40)
     scan = clean.Scan(Config(data_dir=root), store, datetime.now(UTC))
     action = getattr(clean, rule_name)(scan)
     assert action and action.items
-    with FileLock(str(path) + '.lock'):
+    with FileLock(str(path) + ".lock"):
         result = action.execute()
-    assert path.is_file() and result == {'deleted': 0, 'skipped': 1}
+    assert path.is_file() and result == {"deleted": 0, "skipped": 1}
 
 
-@pytest.mark.parametrize('rule_name,relative', [
-    ('context_cache', 'context/scene.mp4'), ('shot_media_cache', 'cache/shot-media/scene.mp4')])
+@pytest.mark.parametrize(
+    "rule_name,relative",
+    [("context_cache", "context/scene.mp4"), ("shot_media_cache", "cache/shot-media/scene.mp4")],
+)
 def test_cache_cleanup_keeps_recently_accessed_old_media(tmp_path, rule_name, relative):
-    from mindex.maintenance import clean
+    from maintenance import clean
 
-    root = tmp_path / 'data'
+    root = tmp_path / "data"
     store = Store(root)
     path = age(write(root / relative), 40)
     scan = clean.Scan(Config(data_dir=root), store, datetime.now(UTC))
     action = getattr(clean, rule_name)(scan)
     assert action
     os.utime(path, (datetime.now(UTC).timestamp(), path.stat().st_mtime))
-    assert action.execute() == {'deleted': 0, 'skipped': 1}
+    assert action.execute() == {"deleted": 0, "skipped": 1}
     assert path.is_file()
     assert getattr(clean, rule_name)(scan) is None
 
@@ -867,7 +946,8 @@ def test_progress_reports_vacuum_stages(tmp_path):
     with store.connect() as db:
         db.executemany(
             "INSERT OR REPLACE INTO person_features(id,source_id,space,kind,data) VALUES(?,?,?,?,?)",
-            [(f"big-{i}", None, "{}", "reference", "x" * 200_000) for i in range(20)])
+            [(f"big-{i}", None, "{}", "reference", "x" * 200_000) for i in range(20)],
+        )
         db.execute("DELETE FROM person_features")
     messages: list[str] = []
 
@@ -899,7 +979,7 @@ def test_progress_reports_vacuum_busy_skip(tmp_path):
 
 def test_progress_vacuum_heartbeat(monkeypatch):
     """VACUUM 心跳线程：超过间隔发「仍在 VACUUM」；with 退出后线程停止。"""
-    from mindex.maintenance import clean as clean_module
+    from maintenance import clean as clean_module
 
     monkeypatch.setattr(clean_module, "VACUUM_HEARTBEAT_SECONDS", 0.05)
     messages: list[str] = []

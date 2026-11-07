@@ -14,21 +14,30 @@ from typing import ClassVar, Literal
 
 from pydantic import Field, field_validator
 
-from mindex.shared.config import StrictModel
-from mindex.topics.common import parse_time
-from mindex.topics.sources.base import FetchContext, Item, SourceError, http_get, item, register
+from shared.config import StrictModel
+from topics.common import parse_time
+from topics.sources.base import FetchContext, Item, SourceError, http_get, item, register
 
 MAX_QUERIES_PER_SOURCE = 20
 
 
 class BraveConfig(StrictModel):
     endpoint: Literal["news", "web"] = Field(default="news", description="news=新闻搜索；web=网页搜索")
-    freshness: Literal["pd", "pw", "pm", "py"] = Field(default="pd", description="pd=24 小时，pw=7 天，pm=31 天，py=一年")
-    queries: list[str] = Field(default_factory=list, max_length=MAX_QUERIES_PER_SOURCE,
-                               description="查询词；留空时用档案关键词或领域与子方向")
+    freshness: Literal["pd", "pw", "pm", "py"] = Field(
+        default="pd", description="pd=24 小时，pw=7 天，pm=31 天，py=一年"
+    )
+    queries: list[str] = Field(
+        default_factory=list,
+        max_length=MAX_QUERIES_PER_SOURCE,
+        description="查询词；留空时用档案关键词或领域与子方向",
+    )
     count: int = Field(default=10, ge=1, le=20, description="每个查询取几条结果")
-    country: str | None = Field(default=None, pattern=r"^[A-Za-z]{2,3}$", description="国家代码；缺省 ALL（全球）")
-    search_lang: str | None = Field(default=None, pattern=r"^[A-Za-z-]{2,16}$", description="搜索语言；缺省不传，不沿用档案语言")
+    country: str | None = Field(
+        default=None, pattern=r"^[A-Za-z]{2,3}$", description="国家代码；缺省 ALL（全球）"
+    )
+    search_lang: str | None = Field(
+        default=None, pattern=r"^[A-Za-z-]{2,16}$", description="搜索语言；缺省不传，不沿用档案语言"
+    )
 
     @field_validator("queries")
     @classmethod
@@ -42,7 +51,9 @@ def queries_for(cfg: BraveConfig, profile) -> list[str]:
         return cfg.queries
     if profile.keywords:
         return profile.keywords[:MAX_QUERIES_PER_SOURCE]
-    return [f"{profile.domain} {topic}" for topic in profile.subtopics[:MAX_QUERIES_PER_SOURCE]] or [profile.domain]
+    return [f"{profile.domain} {topic}" for topic in profile.subtopics[:MAX_QUERIES_PER_SOURCE]] or [
+        profile.domain
+    ]
 
 
 def message(error: SourceError) -> str:
@@ -65,10 +76,18 @@ def parse(data: bytes, endpoint: str) -> list[Item]:
     for row in rows or []:
         if not isinstance(row, dict):
             continue
-        url = row.get("url") if isinstance(row.get("url"), str) and row["url"].startswith(("http://", "https://")) else None
+        url = (
+            row.get("url")
+            if isinstance(row.get("url"), str) and row["url"].startswith(("http://", "https://"))
+            else None
+        )
         published = parse_time(row.get("page_age"))
-        found = item(row.get("title") or "", row.get("description") or "", url=url,
-                     published_at=published.isoformat(timespec="seconds") if published else None)
+        found = item(
+            row.get("title") or "",
+            row.get("description") or "",
+            url=url,
+            published_at=published.isoformat(timespec="seconds") if published else None,
+        )
         if found:
             items.append(found)
     return items
@@ -94,8 +113,12 @@ class BraveSource:
                 skipped += 1
                 continue
             ctx.budget["brave"] = used + 1
-            params = {"q": query, "count": cfg.count, "freshness": cfg.freshness,
-                      "country": (cfg.country or "ALL").upper()}
+            params = {
+                "q": query,
+                "count": cfg.count,
+                "freshness": cfg.freshness,
+                "country": (cfg.country or "ALL").upper(),
+            }
             if cfg.search_lang:
                 params["search_lang"] = cfg.search_lang
             try:
@@ -104,7 +127,9 @@ class BraveSource:
                 raise SourceError(message(exc), exc.status) from exc
             items.extend(parse(body, cfg.endpoint))
         if skipped and not items:
-            raise SourceError(f"已达到本次挖掘的 Brave 查询上限（topics.brave.max_queries={settings.max_queries}）")
+            raise SourceError(
+                f"已达到本次挖掘的 Brave 查询上限（topics.brave.max_queries={settings.max_queries}）"
+            )
         return items[: ctx.config.topics.fetch.max_items_per_source]
 
 

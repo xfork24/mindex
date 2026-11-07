@@ -2,6 +2,7 @@
 
 本地模式仍使用原文件；远端读取每次核对指针，不把节点旧缓存当作权威状态。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -9,8 +10,8 @@ import io
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
-from mindex.shared import jsonio
-from mindex.shared.work_budget import resource_write
+from shared import jsonio
+from shared.work_budget import resource_write
 
 UNCONDITIONAL = object()
 
@@ -30,26 +31,31 @@ def remote(store):
 
 def pointer(store, key):
     if remote(store):
-        from mindex.shared.directory_files import directory_for, snapshot
+        from shared.directory_files import directory_for, snapshot
 
         prefix = directory_for(key)
         if prefix:
             view = snapshot(store, prefix)
             entry = view.entries.get(key)
-            return ({"path": key, **entry} if entry else
-                    {"path": key, "size": -1, "revision": view.revision} if view.revision is not None else None)
+            return (
+                {"path": key, **entry}
+                if entry
+                else {"path": key, "size": -1, "revision": view.revision}
+                if view.revision is not None
+                else None
+            )
     return store.one("SELECT * FROM shared_files WHERE path=?", (key,))
 
 
 def publish(store, path, *, expected=UNCONDITIONAL):
-    from mindex.shared.migration_state import writable
+    from shared.migration_state import writable
 
     writable(store)
     if not remote(store):
         return None
     path = Path(path)
     key = key_for(store, path)
-    from mindex.shared.directory_files import directory_for, snapshot
+    from shared.directory_files import directory_for, snapshot
 
     prefix = directory_for(key)
     if prefix:
@@ -73,20 +79,21 @@ def publish(store, path, *, expected=UNCONDITIONAL):
             "INSERT INTO shared_files(path,object_key,sha256,size,revision) VALUES(?,?,?,?,?)"
             " ON CONFLICT(path) DO UPDATE SET object_key=excluded.object_key,sha256=excluded.sha256,"
             " size=excluded.size,revision=excluded.revision",
-            (key, object_key, digest, path.stat().st_size, digest))
+            (key, object_key, digest, path.stat().st_size, digest),
+        )
     return digest
 
 
 @resource_write
 def save_bytes(store, path, payload, *, expected=UNCONDITIONAL):
-    from mindex.shared.migration_state import writable
+    from shared.migration_state import writable
 
     writable(store)
     if not remote(store):
         jsonio.save_bytes(path, payload)
         return
     key = key_for(store, path)
-    from mindex.shared.directory_files import directory_for, snapshot
+    from shared.directory_files import directory_for, snapshot
 
     prefix = directory_for(key)
     if prefix:
@@ -109,7 +116,9 @@ def save_bytes(store, path, payload, *, expected=UNCONDITIONAL):
         db.execute(
             "INSERT INTO shared_files(path,object_key,sha256,size,revision) VALUES(?,?,?,?,?)"
             " ON CONFLICT(path) DO UPDATE SET object_key=excluded.object_key,sha256=excluded.sha256,"
-            " size=excluded.size,revision=excluded.revision", (key, object_key, digest, len(payload), digest))
+            " size=excluded.size,revision=excluded.revision",
+            (key, object_key, digest, len(payload), digest),
+        )
     jsonio.save_bytes(path, payload)
 
 
@@ -143,7 +152,7 @@ def hydrate(store, path):
         return Path(path)
     import tempfile
 
-    from mindex.shared.work_budget import GrowingReservation, current
+    from shared.work_budget import GrowingReservation, current
 
     path = Path(path)
     entry = pointer(store, key_for(store, path))
@@ -157,7 +166,9 @@ def hydrate(store, path):
     temporary = None
     try:
         with store.media.materialize(entry["object_key"]) as cached:
-            with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".hydrate-", suffix=".partial", delete=False) as target:
+            with tempfile.NamedTemporaryFile(
+                dir=path.parent, prefix=".hydrate-", suffix=".partial", delete=False
+            ) as target:
                 temporary = Path(target.name)
                 with GrowingReservation(temporary) as reservation, cached.open("rb") as source:
                     while chunk := source.read(1024 * 1024):
@@ -166,12 +177,15 @@ def hydrate(store, path):
                     target.flush()
                     reservation.defer()
         with temporary.open("rb") as source:
-            if temporary.stat().st_size != entry["size"] or hashlib.file_digest(source, "sha256").hexdigest() != entry["sha256"]:
+            if (
+                temporary.stat().st_size != entry["size"]
+                or hashlib.file_digest(source, "sha256").hexdigest() != entry["sha256"]
+            ):
                 raise ValueError("共享文件摘要不符")
         budget = current()
         if budget is not None:
             budget.retain(path)
-        from mindex.shared.work_budget import commit_file
+        from shared.work_budget import commit_file
 
         commit_file(temporary, path)
     finally:
@@ -181,15 +195,21 @@ def hydrate(store, path):
 
 
 def entries(store, prefix):
-    from mindex.shared.directory_files import directory_for, snapshot
+    from shared.directory_files import directory_for, snapshot
 
     directory = directory_for(prefix + "__entry__") if remote(store) else None
     if directory:
-        return [{"path": key, **entry} for key, entry in sorted(snapshot(store, directory).entries.items())
-                if key.startswith(prefix)]
+        return [
+            {"path": key, **entry}
+            for key, entry in sorted(snapshot(store, directory).entries.items())
+            if key.startswith(prefix)
+        ]
     # 前缀通过比较而非 LIKE，避免文件名中的 %/_ 改变匹配范围。
-    return [row for row in store.rows("SELECT * FROM shared_files ORDER BY path")
-            if row["path"].startswith(prefix) and row["size"] >= 0]
+    return [
+        row
+        for row in store.rows("SELECT * FROM shared_files ORDER BY path")
+        if row["path"].startswith(prefix) and row["size"] >= 0
+    ]
 
 
 def hydrate_tree(store, prefix):
@@ -201,7 +221,7 @@ def hydrate_tree(store, prefix):
 
 
 def delete_tree(store, prefix):
-    from mindex.shared.directory_files import directory_for, snapshot
+    from shared.directory_files import directory_for, snapshot
 
     directory = directory_for(prefix + "__entry__") if remote(store) else None
     if directory:
@@ -212,5 +232,7 @@ def delete_tree(store, prefix):
         return
     with store.connect() as db:
         for row in entries(store, prefix):
-            db.execute("UPDATE shared_files SET object_key='',sha256='',size=-1,revision=? WHERE path=?",
-                       (uuid4().hex, row["path"]))
+            db.execute(
+                "UPDATE shared_files SET object_key='',sha256='',size=-1,revision=? WHERE path=?",
+                (uuid4().hex, row["path"]),
+            )

@@ -19,7 +19,7 @@ async def bridge(runtime, sid):
     from starlette.applications import Starlette
     from starlette.routing import Route
 
-    from mindex.agent.mcp_server import StreamableEndpoint
+    from agent.mcp_server import StreamableEndpoint
 
     server = Server("mindex", instructions="Use load_tools before calling tools in unloaded domains.")
 
@@ -79,7 +79,7 @@ async def bridge(runtime, sid):
         if runtime.settings().llm.vision and runtime.settings().max_images:
             import base64
 
-            from mindex.agent.vision import encode_jpeg
+            from agent.vision import encode_jpeg
 
             for ref in (result["message"].get("images") or [])[-runtime.settings().max_images :]:
                 data = encode_jpeg(await runtime._image_loader(sid)(ref))

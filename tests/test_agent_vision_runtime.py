@@ -8,19 +8,19 @@ import json
 import re
 
 import pytest
-from agent_helpers import new_session, result_text, results, wait_idle
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from mindex.agent.llm import anthropic, openai_compat
-from mindex.agent.llm.scripted import ScriptedLlm, call, say
-from mindex.agent.llm.types import image_block, resolved_image_block, tool_message, user_message
-from mindex.agent.registry import ToolOutput, ToolRegistry, ToolSpec
-from mindex.agent.runtime import NO_VISION_PROMPT, NO_VISION_TOOL_NOTE
-from mindex.agent.session_store import derive_messages, estimate_tokens
-from mindex.agent.vision import IMAGE_TOKENS
-from mindex.api import create_app
-from mindex.shared.config import StrictModel
+from agent.llm import anthropic, openai_compat
+from agent.llm.scripted import ScriptedLlm, call, say
+from agent.llm.types import image_block, resolved_image_block, tool_message, user_message
+from agent.registry import ToolOutput, ToolRegistry, ToolSpec
+from agent.runtime import NO_VISION_PROMPT, NO_VISION_TOOL_NOTE
+from agent.session_store import derive_messages, estimate_tokens
+from agent.vision import IMAGE_TOKENS
+from agent_helpers import new_session, result_text, results, wait_idle
+from api import create_app
+from shared.config import StrictModel
 
 BASE64_RUN = re.compile(r"[A-Za-z0-9+/=]{1000,}")
 
@@ -42,8 +42,10 @@ def with_image(text="看图", data="QUJD", ref=None) -> dict:
 
 def test_openai_user_images_as_data_urls_and_refs_skipped():
     converted = openai_compat.convert_messages("sys", [with_image(), with_image(ref="attachment://x")])
-    assert converted[1]["content"] == [{"type": "text", "text": "看图"},
-                                       {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}}]
+    assert converted[1]["content"] == [
+        {"type": "text", "text": "看图"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}},
+    ]
     # 只有引用、没有数据的块不发出，内容保持纯文本。
     assert converted[2]["content"] == "看图"
     tool = tool_message("c1", "结果")
@@ -58,12 +60,16 @@ def test_anthropic_images_in_user_and_tool_result():
     converted = anthropic.convert_messages([with_image(), with_image(ref="attachment://x"), tool, plain])
     user = converted[0]["content"]
     assert user[0] == {"type": "text", "text": "看图"}
-    assert user[1] == {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "QUJD"}}
+    assert user[1] == {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": "QUJD"},
+    }
     assert user[2] == {"type": "text", "text": "看图"}  # 引用块跳过
     results_ = [b for b in user if b["type"] == "tool_result"]
     assert results_[0]["content"] == [
         {"type": "text", "text": "结果"},
-        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "REVG"}}]
+        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "REVG"}},
+    ]
     assert results_[1]["content"] == "纯文本"
 
 
@@ -101,8 +107,9 @@ def app(config, monkeypatch):
 
 
 def upload(client, sid: str, data: bytes) -> str:
-    response = client.post("/api/agent/attachments", files={"file": ("p.png", data, "image/png")},
-                           data={"session_id": sid})
+    response = client.post(
+        "/api/agent/attachments", files={"file": ("p.png", data, "image/png")}, data={"session_id": sid}
+    )
     assert response.status_code == 201, response.text
     return response.json()["id"]
 
@@ -119,11 +126,15 @@ def test_vision_on_sends_attachment_and_tool_images(app):
     ref = upload(client, sid, png())
     client.app.state.agent_runtime.registry = image_registry([f"/api/agent/attachments/{ref[13:]}/content"])
     llm.extend([call("show_frames", call_id="c1")], [say("看到了")])
-    response = client.post(f"/api/agent/sessions/{sid}/messages", json={"content": "看图", "attachments": [ref]})
+    response = client.post(
+        f"/api/agent/sessions/{sid}/messages", json={"content": "看图", "attachments": [ref]}
+    )
     assert response.status_code == 202, response.text
     events = wait_idle(client, sid)
 
-    user = next(e["data"] for e in events if e["type"] == "user/message" and e["data"]["source"]["kind"] == "user")
+    user = next(
+        e["data"] for e in events if e["type"] == "user/message" and e["data"]["source"]["kind"] == "user"
+    )
     assert user["content"][1] == {"type": "image", "ref": ref, "mediaType": "image/png"}
     tool = results(events)[0]["message"]
     # 非本站地址被丢弃；视觉开启时文本不加未发送说明。
@@ -135,7 +146,9 @@ def test_vision_on_sends_attachment_and_tool_images(app):
     assert len(blocks) == 1 and blocks[0]["mediaType"] == "image/jpeg" and blocks[0]["data"]
     second = llm.requests[1].messages
     synthetic = [m for m in second if m["source"].get("origin") == "tool-images"]
-    assert len(synthetic) == 1 and any(b["type"] == "image" and b.get("data") for b in synthetic[0]["content"])
+    assert len(synthetic) == 1 and any(
+        b["type"] == "image" and b.get("data") for b in synthetic[0]["content"]
+    )
     assert all("images" not in m for m in second)
     assert NO_VISION_PROMPT not in llm.requests[1].system
     # 日志与 SSE 来源只含引用。

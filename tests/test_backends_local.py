@@ -14,15 +14,9 @@ import threading
 import pytest
 from filelock import Timeout
 
-from mindex.shared.backends import (
-    BackendContext,
-    FileLockProvider,
-    InlineTaskQueue,
-    LocalMediaStore,
-    open_context,
-)
-from mindex.shared.config import Config
-from mindex.shared.storage import Store
+from shared.backends import BackendContext, FileLockProvider, InlineTaskQueue, LocalMediaStore, open_context
+from shared.config import Config
+from shared.storage import Store
 
 
 @pytest.fixture
@@ -82,7 +76,9 @@ def test_local_media_store_roundtrip(tmp_path):
     # 同 key 不同内容是键冲突（不可变键语义）
     other = b"different"
     with pytest.raises(ValueError):
-        store.put_immutable("clips/src/shot/a.mp4", io.BytesIO(other), sha256=hashlib.sha256(other).hexdigest())
+        store.put_immutable(
+            "clips/src/shot/a.mp4", io.BytesIO(other), sha256=hashlib.sha256(other).hexdigest()
+        )
     assert store.stat("clips/src/shot/a.mp4", with_sha256=True).sha256 == sha
     with store.open_read("clips/src/shot/a.mp4") as handle:
         assert handle.read() == payload
@@ -102,7 +98,9 @@ def test_local_media_store_rejects_escape_and_bad_digest(tmp_path):
     with pytest.raises(FileNotFoundError):
         store.stat("media.mp4", version="v1")  # 本地无版本概念
     with pytest.raises(ValueError):
-        store.put_immutable("bad.bin", io.BytesIO(b"mismatch"), sha256=hashlib.sha256(b"expected").hexdigest())
+        store.put_immutable(
+            "bad.bin", io.BytesIO(b"mismatch"), sha256=hashlib.sha256(b"expected").hexdigest()
+        )
     assert list(tmp_path.iterdir()) == []  # 失败写入不产生目标或残留临时文件
 
 
@@ -153,8 +151,13 @@ def test_local_vector_store_wraps_vector_index(config):
     assert vectors.count() == 0
     rng = random.Random(7)
     entries = [
-        (f"rep{j}", [rng.random() for _ in range(8)],
-         {"id": f"seg{j}", "source_id": "src", "kind": "shot"}, "visual", f"doc{j}")
+        (
+            f"rep{j}",
+            [rng.random() for _ in range(8)],
+            {"id": f"seg{j}", "source_id": "src", "kind": "shot"},
+            "visual",
+            f"doc{j}",
+        )
         for j in range(5)
     ]
     vectors.upsert_many(entries)
@@ -177,14 +180,19 @@ def test_local_vector_store_wraps_vector_index(config):
 
 def test_local_vector_store_interops_with_vector_index(config):
     """本地实现与 processing 的 VectorIndex 读写同一集合（阶段 0 不改变现有调用方）。"""
-    from mindex.processing.indexing import VectorIndex
+    from processing.indexing import VectorIndex
 
     ctx = open_context(config)
     index_id = "k" * 12
     rng = random.Random(11)
     entries = [
-        (f"vid{j}", [rng.random() for _ in range(8)],
-         {"id": f"seg{j}", "source_id": "src", "kind": "shot"}, "visual", f"doc{j}")
+        (
+            f"vid{j}",
+            [rng.random() for _ in range(8)],
+            {"id": f"seg{j}", "source_id": "src", "kind": "shot"},
+            "visual",
+            f"doc{j}",
+        )
         for j in range(3)
     ]
     ctx.vectors.open(index_id, create=True).upsert_many(entries)
@@ -197,5 +205,9 @@ def test_store_open_matches_direct_construction(tmp_path):
     """阶段 0 的 Store.open 与直构零行为差异：同一目录、可读同样的表。"""
     direct = Store(tmp_path / "data")
     direct.execute("INSERT INTO settings VALUES('probe','1')")
-    assert Store.open(Config(data_dir=tmp_path / "data")).one(
-        "SELECT value FROM settings WHERE key='probe'")["value"] == "1"
+    assert (
+        Store.open(Config(data_dir=tmp_path / "data")).one("SELECT value FROM settings WHERE key='probe'")[
+            "value"
+        ]
+        == "1"
+    )

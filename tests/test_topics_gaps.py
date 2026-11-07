@@ -9,17 +9,17 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
-from topics_fixtures import topic_embedder
 from typer.testing import CliRunner
 
-from mindex import cli
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext
-from mindex.agent.tools import build_registry
-from mindex.api import create_app
-from mindex.shared.storage import Store
-from mindex.topics import cards, gaps, profiles
-from mindex.topics.models import ProfileBody
+import cli
+from agent.loopback import MindexClient
+from agent.registry import ToolContext
+from agent.tools import build_registry
+from api import create_app
+from shared.storage import Store
+from topics import cards, gaps, profiles
+from topics.models import ProfileBody
+from topics_fixtures import topic_embedder
 
 
 @pytest.fixture
@@ -29,8 +29,10 @@ def seeded(config):
     ids = []
     for title in ("选题一", "选题二"):
         card_id = f"tc_{len(ids):012d}"
-        store.execute("INSERT INTO topic_cards(id,profile_id,title,body,created_at,updated_at) VALUES(?,?,?,?,?,?)",
-                      (card_id, pid, title, json.dumps({"item_ids": []}), "t", "t"))
+        store.execute(
+            "INSERT INTO topic_cards(id,profile_id,title,body,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+            (card_id, pid, title, json.dumps({"item_ids": []}), "t", "t"),
+        )
         ids.append(card_id)
     return config, store, pid, ids
 
@@ -40,7 +42,9 @@ def test_record_merges_and_counts_once_per_card(seeded):
     embedder = topic_embedder(config)
     assert gaps.record(store, pid, a, ["紫色天空", "央行发布会现场"], embedder=embedder) == 2
     assert gaps.record(store, pid, a, ["紫色天空"], embedder=embedder) == 0  # 同一卡片不重复计数
-    assert gaps.record(store, pid, b, ["紫色 天空！", "紫色夜空"], embedder=embedder) == 0  # 规范化相同 / 向量相同
+    assert (
+        gaps.record(store, pid, b, ["紫色 天空！", "紫色夜空"], embedder=embedder) == 0
+    )  # 规范化相同 / 向量相同
     listed = gaps.list_gaps(store, pid)
     assert [(g["visual"], g["count"]) for g in listed] == [("紫色天空", 2), ("央行发布会现场", 1)]
     assert [c["title"] for c in listed[0]["cards"]] == ["选题一", "选题二"]
@@ -52,7 +56,10 @@ def test_record_merges_and_counts_once_per_card(seeded):
     done = gaps.update_gap(store, listed[0]["id"], gaps.GapChanges(status="done"))
     assert done["status"] == "done"
     assert gaps.record(store, pid, a, ["紫色天空"], embedder=embedder) == 1
-    assert len(gaps.list_gaps(store, pid, status="done")) == 1 and len(gaps.list_gaps(store, pid, status="all")) == 4
+    assert (
+        len(gaps.list_gaps(store, pid, status="done")) == 1
+        and len(gaps.list_gaps(store, pid, status="all")) == 4
+    )
     with pytest.raises(ValueError):
         gaps.list_gaps(store, pid, status="bogus")
     # 撤回卡片：计数减少，只属于它的缺口删除
@@ -131,12 +138,12 @@ def test_matcher_reembeds_when_embedding_space_changes(seeded):
 
 def test_export_csv(seeded):
     _, store, pid, (a, _) = seeded
-    gaps.record(store, pid, a, ["=HYPERLINK(\"http://x\")", "红色画面"], embedder=None)
+    gaps.record(store, pid, a, ['=HYPERLINK("http://x")', "红色画面"], embedder=None)
     data = gaps.export_csv(store, pid)
     assert data.startswith("\ufeff".encode())
     rows = list(csv.reader(io.StringIO(data.decode("utf-8-sig"))))
     assert rows[0] == ["画面", "出现次数", "状态", "相关选题", "更新时间"]
-    assert {r[0] for r in rows[1:]} == {"'=HYPERLINK(\"http://x\")", "红色画面"}
+    assert {r[0] for r in rows[1:]} == {'\'=HYPERLINK("http://x")', "红色画面"}
     assert all(r[2] == "待采集" and r[3] == "选题一" for r in rows[1:])
 
 
@@ -154,15 +161,22 @@ def test_gaps_rest_cli_and_tools(seeded, tmp_path):
         assert client.patch("/api/topics/gaps/tg_000000000000", json={"status": "done"}).status_code == 404
         exported = client.get(f"/api/topics/profiles/{pid}/gaps.csv")
         assert exported.status_code == 200 and exported.headers["content-type"].startswith("text/csv")
-        assert "attachment" in exported.headers["content-disposition"] and "UTF-8''" in exported.headers["content-disposition"]
-        assert exported.content.startswith("\ufeff".encode()) and "已采集" in exported.content.decode("utf-8-sig")
+        assert (
+            "attachment" in exported.headers["content-disposition"]
+            and "UTF-8''" in exported.headers["content-disposition"]
+        )
+        assert exported.content.startswith("\ufeff".encode()) and "已采集" in exported.content.decode(
+            "utf-8-sig"
+        )
         assert client.get("/api/topics/profiles/tp_000000000000/gaps").status_code == 404
         # CLI 用独立配置文件，工具调用经进程内回环：全部在同一应用生命周期内按序执行。
         runner = CliRunner()
         yaml_path = tmp_path / "config.yaml"
         yaml_path.write_text(f"data_dir: {config.data_dir}\n", encoding="utf-8")
         base = ["--config", str(yaml_path), "topics", "gaps"]
-        assert [g["visual"] for g in json.loads(runner.invoke(cli.app, [*base, "list", pid]).output)["items"]] == ["蓝色海面"]
+        assert [
+            g["visual"] for g in json.loads(runner.invoke(cli.app, [*base, "list", pid]).output)["items"]
+        ] == ["蓝色海面"]
         assert json.loads(runner.invoke(cli.app, [*base, "reopen", gid]).output)["status"] == "open"
         assert json.loads(runner.invoke(cli.app, [*base, "done", gid]).output)["status"] == "done"
         target = tmp_path / "gaps.csv"
@@ -185,6 +199,10 @@ def test_gaps_rest_cli_and_tools(seeded, tmp_path):
                 await mindex.aclose()
 
         out = asyncio.run(call("topic_gaps", {"topic_profile_id": pid, "status": "all"}))
-        assert "紫色天空 | 出现 2 次 | 已采集" in out.text and "gaps.csv" in out.text and out.focus["section"] == "gaps"
+        assert (
+            "紫色天空 | 出现 2 次 | 已采集" in out.text
+            and "gaps.csv" in out.text
+            and out.focus["section"] == "gaps"
+        )
         out = asyncio.run(call("update_topic_gap", {"gap_id": gid, "status": "open"}))
         assert out.value["status"] == "open" and out.mutation == {"domain": "topics", "profile_id": pid}

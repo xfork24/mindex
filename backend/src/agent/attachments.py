@@ -19,8 +19,8 @@ import unicodedata
 from pathlib import Path
 from typing import Literal
 
-from mindex.agent.schema import initialize
-from mindex.agent.session_store import Database, now_ms
+from agent.schema import initialize
+from agent.session_store import Database, now_ms
 
 PREFIX = "attachment://"
 DIRNAME = "agent-attachments"
@@ -40,7 +40,7 @@ def token(ref: str) -> str:
     """接受 ``attachment://<token>`` 或裸 token，返回校验过的 token。"""
     if not isinstance(ref, str):
         raise AttachmentError("附件引用格式无效")
-    value = ref[len(PREFIX):] if ref.startswith(PREFIX) else ref
+    value = ref[len(PREFIX) :] if ref.startswith(PREFIX) else ref
     if not TOKEN_RE.fullmatch(value):
         raise AttachmentError("附件引用格式无效")
     return value
@@ -56,7 +56,7 @@ def safe_filename(name: str | None) -> str:
     if len(raw) > MAX_FILENAME:
         stem, dot, ext = raw.rpartition(".")
         if dot and stem and len(ext) <= 16:
-            raw = f"{stem[:MAX_FILENAME - len(ext) - 1]}.{ext}"
+            raw = f"{stem[: MAX_FILENAME - len(ext) - 1]}.{ext}"
         else:
             raw = raw[:MAX_FILENAME]
     return raw
@@ -72,8 +72,16 @@ class AttachmentStore:
         initialize(self.store)
 
     # ------------------------------------------------------------ 写入
-    def put(self, upload_path: Path, *, filename: str | None, content_type: str | None,
-            owner: Literal["session", "mcp"], session_id: str | None, ttl_hours: int) -> dict:
+    def put(
+        self,
+        upload_path: Path,
+        *,
+        filename: str | None,
+        content_type: str | None,
+        owner: Literal["session", "mcp"],
+        session_id: str | None,
+        ttl_hours: int,
+    ) -> dict:
         """把已写好的上传文件移入暂存目录并登记，返回公开元数据。
 
         ``upload_path`` 会被移动（跨文件系统时复制后删除）；空文件抛 ``ValueError``。
@@ -99,8 +107,18 @@ class AttachmentStore:
             self.store.execute(
                 "INSERT INTO agent_attachments(id,session_id,owner,filename,content_type,bytes,sha256,path,"
                 "created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (tok, session_id, owner, name, (content_type or "application/octet-stream")[:200], size, digest,
-                 target.relative_to(self.data_dir).as_posix(), stamp, stamp + ttl_hours * 3600 * 1000),
+                (
+                    tok,
+                    session_id,
+                    owner,
+                    name,
+                    (content_type or "application/octet-stream")[:200],
+                    size,
+                    digest,
+                    target.relative_to(self.data_dir).as_posix(),
+                    stamp,
+                    stamp + ttl_hours * 3600 * 1000,
+                ),
             )
         except BaseException:
             shutil.rmtree(folder, ignore_errors=True)
@@ -127,7 +145,9 @@ class AttachmentStore:
     def resolve(self, ref: str, *, session_id: str | None, owner: str) -> Path:
         """按调用方归属解析附件文件：归属、会话、有效期与文件都校验通过才返回路径。"""
         row = self._row(ref)
-        if row["owner"] != owner or (owner == "session" and (not session_id or row["session_id"] != session_id)):
+        if row["owner"] != owner or (
+            owner == "session" and (not session_id or row["session_id"] != session_id)
+        ):
             raise AttachmentError("附件不属于当前会话或调用方，请在当前会话中重新上传")
         if row["expires_at"] <= now_ms():
             raise AttachmentError("附件已过期，请重新上传")
@@ -160,7 +180,8 @@ class AttachmentStore:
         """已过期的附件（含绝对路径 ``file``），供清理规则使用。"""
         stamp = now_ms() if now is None else now
         rows = self.store.rows(
-            "SELECT * FROM agent_attachments WHERE expires_at<=? ORDER BY expires_at", (stamp,))
+            "SELECT * FROM agent_attachments WHERE expires_at<=? ORDER BY expires_at", (stamp,)
+        )
         return [{**_public(row), "file": str(self.data_dir / row["path"])} for row in rows]
 
     def tokens(self) -> set[str]:
@@ -186,9 +207,15 @@ class AttachmentStore:
 
 def _public(row: dict) -> dict:
     return {
-        "id": f"{PREFIX}{row['id']}", "filename": row["filename"], "content_type": row["content_type"],
-        "bytes": row["bytes"], "sha256": row["sha256"], "owner": row["owner"], "session_id": row["session_id"],
-        "created_at": row["created_at"], "expires_at": row["expires_at"],
+        "id": f"{PREFIX}{row['id']}",
+        "filename": row["filename"],
+        "content_type": row["content_type"],
+        "bytes": row["bytes"],
+        "sha256": row["sha256"],
+        "owner": row["owner"],
+        "session_id": row["session_id"],
+        "created_at": row["created_at"],
+        "expires_at": row["expires_at"],
     }
 
 

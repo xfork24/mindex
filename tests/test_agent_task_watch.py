@@ -5,17 +5,17 @@ from __future__ import annotations
 import time
 
 import pytest
-from agent_helpers import new_session, send, wait_idle
-from conftest import FixtureEmbedder
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
-from mindex.agent.llm.scripted import ScriptedLlm, call, say
-from mindex.agent.registry import ToolOutput, ToolRegistry, ToolSpec
-from mindex.agent.tools import meta
-from mindex.agent.watcher import BuildWatcher, TaskWatcher, watch_target
-from mindex.api import create_app
-from mindex.shared.storage import Store
+from agent.llm.scripted import ScriptedLlm, call, say
+from agent.registry import ToolOutput, ToolRegistry, ToolSpec
+from agent.tools import meta
+from agent.watcher import BuildWatcher, TaskWatcher, watch_target
+from agent_helpers import new_session, send, wait_idle
+from api import create_app
+from conftest import FixtureEmbedder
+from shared.storage import Store
 
 
 class Empty(BaseModel):
@@ -46,8 +46,11 @@ def wait_type(client, sid, kind, count=1, timeout=30):
 
 
 def followups(events):
-    return [e["data"]["content"][0]["text"] for e in events
-            if e["type"] == "user/message" and e["data"]["source"]["kind"] == "followup"]
+    return [
+        e["data"]["content"][0]["text"]
+        for e in events
+        if e["type"] == "user/message" and e["data"]["source"]["kind"] == "followup"
+    ]
 
 
 def test_watch_task_followup_on_cancelled(config):
@@ -57,23 +60,31 @@ def test_watch_task_followup_on_cancelled(config):
     with TestClient(app) as client:
         app.state.agent_runtime.registry = probe_registry(target)
         store = Store(config.data_dir)
-        store.execute("INSERT INTO source_tasks(id,source_id,work,status,config,options) VALUES(?,?,?,?,?,?)",
-                      ("task-a", "src-1", "analysis", "running", "{}", "{}"))
+        store.execute(
+            "INSERT INTO source_tasks(id,source_id,work,status,config,options) VALUES(?,?,?,?,?,?)",
+            ("task-a", "src-1", "analysis", "running", "{}", "{}"),
+        )
         sid = new_session(client)
         send(client, sid, "分析这个素材")
         events = wait_idle(client, sid)
         assert next(e for e in events if e["type"] == "plugin:mindex/task-watch")["data"] == target
         # 仍在运行：没有结束事件。
         time.sleep(0.2)
-        assert not any(e["type"] == "plugin:mindex/task-finished"
-                       for e in client.get(f"/api/agent/sessions/{sid}/log").json()["items"])
-        store.execute("UPDATE source_tasks SET status='cancelled',error='已取消',progress=? WHERE id='task-a'",
-                      ('{"stage":"analyze","completed":2,"total":5}',))
+        assert not any(
+            e["type"] == "plugin:mindex/task-finished"
+            for e in client.get(f"/api/agent/sessions/{sid}/log").json()["items"]
+        )
+        store.execute(
+            "UPDATE source_tasks SET status='cancelled',error='已取消',progress=? WHERE id='task-a'",
+            ('{"stage":"analyze","completed":2,"total":5}',),
+        )
         wait_type(client, sid, "plugin:mindex/task-finished")
         events = wait_idle(client, sid)
     finished = next(e for e in events if e["type"] == "plugin:mindex/task-finished")["data"]
     assert finished["status"] == "cancelled" and finished["error"] == "已取消"
-    assert finished["kind"] == "source" and finished["work"] == "analysis" and finished["progress"]["total"] == 5
+    assert (
+        finished["kind"] == "source" and finished["work"] == "analysis" and finished["progress"]["total"] == 5
+    )
     texts = followups(events)
     assert len(texts) == 1
     assert "素材任务 task-a（素材 src-1，工作 分析）已结束，状态：cancelled" in texts[0]
@@ -88,15 +99,22 @@ def test_restart_resumes_unfinished_task_watches(config):
     with TestClient(first) as client:
         sid = new_session(client)
         store = Store(config.data_dir)
-        store.execute("INSERT INTO person_tasks(id,source_id,status,config,options) VALUES(?,?,?,?,?)",
-                      ("person-1", "src-1", "running", "{}", "{}"))
-        store.execute("INSERT INTO dialogue_tasks(id,source_id,status,config,options) VALUES(?,?,?,?,?)",
-                      ("dialogue-1", "src-1", "complete", "{}", "{}"))
+        store.execute(
+            "INSERT INTO person_tasks(id,source_id,status,config,options) VALUES(?,?,?,?,?)",
+            ("person-1", "src-1", "running", "{}", "{}"),
+        )
+        store.execute(
+            "INSERT INTO dialogue_tasks(id,source_id,status,config,options) VALUES(?,?,?,?,?)",
+            ("dialogue-1", "src-1", "complete", "{}", "{}"),
+        )
         sessions = first.state.agent_runtime.store
         sessions.append(sid, "plugin:mindex/task-watch", {"kind": "person", "task_id": "person-1"})
         sessions.append(sid, "plugin:mindex/task-watch", {"kind": "dialogue", "task_id": "dialogue-1"})
-        sessions.append(sid, "plugin:mindex/task-finished",
-                        {"kind": "dialogue", "task_id": "dialogue-1", "status": "complete"})
+        sessions.append(
+            sid,
+            "plugin:mindex/task-finished",
+            {"kind": "dialogue", "task_id": "dialogue-1", "status": "complete"},
+        )
 
     # 重启时运行中的人物任务被恢复为 interrupted；已结束的对白跟踪不再补发。
     with TestClient(make_app(config, ScriptedLlm([[say("人物任务中断了，可以重试。")]]))) as client:
@@ -128,20 +146,30 @@ def test_watch_target_normalization_and_texts():
     build = {"job_id": "j", "build_id": "b", "plan_id": "p"}
     assert watch_target(build) == build
     assert watch_target({"kind": "build", **build}) == build
-    assert watch_target({"kind": "person", "task_id": "t", "work": None, "extra": 1}) == {"kind": "person",
-                                                                                           "task_id": "t"}
+    assert watch_target({"kind": "person", "task_id": "t", "work": None, "extra": 1}) == {
+        "kind": "person",
+        "task_id": "t",
+    }
     for bad in ({"kind": "other", "task_id": "t"}, {"kind": "source"}, {"job_id": "j"}):
         with pytest.raises(ValueError):
             watch_target(bad)
 
     summary = TaskWatcher.task_summary(
         {"kind": "source", "task_id": "t"},
-        {"id": "t", "source_id": "s", "work": "shots", "status": "complete", "result": {"big": "x" * 10000},
-         "publication": {"status": "queued", "task_ids": ["p1", "p2"]}, "progress": {}},
+        {
+            "id": "t",
+            "source_id": "s",
+            "work": "shots",
+            "status": "complete",
+            "result": {"big": "x" * 10000},
+            "publication": {"status": "queued", "task_ids": ["p1", "p2"]},
+            "progress": {},
+        },
     )
     assert "result" not in summary and summary["work"] == "shots"
     text = TaskWatcher.followup_text(summary)
     assert "素材任务 t（素材 s，工作 分镜）已结束，状态：complete" in text
     assert "已链式创建发布任务：p1, p2" in text and "最后进度" not in text
     assert TaskWatcher.followup_text({"job_id": "j", "build_id": "b", "status": "cancelled"}).startswith(
-        "[系统通知] 构建 b（任务 j）已结束，状态：cancelled")
+        "[系统通知] 构建 b（任务 j）已结束，状态：cancelled"
+    )

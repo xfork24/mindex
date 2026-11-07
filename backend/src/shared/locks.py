@@ -46,16 +46,31 @@ if sys.platform == "win32":  # pragma: win32 cover
     _ERROR_NOT_LOCKED = 158
 
     class _OVERLAPPED(ctypes.Structure):
-        _fields_ = (("Internal", wintypes.LPVOID), ("InternalHigh", wintypes.LPVOID),
-                    ("Offset", wintypes.DWORD), ("OffsetHigh", wintypes.DWORD),
-                    ("hEvent", wintypes.HANDLE))
+        _fields_ = (
+            ("Internal", wintypes.LPVOID),
+            ("InternalHigh", wintypes.LPVOID),
+            ("Offset", wintypes.DWORD),
+            ("OffsetHigh", wintypes.DWORD),
+            ("hEvent", wintypes.HANDLE),
+        )
 
     _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    _kernel32.LockFileEx.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
-                                     wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(_OVERLAPPED)]
+    _kernel32.LockFileEx.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.POINTER(_OVERLAPPED),
+    ]
     _kernel32.LockFileEx.restype = wintypes.BOOL
-    _kernel32.UnlockFileEx.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
-                                       wintypes.DWORD, ctypes.POINTER(_OVERLAPPED)]
+    _kernel32.UnlockFileEx.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.POINTER(_OVERLAPPED),
+    ]
     _kernel32.UnlockFileEx.restype = wintypes.BOOL
 
     def _lock_region(handle, exclusive: bool) -> None:
@@ -65,8 +80,9 @@ if sys.platform == "win32":  # pragma: win32 cover
         """
         overlapped = _OVERLAPPED()
         flags = _LOCKFILE_FAIL_IMMEDIATELY | (_LOCKFILE_EXCLUSIVE_LOCK if exclusive else 0)
-        if _kernel32.LockFileEx(msvcrt.get_osfhandle(handle.fileno()), flags, 0, 1, 0,
-                                ctypes.byref(overlapped)):
+        if _kernel32.LockFileEx(
+            msvcrt.get_osfhandle(handle.fileno()), flags, 0, 1, 0, ctypes.byref(overlapped)
+        ):
             return
         error = ctypes.get_last_error()
         if error == _ERROR_LOCK_VIOLATION:
@@ -75,8 +91,9 @@ if sys.platform == "win32":  # pragma: win32 cover
 
     def _unlock_region(handle) -> None:
         overlapped = _OVERLAPPED()
-        if not _kernel32.UnlockFileEx(msvcrt.get_osfhandle(handle.fileno()), 0, 1, 0,
-                                      ctypes.byref(overlapped)):
+        if not _kernel32.UnlockFileEx(
+            msvcrt.get_osfhandle(handle.fileno()), 0, 1, 0, ctypes.byref(overlapped)
+        ):
             if (error := ctypes.get_last_error()) != _ERROR_NOT_LOCKED:
                 raise ctypes.WinError(error)
 else:
@@ -87,6 +104,7 @@ else:
 
     def _unlock_region(handle) -> None:
         fcntl.flock(handle, fcntl.LOCK_UN)
+
 
 ORDER = ("pipeline", "index-write", "library", "register", "studio", "topics")
 
@@ -181,8 +199,13 @@ def check_order(names) -> None:
         raise ValueError(f"加锁顺序错误：{' → '.join(names)}；必须遵循 {' → '.join(ORDER)}")
 
 
-def acquire_ordered(root, names, *, exclusive: bool | dict[str, bool] | None = None,
-                    timeout: float | dict[str, float | None] | None = 0) -> ExitStack:
+def acquire_ordered(
+    root,
+    names,
+    *,
+    exclusive: bool | dict[str, bool] | None = None,
+    timeout: float | dict[str, float | None] | None = 0,
+) -> ExitStack:
     """按规范顺序获取多把锁，返回持有全部锁的 ``ExitStack``（``close()`` 或 ``with`` 结束时逆序释放）。
 
     ``exclusive``、``timeout`` 可为统一取值或按名称的字典（字典未列出的名称：``exclusive`` 用 ``named``

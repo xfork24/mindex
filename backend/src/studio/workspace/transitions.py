@@ -1,12 +1,14 @@
 """分镜转场：镜内转场（enter/leave，作用于单镜画面、不改时长）与重叠转场（next，本镜与下一镜交叉过渡）。
 
-重叠转场靠"尾部余量"实现：声明了 ``next`` 的分镜在 render 阶段多渲染 ``duration`` 秒画面（素材类优先从源继续取，
+重叠转场靠"尾部余量"实现：声明了 ``next`` 的分镜在 render 阶段多渲染 ``duration``
+秒画面（素材类优先从源继续取，
 不够时冻结末帧），compose 用 xfade 吃掉这段余量，所以成片总帧数、配音、字幕与背景音乐时间线都与硬切完全相同。
 过渡从切点开始：下一镜的配音与字幕照常在切点开始，画面在下一镜开头的 ``duration`` 秒内由本镜余量过渡到下一镜。
 
 生效规则（``effective``）：
 - 最后一镜的 ``next`` 没有下一镜可过渡，忽略；
-- 本镜有生效的 ``next`` 时，本镜的 ``leave`` 被重叠转场取代；上一镜有生效的 ``next`` 时，本镜的 ``enter`` 同样被取代；
+- 本镜有生效的 ``next`` 时，本镜的 ``leave`` 被重叠转场取代；上一镜有生效的 ``next`` 时，本镜的 ``enter``
+同样被取代；
 - 镜内转场时长截到镜头时长的一半以内（执行时按实际配音时长截断并记录提示）。
 """
 
@@ -72,7 +74,9 @@ def handle_seconds(w, p, sid) -> float:
 
 def overlaps(w, p) -> list[list]:
     """compose 签名里的重叠转场：``[[分镜, {kind, duration}], ...]``；没有时为空。"""
-    return [[sid, found["next"]] for sid in ordered_shots(w, p) if (found := effective(w, p, sid)).get("next")]
+    return [
+        [sid, found["next"]] for sid in ordered_shots(w, p) if (found := effective(w, p, sid)).get("next")
+    ]
 
 
 def clamp_edges(found: dict, seconds: float) -> tuple[dict | None, dict | None, list[str]]:
@@ -85,8 +89,10 @@ def clamp_edges(found: dict, seconds: float) -> tuple[dict | None, dict | None, 
             continue
         limit = seconds / 2
         if edge["duration"] > limit:
-            notes.append(f"{'入场' if side == 'enter' else '出场'}转场 {edge['duration']:g} 秒超过镜头时长的一半，"
-                         f"已截到 {limit:.2f} 秒")
+            notes.append(
+                f"{'入场' if side == 'enter' else '出场'}转场 {edge['duration']:g} 秒超过镜头时长的一半，"
+                f"已截到 {limit:.2f} 秒"
+            )
             edge = {**edge, "duration": round(limit, 3)}
         edges[side] = edge
     return edges.get("enter"), edges.get("leave"), notes

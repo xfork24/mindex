@@ -8,11 +8,11 @@ from pathlib import Path
 import pytest
 import typer
 
-from mindex.agent.mcp_server import exported
-from mindex.agent.tools import build_registry
-from mindex.api import create_app
-from mindex.cli_topics import app as topics_app
-from mindex.topics.capabilities import CAPABILITIES
+from agent.mcp_server import exported
+from agent.tools import build_registry
+from api import create_app
+from cli.topics import app as topics_app
+from topics.capabilities import CAPABILITIES
 
 FRONTEND = Path(__file__).resolve().parents[1] / "frontend" / "src"
 REGISTRY = build_registry()
@@ -20,7 +20,7 @@ REGISTRY = build_registry()
 
 @pytest.fixture(scope="module")
 def routes(tmp_path_factory):
-    from mindex.shared.config import Config
+    from shared.config import Config
 
     app = create_app(Config(data_dir=tmp_path_factory.mktemp("parity") / "data"))
 
@@ -32,7 +32,9 @@ def routes(tmp_path_factory):
             else:
                 yield route
 
-    return {(method, route.path) for route in flat(app.routes) for method in getattr(route, "methods", None) or ()}
+    return {
+        (method, route.path) for route in flat(app.routes) for method in getattr(route, "methods", None) or ()
+    }
 
 
 def cli_commands() -> set[str]:
@@ -70,7 +72,9 @@ def test_every_capability_has_all_entries(capability, routes):
         assert spec.domain == "topics" or name.endswith("job_profile"), name
         assert name in mcp_names, f"{capability.label}：工具 {name} 未导出给 MCP"
     html = (FRONTEND / capability.page_file).read_text(encoding="utf-8")
-    assert f'data-capability="{capability.page}"' in html, f"{capability.label}：页面缺少区块 {capability.page}"
+    assert f'data-capability="{capability.page}"' in html, (
+        f"{capability.label}：页面缺少区块 {capability.page}"
+    )
 
 
 def test_all_topics_tools_are_registered_capabilities():

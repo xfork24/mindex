@@ -7,7 +7,7 @@ import re
 from datetime import datetime
 from uuid import uuid4
 
-from mindex.admin.curation import EntityNotFound
+from admin.curation import EntityNotFound
 
 # 各实体 ID：前缀 + 12 位十六进制，便于在日志与对话中区分（tp 档案、ts 数据源、ti 条目、tc 卡片、tg 缺口）。
 ID_PATTERN = r"^t[psicg]_[a-f0-9]{12}$"

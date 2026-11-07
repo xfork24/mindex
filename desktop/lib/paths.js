@@ -23,11 +23,18 @@ function layout({ packaged, resourcesPath, userData, logs, platform = process.pl
     userData,
     logs,
     stateFile: path.join(userData, "desktop-state.json"),
-    template: packaged ? path.join(resourcesPath, "config.template.yaml") : path.join(DESKTOP_DIR, "config.template.yaml"),
-    backendExecutable: packaged ? path.join(resourcesPath, "backend", binaryName("mindex", platform))
+    template: packaged
+      ? path.join(resourcesPath, "config.template.yaml")
+      : path.join(DESKTOP_DIR, "config.template.yaml"),
+    backendExecutable: packaged
+      ? path.join(resourcesPath, "backend", binaryName("mindex", platform))
       : existing(path.join(resources, "backend", binaryName("mindex", platform))),
-    ffmpeg: existing(path.join(resources, packaged ? "bin" : "ffmpeg/bin", binaryName("ffmpeg", platform))),
-    ffprobe: existing(path.join(resources, packaged ? "bin" : "ffmpeg/bin", binaryName("ffprobe", platform))),
+    ffmpeg: existing(
+      path.join(resources, packaged ? "bin" : "ffmpeg/bin", binaryName("ffmpeg", platform)),
+    ),
+    ffprobe: existing(
+      path.join(resources, packaged ? "bin" : "ffmpeg/bin", binaryName("ffprobe", platform)),
+    ),
     fonts: existing(path.join(resources, "fonts")),
     browsers: path.join(userData, "browsers"),
     pages: path.join(DESKTOP_DIR, "pages"),

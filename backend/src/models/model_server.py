@@ -19,9 +19,9 @@ from filelock import FileLock
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from mindex.shared.config import Config, fingerprint, load_config
-from mindex.shared.media import content_hash, ffmpeg_bin, probe
-from mindex.shared.uploads import save_upload
+from shared.config import Config, fingerprint, load_config
+from shared.media import content_hash, ffmpeg_bin, probe
+from shared.uploads import save_upload
 
 
 class TextBatch(BaseModel):
@@ -173,7 +173,7 @@ class WeMMEngine:
             ]
 
     def image(self, path: Path) -> list[list[float]]:
-        from mindex.shared.images import image_png
+        from shared.images import image_png
 
         png = image_png(path, self.config.video.max_pixels)
         with tempfile.TemporaryDirectory(prefix="wemm-image-") as directory:

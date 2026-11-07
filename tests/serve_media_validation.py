@@ -6,8 +6,8 @@ from pathlib import Path
 
 import uvicorn
 
-from mindex.api import create_app
-from mindex.shared.config import load_config
+from api import create_app
+from shared.config import load_config
 
 
 def main():

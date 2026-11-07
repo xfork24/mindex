@@ -10,11 +10,11 @@ from pathlib import Path
 import httpx
 import pytest
 
-from mindex.shared import work_budget
-from mindex.shared.config import Config
-from mindex.shared.storage import Store
-from mindex.studio import studio
-from mindex.studio.tools.artifacts import Artifact, download
+from shared import work_budget
+from shared.config import Config
+from shared.storage import Store
+from studio import studio
+from studio.tools.artifacts import Artifact, download
 
 
 @pytest.fixture
@@ -59,16 +59,21 @@ def streamed_download(monkeypatch):
 
     class Chunks(httpx.SyncByteStream):
         def __iter__(self):
-            yield payload[:1024 * 1024]
-            yield payload[1024 * 1024:]
+            yield payload[: 1024 * 1024]
+            yield payload[1024 * 1024 :]
 
     original_client = httpx.Client
     transport = httpx.MockTransport(lambda request: httpx.Response(200, stream=Chunks()))
     monkeypatch.setattr(httpx, "Client", lambda **kwargs: original_client(transport=transport, **kwargs))
 
     def fetch(target, *, max_bytes=None):
-        return download(Artifact(url="http://127.0.0.1/artifact"), target,
-                        hosts={"127.0.0.1"}, max_bytes=len(payload) if max_bytes is None else max_bytes, timeout=5)
+        return download(
+            Artifact(url="http://127.0.0.1/artifact"),
+            target,
+            hosts={"127.0.0.1"},
+            max_bytes=len(payload) if max_bytes is None else max_bytes,
+            timeout=5,
+        )
 
     return payload, fetch
 
@@ -100,7 +105,9 @@ def test_budgeted_copy_closes_file_before_atomic_commit(budget_store):
 
 
 @pytest.mark.parametrize("operation", ["download", "copy"])
-def test_failed_commit_preserves_target_and_releases_budget(budget_store, streamed_download, monkeypatch, operation):
+def test_failed_commit_preserves_target_and_releases_budget(
+    budget_store, streamed_download, monkeypatch, operation
+):
     _payload, fetch = streamed_download
     root = budget_store._backend_context.staging.root
     source, target = root / "source.bin", root / "target.bin"

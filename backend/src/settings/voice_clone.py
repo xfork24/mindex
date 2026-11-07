@@ -13,9 +13,9 @@ import json
 import tempfile
 from pathlib import Path
 
-from mindex.models import adapters
-from mindex.models.adapters import ModelError
-from mindex.shared.media import extract_audio
+from models import adapters
+from models.adapters import ModelError
+from shared.media import extract_audio
 
 SAMPLE_MIME = {".wav": "audio/wav", ".mp3": "audio/mpeg", ".m4a": "audio/mp4"}
 
@@ -85,8 +85,9 @@ def qwentts_register(base_url: str, sample: Path, name: str, ref_text: str = "",
     )
 
 
-def aliyun_enroll(base_url: str, api_key: str, audio_url: str, prefix: str, target_model: str, *,
-                  timeout: float) -> str:
+def aliyun_enroll(
+    base_url: str, api_key: str, audio_url: str, prefix: str, target_model: str, *, timeout: float
+) -> str:
     """按公网 URL 提交复刻，返回生成的音色 voice_id（与 target_model 绑定）。"""
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     payload = adapters.request(
@@ -105,7 +106,9 @@ def aliyun_enroll(base_url: str, api_key: str, audio_url: str, prefix: str, targ
         },
     )
     output = payload.get("output") if isinstance(payload, dict) else None
-    voice_id = (output or {}).get("voice_id") or (payload.get("voice_id") if isinstance(payload, dict) else None)
+    voice_id = (output or {}).get("voice_id") or (
+        payload.get("voice_id") if isinstance(payload, dict) else None
+    )
     if not voice_id:
         raise ModelError(
             "阿里声音复刻未返回音色 ID，请在百炼控制台确认结果后改用「录入已有音色」："

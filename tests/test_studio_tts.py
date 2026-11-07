@@ -5,11 +5,12 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from conftest import FixtureSpeaker, FixtureStoryboarder, legacy_job
 
-from mindex.models.adapters import ModelError
-from mindex.shared.media import audio_info
-from mindex.studio import studio, studio_steps
+from conftest import FixtureSpeaker, FixtureStoryboarder, legacy_job
+from models.adapters import ModelError
+from shared.media import audio_info
+from studio import steps as studio_steps
+from studio import studio
 
 
 def test_fixture_speaker_wav_is_probeable(config):

@@ -1,4 +1,5 @@
 """把执行归属绑定到业务事务，旧 attempt/租约不能写回共享状态。"""
+
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
@@ -7,7 +8,7 @@ from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, field
 from threading import RLock
 
-from mindex.shared.db.locks_pg import LeaseLost
+from shared.db.locks_pg import LeaseLost
 
 _ATTEMPT = ContextVar("mindex_attempt", default=None)
 _LEASES = ContextVar("mindex_leases", default=())
@@ -34,7 +35,8 @@ class Attempt:
         if self._closed or self.lost.is_set():
             raise LeaseLost("任务租约已失联，停止提交")
         if self.cancelled.is_set():
-            from mindex.shared.task_cancel import TaskCancelled
+            from shared.task_cancel import TaskCancelled
+
             raise TaskCancelled()
 
     def retain(self, key, context):
@@ -45,8 +47,9 @@ class Attempt:
                 previous = {id(lease) for lease in _LEASES.get()}
                 self._held_values[key] = self._contexts.enter_context(context)
                 self._held.add(key)
-                self._publication_leases.update((id(lease), lease) for lease in _LEASES.get()
-                                                if id(lease) not in previous)
+                self._publication_leases.update(
+                    (id(lease), lease) for lease in _LEASES.get() if id(lease) not in previous
+                )
             return self._held_values[key]
 
     def defer(self, key, publish):
@@ -81,7 +84,7 @@ class Attempt:
 @contextmanager
 def publication_scope(store, *, config=None, check=None, only_attempt=False):
     """持久任务把索引锁交给当前 attempt；本地/inline 保持原临界区。"""
-    from mindex.shared.processing_lock import index_write_lock
+    from shared.processing_lock import index_write_lock
 
     attempt = current_attempt()
     if only_attempt and (not store.pg or attempt is None):
@@ -89,7 +92,7 @@ def publication_scope(store, *, config=None, check=None, only_attempt=False):
         return
     lock = index_write_lock(store.root, config=config, check=check) if config is not None else None
     if lock is None:
-        from mindex.shared import lock_backend
+        from shared import lock_backend
 
         lock = lock_backend.named(store, "index-write", exclusive=True, timeout=None)
     if store.pg and attempt is not None:
@@ -162,19 +165,22 @@ def verify_transaction(connection, backend, *, execution=None):
             "SELECT cancel_requested FROM task_queue WHERE library_id=%s AND id=%s AND owner=%s"
             " AND attempt_id=%s AND fencing_token=%s AND status='running'"
             " AND expires_at >= clock_timestamp() FOR SHARE",
-            (attempt.library_id, task.id, task.owner, task.attempt_id, task.fencing_token)).fetchone()
+            (attempt.library_id, task.id, task.owner, task.attempt_id, task.fencing_token),
+        ).fetchone()
         if row is None:
             attempt.lost.set()
             raise LeaseLost("任务 attempt 已过期或易主，拒绝旧 worker 提交")
         if row[0]:
             attempt.cancelled.set()
             attempt.check()
-        from mindex.shared.db.scaling_schema import ALL_LEDGER_TABLES
+        from shared.db.scaling_schema import ALL_LEDGER_TABLES
 
         if task.ledger_table in ALL_LEDGER_TABLES and task.ledger_id:
             bound = connection.execute(
                 f"SELECT 1 FROM {task.ledger_table} WHERE id=%s AND queue_attempt_id=%s"
-                " AND queue_fencing_token=%s", (task.ledger_id, task.attempt_id, task.fencing_token)).fetchone()
+                " AND queue_fencing_token=%s",
+                (task.ledger_id, task.attempt_id, task.fencing_token),
+            ).fetchone()
             if bound is None:
                 attempt.lost.set()
                 raise LeaseLost("账本当前 attempt 与执行令牌不一致，拒绝提交")
@@ -184,6 +190,7 @@ def verify_transaction(connection, backend, *, execution=None):
         row = connection.execute(
             "SELECT 1 FROM lock_holders WHERE library_id=%s AND name=%s AND owner_id=%s"
             " AND fencing_token=%s AND expires_at >= clock_timestamp() FOR SHARE",
-            (lease.provider.library_id, lease.name, lease.owner_id, lease.token)).fetchone()
+            (lease.provider.library_id, lease.name, lease.owner_id, lease.token),
+        ).fetchone()
         if row is None:
             raise LeaseLost(f"资源租约已失效：{lease.name}，拒绝提交")

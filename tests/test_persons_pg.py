@@ -12,8 +12,8 @@ import os
 
 import pytest
 
-from mindex.persons.persons import Persons
-from mindex.shared.storage import Store, dumps
+from persons.persons import Persons
+from shared.storage import Store, dumps
 
 pytestmark = pytest.mark.requires_postgres
 
@@ -26,9 +26,9 @@ def stores(tmp_path, monkeypatch):
         pytest.skip("需要 MINDEX_TEST_POSTGRES_DSN")
     import psycopg
 
-    from mindex.shared.config import Config
-    from mindex.shared.db.migrate_pg import migrate_pg
-    from mindex.shared.storage import PgStore
+    from shared.config import Config
+    from shared.db.migrate_pg import migrate_pg
+    from shared.storage import PgStore
 
     monkeypatch.setenv("MINDEX_DATABASE_DSN", DSN)
     with psycopg.connect(DSN, autocommit=True) as conn:
@@ -48,19 +48,33 @@ def _seed(store):
         store.execute(
             "INSERT INTO segments(id,source_id,kind,start,end,path,thumbnail,generation,reason) "
             "VALUES(?,?,?,?,?,?,?,?,?)",
-            (shot, "s1", "shot", start, end, f"clips/{shot}.mp4", f"{shot}.jpg", "g", "r"))
-    store.execute("INSERT INTO person_entities(id,kind,data) VALUES('w1','work',?)",
-                  (dumps({"id": "w1", "name": "作品", "kind": "work"}),))
-    store.execute("INSERT INTO person_entities(id,kind,data) VALUES('r1','role',?)",
-                  (dumps({"id": "r1", "name": "主角", "kind": "role",
-                          "work_ids": ["w1"], "actor_ids": ["a1"]}),))
-    store.execute("INSERT INTO person_entities(id,kind,data) VALUES('a1','actor',?)",
-                  (dumps({"id": "a1", "name": "演员", "kind": "actor"}),))
+            (shot, "s1", "shot", start, end, f"clips/{shot}.mp4", f"{shot}.jpg", "g", "r"),
+        )
+    store.execute(
+        "INSERT INTO person_entities(id,kind,data) VALUES('w1','work',?)",
+        (dumps({"id": "w1", "name": "作品", "kind": "work"}),),
+    )
+    store.execute(
+        "INSERT INTO person_entities(id,kind,data) VALUES('r1','role',?)",
+        (dumps({"id": "r1", "name": "主角", "kind": "role", "work_ids": ["w1"], "actor_ids": ["a1"]}),),
+    )
+    store.execute(
+        "INSERT INTO person_entities(id,kind,data) VALUES('a1','actor',?)",
+        (dumps({"id": "a1", "name": "演员", "kind": "actor"}),),
+    )
     store.execute("INSERT INTO person_sources(source_id,work_id) VALUES('s1','w1')")
     evidence = {
-        "e1": ("shot1", "accepted", {"confirmation": "shot_review", "score": 0.9,
-                                     "reviewed_at": "2026-01-01T00:00:00", "shot_excluded": False,
-                                     "image_path": "persons/frames/s1/e1.jpg"}),
+        "e1": (
+            "shot1",
+            "accepted",
+            {
+                "confirmation": "shot_review",
+                "score": 0.9,
+                "reviewed_at": "2026-01-01T00:00:00",
+                "shot_excluded": False,
+                "image_path": "persons/frames/s1/e1.jpg",
+            },
+        ),
         "e2": ("shot2", "candidate", {"score": 0.5}),
         "e3": ("shot3", "rejected", {"score": 0.2, "reviewed": True, "shot_excluded": True}),
     }
@@ -68,15 +82,30 @@ def _seed(store):
         store.execute(
             "INSERT INTO person_evidence(id,source_id,shot_id,actor_id,role_id,start,end,status,data) "
             "VALUES(?,?,?,?,?,?,?,?,?)",
-            (evidence_id, "s1", shot, "a1", "r1", 0.0, 1.0, status, dumps({"id": evidence_id, **data})))
-    store.execute("INSERT INTO person_coverage VALUES('s1','cov1',?)",
-                  (dumps({"shot_id": "shot3", "removed_confirmation": True}),))
+            (evidence_id, "s1", shot, "a1", "r1", 0.0, 1.0, status, dumps({"id": evidence_id, **data})),
+        )
+    store.execute(
+        "INSERT INTO person_coverage VALUES('s1','cov1',?)",
+        (dumps({"shot_id": "shot3", "removed_confirmation": True}),),
+    )
     version = {
-        "entities": [{"id": "r1", "name": "主角", "kind": "role", "work_ids": ["w1"], "actor_ids": ["a1"]},
-                     {"id": "a1", "name": "演员", "kind": "actor"}],
-        "evidence": [{"id": "e1", "source_id": "s1", "shot_id": "shot1", "actor_id": "a1",
-                      "role_id": "r1", "start": 0, "end": 1, "status": "accepted",
-                      "data": {"score": 0.9, "image_path": "persons/frames/s1/e1.jpg"}}],
+        "entities": [
+            {"id": "r1", "name": "主角", "kind": "role", "work_ids": ["w1"], "actor_ids": ["a1"]},
+            {"id": "a1", "name": "演员", "kind": "actor"},
+        ],
+        "evidence": [
+            {
+                "id": "e1",
+                "source_id": "s1",
+                "shot_id": "shot1",
+                "actor_id": "a1",
+                "role_id": "r1",
+                "start": 0,
+                "end": 1,
+                "status": "accepted",
+                "data": {"score": 0.9, "image_path": "persons/frames/s1/e1.jpg"},
+            }
+        ],
         "coverage": [],
         "format": 2,
     }
@@ -105,16 +134,21 @@ def test_released_entities_and_version_images_match(stores):
     sqlite, postgres = stores
     sqlite_release = Persons(sqlite).release_for("i1", pinned=True)
     pg_release = Persons(postgres).release_for("i1", pinned=True)
-    assert (Persons(sqlite).published_entities(sqlite_release)
-            == Persons(postgres).published_entities(pg_release))
-    assert (Persons(sqlite)._version_image_index("v1")
-            == Persons(postgres)._version_image_index("v1"))
+    assert Persons(sqlite).published_entities(sqlite_release) == Persons(postgres).published_entities(
+        pg_release
+    )
+    assert Persons(sqlite)._version_image_index("v1") == Persons(postgres)._version_image_index("v1")
 
 
-@pytest.mark.parametrize("sources,identifiers,expected", [
-    (["s1"], ["a1"], ["e1"]), (["s1"], ["r1"], ["e1"]),
-    (["other-source"], ["a1"], []), (["s1"], ["other-person"], []),
-])
+@pytest.mark.parametrize(
+    "sources,identifiers,expected",
+    [
+        (["s1"], ["a1"], ["e1"]),
+        (["s1"], ["r1"], ["e1"]),
+        (["other-source"], ["a1"], []),
+        (["s1"], ["other-person"], []),
+    ],
+)
 def test_query_evidence_projection_respects_sources_and_identities(stores, sources, identifiers, expected):
     _, pg = stores
     catalogue = Persons(pg)

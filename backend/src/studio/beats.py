@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from mindex.shared.media import command, ffmpeg_bin
+from shared.media import command, ffmpeg_bin
 
 # 改动分析算法或参数时递增：曲库记录分析版本，过期的分析会提示重新分析。
 ANALYSIS_VERSION = 1
@@ -24,8 +24,26 @@ MAX_SECONDS = 600
 
 
 def decode(path: Path, *, seconds: float = MAX_SECONDS) -> np.ndarray:
-    raw = command([ffmpeg_bin(), "-v", "error", "-i", str(path), "-t", f"{seconds:g}", "-vn", "-ac", "1", "-ar",
-                   str(RATE), "-f", "f32le", "-"], timeout=300)
+    raw = command(
+        [
+            ffmpeg_bin(),
+            "-v",
+            "error",
+            "-i",
+            str(path),
+            "-t",
+            f"{seconds:g}",
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            str(RATE),
+            "-f",
+            "f32le",
+            "-",
+        ],
+        timeout=300,
+    )
     return np.frombuffer(raw, dtype=np.float32).copy()
 
 
@@ -51,7 +69,7 @@ def estimate_bpm(envelope: np.ndarray) -> float:
     centered = envelope - envelope.mean()
     size = 1 << (2 * centered.size - 1).bit_length()
     spectrum = np.fft.rfft(centered, size)
-    correlation = np.fft.irfft(spectrum * np.conj(spectrum), size)[:centered.size]
+    correlation = np.fft.irfft(spectrum * np.conj(spectrum), size)[: centered.size]
     lags = np.arange(correlation.size)
     valid = (lags >= frame_rate * 60 / MAX_BPM) & (lags <= frame_rate * 60 / MIN_BPM)
     if not valid.any() or correlation[0] <= 0:
@@ -99,7 +117,10 @@ def track_beats(envelope: np.ndarray, bpm: float, tightness: float = 100.0) -> n
 
 
 def analyze(path: Path) -> dict:
-    """返回 ``{bpm, beats, duration, energy, brightness, analysis_version}``；节拍时间单位为秒（保留 3 位）。"""
+    (
+        """返回 ``{bpm, beats, duration, energy, brightness, analysis_version}``；节拍时间单位为秒（保留 3 """
+        """位）。"""
+    )
     samples = decode(path)
     duration = samples.size / RATE
     if duration < 1:
@@ -107,10 +128,16 @@ def analyze(path: Path) -> dict:
     envelope = onset_envelope(samples)
     bpm = estimate_bpm(envelope)
     beats = track_beats(envelope, bpm) * HOP / RATE
-    rms = float(np.sqrt(np.mean(samples ** 2))) if samples.size else 0.0
+    rms = float(np.sqrt(np.mean(samples**2))) if samples.size else 0.0
     energy = round(min(1.0, max(0.0, (20 * math.log10(rms + 1e-9) + 40) / 34)), 3)  # -40 dBFS→0，-6 dBFS→1
     spectrum = np.abs(np.fft.rfft(samples[: RATE * 60] * 1.0))
     freqs = np.fft.rfftfreq(min(samples.size, RATE * 60), 1 / RATE)
     centroid = float((spectrum * freqs).sum() / spectrum.sum()) if spectrum.sum() > 0 else 0.0
-    return {"bpm": round(bpm, 2), "beats": [round(float(b), 3) for b in beats], "duration": round(duration, 3),
-            "energy": energy, "brightness": round(min(1.0, centroid / 4000), 3), "analysis_version": ANALYSIS_VERSION}
+    return {
+        "bpm": round(bpm, 2),
+        "beats": [round(float(b), 3) for b in beats],
+        "duration": round(duration, 3),
+        "energy": energy,
+        "brightness": round(min(1.0, centroid / 4000), 3),
+        "analysis_version": ANALYSIS_VERSION,
+    }

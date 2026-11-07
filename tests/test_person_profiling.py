@@ -3,11 +3,11 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from mindex.api import create_app
-from mindex.persons import profiling
-from mindex.persons.person_models import Entity
-from mindex.persons.persons import Persons
-from mindex.shared.storage import Store, dumps
+from api import create_app
+from persons import profiling
+from persons.person_models import Entity
+from persons.persons import Persons
+from shared.storage import Store, dumps
 
 
 @pytest.fixture
@@ -30,7 +30,18 @@ def seeded(config):
     for n in range(2):
         store.execute(
             "INSERT INTO person_evidence VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (f"e{n}", "source", f"shot{n}", None, None, None, float(n), n + 0.4, "candidate", dumps({"work_id": work})),
+            (
+                f"e{n}",
+                "source",
+                f"shot{n}",
+                None,
+                None,
+                None,
+                float(n),
+                n + 0.4,
+                "candidate",
+                dumps({"work_id": work}),
+            ),
         )
     return config
 
@@ -38,7 +49,10 @@ def seeded(config):
 def test_profiling_disabled_adds_nothing(seeded, monkeypatch):
     monkeypatch.delenv(profiling.ENV_FLAG, raising=False)
     client = TestClient(create_app(seeded))
-    for url in ("/api/persons/review/shots?source_id=source", "/api/persons/review/shots/shot0?source_id=source"):
+    for url in (
+        "/api/persons/review/shots?source_id=source",
+        "/api/persons/review/shots/shot0?source_id=source",
+    ):
         response = client.get(url)
         assert response.status_code == 200
         assert "server-timing" not in response.headers
@@ -49,9 +63,17 @@ def test_profiling_enabled_reports_stages_on_every_path(seeded, monkeypatch):
     client = TestClient(create_app(seeded))
     response = client.get("/api/persons/review/shots?source_id=source")
     timing = response.headers["server-timing"]
-    for name in ("filters_sql", "scope_total_sql", "page_sql", "evidence_sql", "json_decode", "total", "middleware"):
+    for name in (
+        "filters_sql",
+        "scope_total_sql",
+        "page_sql",
+        "evidence_sql",
+        "json_decode",
+        "total",
+        "middleware",
+    ):
         assert name + ";dur=" in timing
-    assert 'evidence_sql;dur=' in timing and 'desc="n=2"' in timing  # 两个分镜，各一次证据查询
+    assert "evidence_sql;dur=" in timing and 'desc="n=2"' in timing  # 两个分镜，各一次证据查询
     assert response.json()["total"] == 2
 
     single = client.get("/api/persons/review/shots/shot0?source_id=source")

@@ -1,71 +1,285 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-  <script src="/assets/shared/i18n-boot.js?v=bf7e8b3c7c"></script>
-  <script src="/assets/shared/theme.js?v=ba2154c954"></script>
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title data-i18n="[[0,&quot;ui.templates_page_title&quot;]]">Mindex · 文案模板</title><link rel="icon" href="/assets/shared/favicon.svg?v=8d7f9242de" type="image/svg+xml">
-  <link rel="stylesheet" href="/assets/shared/style.css?v=87b28bc99b"><link rel="stylesheet" href="/assets/shared/agent-panel.css?v=4284eb0eb0"><link rel="stylesheet" href="/assets/studio/studio.css?v=c83fdc13f9"><link rel="stylesheet" href="/assets/studio/templates.css?v=0f1410c87d">
-  <script src="/assets/shared/messages.js?v=6a8ef772ae" defer></script><script src="/assets/shared/i18n.js?v=e981ac227d" defer></script><script src="/assets/shared/api.js?v=f9ecd754db" defer></script><script src="/assets/shared/control-layout.js?v=8295190463" defer></script><script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script><script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script><script src="/assets/shared/agent-markdown.js?v=8f0018e90a" defer></script><script src="/assets/shared/agent-panel.js?v=2e639588c0" defer></script><script src="/assets/shared/feedback.js?v=4630718c9e" defer></script><script src="/assets/studio/studio-template-text.js?v=312f179827" defer></script><script src="/assets/studio/templates.js?v=0c1b511289" defer></script>
-</head>
-<body class="studio studio-templates">
-  <header><a class="brand" href="/">m<span>index</span><i></i></a><nav class="page-nav" aria-label="页面导航" data-i18n-aria-label="ui.main_navigation"><a class="quiet nav-link" href="/search" data-i18n="[[0,&quot;ui.c9b1e68e3537&quot;]]">视频检索</a><a class="quiet nav-link" href="/" aria-current="page" data-i18n="[[0,&quot;ui.b6fc3cef0bd0&quot;]]">创作</a><a class="quiet nav-link" href="/admin" data-i18n="[[0,&quot;ui.f517302fec0d&quot;]]">素材管理</a><a class="quiet nav-link" href="/persons" data-i18n="[[0,&quot;ui.0973ef28d791&quot;]]">人物库</a><a class="quiet nav-link" href="/settings" data-i18n="[[0,&quot;ui.7debf9cb0372&quot;]]">设置</a></nav><div class="header-actions"><button id="reload" class="quiet" type="button" data-i18n="[[0,&quot;ui.templates_reload&quot;]]" data-i18n-aria-label="ui.templates_reload">刷新模板</button><button type="button" class="quiet theme-toggle" data-theme-toggle></button><button type="button" class="quiet language-switch" data-language-toggle aria-label="中文 / English"><span data-language="zh" lang="zh-CN">文</span><span class="language-divider" aria-hidden="true">/</span><span data-language="en" lang="en">En</span></button></div></header>
-  <main class="studio-main">
-    <section class="studio-intro"><h1 data-i18n="[[0,&quot;ui.templates_heading&quot;]]">文案模板</h1><p data-i18n="[[0,&quot;ui.templates_intro&quot;]]">管理文案模板的提示词与字数上限，用示例大纲试写验证效果。</p></section>
-    <nav class="studio-tabs" aria-label="创作分区" data-i18n-aria-label="ui.studio_tabs_aria"><a class="studio-tab" id="studio-jobs-tab" href="/" data-i18n="[[0,&quot;ui.studio_tab_jobs&quot;]]">创作任务</a><a class="studio-tab" id="studio-topics-tab" href="/studio/topics" data-i18n="[[0,&quot;ui.studio_tab_topics&quot;]]">选题挖掘</a><a class="studio-tab" href="/studio/templates" aria-current="page" data-i18n="[[0,&quot;ui.studio_tab_templates&quot;]]">文案模板</a><a class="studio-tab" id="studio-brands-tab" href="/studio/brands" data-i18n="[[0,&quot;ui.studio_tab_brands&quot;]]">风格模板</a><a class="studio-tab" href="/studio/delivery-templates" data-i18n="[[0,&quot;ui.studio_tab_delivery_templates&quot;]]">交付模板</a></nav>
-    <div id="notice" class="notice" role="status" aria-live="polite"></div>
-    <div class="workspace">
-      <aside class="job-panel template-panel" aria-label="文案模板列表" data-i18n-aria-label="ui.template_list_aria">
-        <label for="template-filter" data-i18n="[[0,&quot;ui.templates_filter_label&quot;]]">搜索模板</label>
-        <input id="template-filter" type="search" autocomplete="off" placeholder="名称、分类或提示词" data-i18n-placeholder="ui.templates_filter_placeholder">
-        <div id="template-list"></div>
-      </aside>
-      <section class="work-panel" aria-label="模板详情" data-i18n-aria-label="ui.templates_detail_aria">
-        <div id="template-empty" class="empty"><h2 data-i18n="[[0,&quot;ui.templates_select_title&quot;]]">选择一个文案模板</h2><p data-i18n="[[0,&quot;ui.templates_select_hint&quot;]]">在左侧选择模板，查看提示词、修改并试写效果。</p></div>
-        <div id="template-view" hidden>
-          <div class="template-card">
-            <div class="section-head template-title-row">
-              <h2 id="template-title"></h2><span id="template-tags" class="template-tags"></span>
-              <div class="head-actions"><button id="template-copy" class="quiet" type="button" data-i18n="[[0,&quot;ui.templates_copy_action&quot;]]">复制为自定义模板</button><button id="template-delete" class="quiet danger" type="button" data-i18n="[[0,&quot;ui.template_delete&quot;]]">删除</button></div>
-            </div>
-            <p id="template-description" class="muted"></p>
-            <p id="template-note" class="template-note"></p>
-            <form id="template-form" class="template-form" novalidate>
-              <div class="template-fields">
-                <label class="form-field" data-i18n="[[0,&quot;ui.template_field_name&quot;]]">名称<input id="tf-name" maxlength="40" required></label>
-                <label class="form-field" data-i18n="[[0,&quot;ui.template_field_category&quot;]]">分类<input id="tf-category" maxlength="40" required></label>
-                <label class="form-field" data-i18n="[[0,&quot;ui.template_field_kind&quot;]]">类型<select id="tf-kind"><option value="outline" data-i18n="[[0,&quot;ui.template_kind_outline&quot;]]">按大纲写</option><option value="rewrite" data-i18n="[[0,&quot;ui.template_kind_rewrite&quot;]]">改写参考文稿</option></select></label>
-                <label class="form-field" data-i18n="[[0,&quot;ui.template_field_max_chars&quot;]]">字数上限（留空跟随系统上限）<input id="tf-max-chars" type="number" min="50" max="20000" step="1" inputmode="numeric"></label>
-              </div>
-              <label class="form-field" data-i18n="[[0,&quot;ui.template_field_description&quot;]]">说明<input id="tf-description" maxlength="200"></label>
-              <label class="form-field" data-i18n="[[0,&quot;ui.template_field_instructions&quot;]]">提示词<textarea id="tf-instructions" rows="18" maxlength="6000" required aria-describedby="tf-instructions-count"></textarea></label>
-              <div class="template-form-foot">
-                <span id="tf-instructions-count" class="muted"></span>
-                <span id="template-dirty" class="warn-text" hidden data-i18n="[[0,&quot;ui.templates_unsaved&quot;]]">有未保存的修改</span>
-                <span class="template-form-actions"><button id="template-revert" class="quiet" type="button" data-i18n="[[0,&quot;ui.templates_revert&quot;]]">放弃修改</button><button id="template-save" class="submit" type="submit" data-i18n="[[0,&quot;ui.template_save&quot;]]">保存模板</button></span>
-              </div>
-              <p id="template-error" class="warn-text" role="alert" hidden></p>
-            </form>
-            <p id="template-meta" class="muted template-meta"></p>
-          </div>
-          <section id="template-preview" class="template-card template-preview" aria-labelledby="preview-title">
-            <div class="section-head"><h2 id="preview-title" data-i18n="[[0,&quot;ui.templates_preview_title&quot;]]">试写效果</h2></div>
-            <p class="muted" data-i18n="[[0,&quot;ui.templates_preview_hint&quot;]]">使用上方表单中的提示词、类型与字数上限（含未保存的修改）调用文案模型生成一次：结果不保存，也不影响任何任务，也不附带素材摘要。</p>
-            <div class="preview-inputs">
-              <label class="form-field" data-i18n="[[0,&quot;ui.templates_preview_outline&quot;]]">示例大纲<textarea id="preview-outline" rows="6" maxlength="2000" placeholder="例如：介绍新加坡滨海湾公园的白天和夜景，300 字左右，最后总结一下。" data-i18n-placeholder="ui.templates_preview_outline_placeholder"></textarea></label>
-              <label class="form-field" data-i18n="[[0,&quot;ui.templates_preview_references&quot;]]">参考文稿（可选；改写类模板必填。多份之间用单独一行 --- 分隔）<textarea id="preview-references" rows="6" placeholder="粘贴访谈稿、谈话文稿等" data-i18n-placeholder="ui.templates_preview_references_placeholder"></textarea></label>
-            </div>
-            <div class="preview-actions"><button id="preview-run" class="submit" type="button" data-i18n="[[0,&quot;ui.templates_preview_run&quot;]]">试写文案</button><span id="preview-status" class="muted" role="status" aria-live="polite"></span></div>
-            <p id="preview-error" class="warn-text" role="alert" hidden></p>
-            <div id="preview-result" class="preview-result" hidden>
-              <div class="preview-result-head"><span id="preview-meta" class="muted"></span><button id="preview-copy" class="quiet" type="button" data-i18n="[[0,&quot;ui.templates_preview_copy&quot;]]">复制文案</button></div>
-              <div id="preview-text" class="preview-text" tabindex="0"></div>
-            </div>
-          </section>
-        </div>
+  <head>
+    <script src="/assets/shared/i18n-boot.js?v=6ad8b45125"></script>
+    <script src="/assets/shared/theme.js?v=06b5a45391"></script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title data-i18n='[[0,"ui.templates_page_title"]]'>Mindex · 文案模板</title>
+    <link rel="icon" href="/assets/shared/favicon.svg?v=8d7f9242de" type="image/svg+xml" />
+    <link rel="stylesheet" href="/assets/shared/style.css?v=7303c8f392" />
+    <link rel="stylesheet" href="/assets/shared/agent-panel.css?v=4402a24df2" />
+    <link rel="stylesheet" href="/assets/studio/studio.css?v=b02cf94e3b" />
+    <link rel="stylesheet" href="/assets/studio/templates.css?v=5070e0407e" />
+    <script src="/assets/shared/messages.js?v=6a8ef772ae" defer></script>
+    <script src="/assets/shared/i18n.js?v=71113d017f" defer></script>
+    <script src="/assets/shared/api.js?v=799acf885b" defer></script>
+    <script src="/assets/shared/control-layout.js?v=1278e93f03" defer></script>
+    <script src="/assets/shared/marked.umd.js?v=b82b933440" defer></script>
+    <script src="/assets/shared/purify.min.js?v=cd37898f97" defer></script>
+    <script src="/assets/shared/agent-markdown.js?v=9dd4d8c653" defer></script>
+    <script src="/assets/shared/agent-panel.js?v=11ba8e2e53" defer></script>
+    <script src="/assets/shared/feedback.js?v=a83918f9e5" defer></script>
+    <script src="/assets/studio/studio-template-text.js?v=bcfd3c7d6c" defer></script>
+    <script src="/assets/studio/templates.js?v=52d32c2bdf" defer></script>
+  </head>
+  <body class="studio studio-templates">
+    <header>
+      <a class="brand" href="/">m<span>index</span><i></i></a>
+      <nav class="page-nav" aria-label="页面导航" data-i18n-aria-label="ui.main_navigation">
+        <a class="quiet nav-link" href="/search" data-i18n='[[0,"ui.c9b1e68e3537"]]'>视频检索</a
+        ><a class="quiet nav-link" href="/" aria-current="page" data-i18n='[[0,"ui.b6fc3cef0bd0"]]'
+          >创作</a
+        ><a class="quiet nav-link" href="/admin" data-i18n='[[0,"ui.f517302fec0d"]]'>素材管理</a
+        ><a class="quiet nav-link" href="/persons" data-i18n='[[0,"ui.0973ef28d791"]]'>人物库</a
+        ><a class="quiet nav-link" href="/settings" data-i18n='[[0,"ui.7debf9cb0372"]]'>设置</a>
+      </nav>
+      <div class="header-actions">
+        <button
+          id="reload"
+          class="quiet"
+          type="button"
+          data-i18n='[[0,"ui.templates_reload"]]'
+          data-i18n-aria-label="ui.templates_reload"
+        >
+          刷新模板</button
+        ><button type="button" class="quiet theme-toggle" data-theme-toggle></button
+        ><button
+          type="button"
+          class="quiet language-switch"
+          data-language-toggle
+          aria-label="中文 / English"
+        >
+          <span data-language="zh" lang="zh-CN">文</span
+          ><span class="language-divider" aria-hidden="true">/</span
+          ><span data-language="en" lang="en">En</span>
+        </button>
+      </div>
+    </header>
+    <main class="studio-main">
+      <section class="studio-intro">
+        <h1 data-i18n='[[0,"ui.templates_heading"]]'>文案模板</h1>
+        <p data-i18n='[[0,"ui.templates_intro"]]'>
+          管理文案模板的提示词与字数上限，用示例大纲试写验证效果。
+        </p>
       </section>
-    </div>
-  </main>
-  <footer><span data-i18n="[[0,&quot;ui.templates_footer&quot;]]">Mindex / 文案模板</span><span data-i18n="[[0,&quot;ui.3c60f44b51aa&quot;]]">本地素材库 · 工作流分步执行</span></footer>
-</body>
+      <nav class="studio-tabs" aria-label="创作分区" data-i18n-aria-label="ui.studio_tabs_aria">
+        <a class="studio-tab" id="studio-jobs-tab" href="/" data-i18n='[[0,"ui.studio_tab_jobs"]]'
+          >创作任务</a
+        ><a
+          class="studio-tab"
+          id="studio-topics-tab"
+          href="/studio/topics"
+          data-i18n='[[0,"ui.studio_tab_topics"]]'
+          >选题挖掘</a
+        ><a
+          class="studio-tab"
+          href="/studio/templates"
+          aria-current="page"
+          data-i18n='[[0,"ui.studio_tab_templates"]]'
+          >文案模板</a
+        ><a
+          class="studio-tab"
+          id="studio-brands-tab"
+          href="/studio/brands"
+          data-i18n='[[0,"ui.studio_tab_brands"]]'
+          >风格模板</a
+        ><a
+          class="studio-tab"
+          href="/studio/delivery-templates"
+          data-i18n='[[0,"ui.studio_tab_delivery_templates"]]'
+          >交付模板</a
+        >
+      </nav>
+      <div id="notice" class="notice" role="status" aria-live="polite"></div>
+      <div class="workspace">
+        <aside
+          class="job-panel template-panel"
+          aria-label="文案模板列表"
+          data-i18n-aria-label="ui.template_list_aria"
+        >
+          <label for="template-filter" data-i18n='[[0,"ui.templates_filter_label"]]'
+            >搜索模板</label
+          >
+          <input
+            id="template-filter"
+            type="search"
+            autocomplete="off"
+            placeholder="名称、分类或提示词"
+            data-i18n-placeholder="ui.templates_filter_placeholder"
+          />
+          <div id="template-list"></div>
+        </aside>
+        <section
+          class="work-panel"
+          aria-label="模板详情"
+          data-i18n-aria-label="ui.templates_detail_aria"
+        >
+          <div id="template-empty" class="empty">
+            <h2 data-i18n='[[0,"ui.templates_select_title"]]'>选择一个文案模板</h2>
+            <p data-i18n='[[0,"ui.templates_select_hint"]]'>
+              在左侧选择模板，查看提示词、修改并试写效果。
+            </p>
+          </div>
+          <div id="template-view" hidden>
+            <div class="template-card">
+              <div class="section-head template-title-row">
+                <h2 id="template-title"></h2>
+                <span id="template-tags" class="template-tags"></span>
+                <div class="head-actions">
+                  <button
+                    id="template-copy"
+                    class="quiet"
+                    type="button"
+                    data-i18n='[[0,"ui.templates_copy_action"]]'
+                  >
+                    复制为自定义模板</button
+                  ><button
+                    id="template-delete"
+                    class="quiet danger"
+                    type="button"
+                    data-i18n='[[0,"ui.template_delete"]]'
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
+              <p id="template-description" class="muted"></p>
+              <p id="template-note" class="template-note"></p>
+              <form id="template-form" class="template-form" novalidate>
+                <div class="template-fields">
+                  <label class="form-field" data-i18n='[[0,"ui.template_field_name"]]'
+                    >名称<input id="tf-name" maxlength="40" required
+                  /></label>
+                  <label class="form-field" data-i18n='[[0,"ui.template_field_category"]]'
+                    >分类<input id="tf-category" maxlength="40" required
+                  /></label>
+                  <label class="form-field" data-i18n='[[0,"ui.template_field_kind"]]'
+                    >类型<select id="tf-kind">
+                      <option value="outline" data-i18n='[[0,"ui.template_kind_outline"]]'>
+                        按大纲写
+                      </option>
+                      <option value="rewrite" data-i18n='[[0,"ui.template_kind_rewrite"]]'>
+                        改写参考文稿
+                      </option>
+                    </select></label
+                  >
+                  <label class="form-field" data-i18n='[[0,"ui.template_field_max_chars"]]'
+                    >字数上限（留空跟随系统上限）<input
+                      id="tf-max-chars"
+                      type="number"
+                      min="50"
+                      max="20000"
+                      step="1"
+                      inputmode="numeric"
+                  /></label>
+                </div>
+                <label class="form-field" data-i18n='[[0,"ui.template_field_description"]]'
+                  >说明<input id="tf-description" maxlength="200"
+                /></label>
+                <label class="form-field" data-i18n='[[0,"ui.template_field_instructions"]]'
+                  >提示词<textarea
+                    id="tf-instructions"
+                    rows="18"
+                    maxlength="6000"
+                    required
+                    aria-describedby="tf-instructions-count"
+                  ></textarea>
+                </label>
+                <div class="template-form-foot">
+                  <span id="tf-instructions-count" class="muted"></span>
+                  <span
+                    id="template-dirty"
+                    class="warn-text"
+                    hidden
+                    data-i18n='[[0,"ui.templates_unsaved"]]'
+                    >有未保存的修改</span
+                  >
+                  <span class="template-form-actions"
+                    ><button
+                      id="template-revert"
+                      class="quiet"
+                      type="button"
+                      data-i18n='[[0,"ui.templates_revert"]]'
+                    >
+                      放弃修改</button
+                    ><button
+                      id="template-save"
+                      class="submit"
+                      type="submit"
+                      data-i18n='[[0,"ui.template_save"]]'
+                    >
+                      保存模板
+                    </button></span
+                  >
+                </div>
+                <p id="template-error" class="warn-text" role="alert" hidden></p>
+              </form>
+              <p id="template-meta" class="muted template-meta"></p>
+            </div>
+            <section
+              id="template-preview"
+              class="template-card template-preview"
+              aria-labelledby="preview-title"
+            >
+              <div class="section-head">
+                <h2 id="preview-title" data-i18n='[[0,"ui.templates_preview_title"]]'>试写效果</h2>
+              </div>
+              <p class="muted" data-i18n='[[0,"ui.templates_preview_hint"]]'>
+                使用上方表单中的提示词、类型与字数上限（含未保存的修改）调用文案模型生成一次：结果不保存，也不影响任何任务，也不附带素材摘要。
+              </p>
+              <div class="preview-inputs">
+                <label class="form-field" data-i18n='[[0,"ui.templates_preview_outline"]]'
+                  >示例大纲<textarea
+                    id="preview-outline"
+                    rows="6"
+                    maxlength="2000"
+                    placeholder="例如：介绍新加坡滨海湾公园的白天和夜景，300 字左右，最后总结一下。"
+                    data-i18n-placeholder="ui.templates_preview_outline_placeholder"
+                  ></textarea>
+                </label>
+                <label class="form-field" data-i18n='[[0,"ui.templates_preview_references"]]'
+                  >参考文稿（可选；改写类模板必填。多份之间用单独一行 --- 分隔）<textarea
+                    id="preview-references"
+                    rows="6"
+                    placeholder="粘贴访谈稿、谈话文稿等"
+                    data-i18n-placeholder="ui.templates_preview_references_placeholder"
+                  ></textarea>
+                </label>
+              </div>
+              <div class="preview-actions">
+                <button
+                  id="preview-run"
+                  class="submit"
+                  type="button"
+                  data-i18n='[[0,"ui.templates_preview_run"]]'
+                >
+                  试写文案</button
+                ><span id="preview-status" class="muted" role="status" aria-live="polite"></span>
+              </div>
+              <p id="preview-error" class="warn-text" role="alert" hidden></p>
+              <div id="preview-result" class="preview-result" hidden>
+                <div class="preview-result-head">
+                  <span id="preview-meta" class="muted"></span
+                  ><button
+                    id="preview-copy"
+                    class="quiet"
+                    type="button"
+                    data-i18n='[[0,"ui.templates_preview_copy"]]'
+                  >
+                    复制文案
+                  </button>
+                </div>
+                <div id="preview-text" class="preview-text" tabindex="0"></div>
+              </div>
+            </section>
+          </div>
+        </section>
+      </div>
+    </main>
+    <footer>
+      <span data-i18n='[[0,"ui.templates_footer"]]'>Mindex / 文案模板</span
+      ><span data-i18n='[[0,"ui.3c60f44b51aa"]]'>本地素材库 · 工作流分步执行</span>
+    </footer>
+  </body>
 </html>

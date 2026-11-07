@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from mindex.agent import attachments as att
-from mindex.agent.attachments import AttachmentError, AttachmentStore, safe_filename, token
-from mindex.shared.config import AgentConfig
+from agent import attachments as att
+from agent.attachments import AttachmentError, AttachmentStore, safe_filename, token
+from shared.config import AgentConfig
 
 
 def upload(tmp_path: Path, data: bytes = b"hello", name: str = "up.bin") -> Path:
@@ -25,14 +25,26 @@ def store(tmp_path):
 
 
 def put(store, tmp_path, *, owner="session", session_id="session-a", data=b"hello", filename="a.png", ttl=1):
-    return store.put(upload(tmp_path, data), filename=filename, content_type="image/png",
-                     owner=owner, session_id=session_id, ttl_hours=ttl)
+    return store.put(
+        upload(tmp_path, data),
+        filename=filename,
+        content_type="image/png",
+        owner=owner,
+        session_id=session_id,
+        ttl_hours=ttl,
+    )
 
 
 def test_put_records_metadata_and_moves_file(store, tmp_path):
     source = upload(tmp_path, b"abc")
-    meta = store.put(source, filename="clip.mp4", content_type="video/mp4", owner="session",
-                     session_id="session-a", ttl_hours=2)
+    meta = store.put(
+        source,
+        filename="clip.mp4",
+        content_type="video/mp4",
+        owner="session",
+        session_id="session-a",
+        ttl_hours=2,
+    )
     assert meta["id"].startswith("attachment://")
     assert meta["filename"] == "clip.mp4"
     assert meta["content_type"] == "video/mp4"
@@ -121,31 +133,40 @@ def test_expired_lists_only_past_records(store, tmp_path):
 
 
 def test_store_shares_agent_database(tmp_path):
-    from mindex.agent.session_store import SessionStore
+    from agent.session_store import SessionStore
 
     data = tmp_path / "data"
     sessions = SessionStore(data)
     store = AttachmentStore(data)
     sid = sessions.create()["id"]
-    ref = store.put(upload(tmp_path), filename="x.txt", content_type="text/plain", owner="session",
-                    session_id=sid, ttl_hours=1)["id"]
+    ref = store.put(
+        upload(tmp_path),
+        filename="x.txt",
+        content_type="text/plain",
+        owner="session",
+        session_id=sid,
+        ttl_hours=1,
+    )["id"]
     assert (data / "agent.sqlite3").is_file()
     assert AttachmentStore(data).get(ref)["session_id"] == sid
 
 
-@pytest.mark.parametrize(("raw", "expected"), [
-    ("photo.jpg", "photo.jpg"),
-    ("../../etc/passwd", "passwd"),
-    ("..\\..\\win\\evil.exe", "evil.exe"),
-    ("C:\\Users\\a\\b.srt", "b.srt"),
-    ("..", "file"),
-    ("", "file"),
-    (None, "file"),
-    (".hidden.png", "hidden.png"),
-    ("a\x00b\nc.wav", "abc.wav"),
-    ('we?ird:na*me".mp3', "we_ird_na_me_.mp3"),
-    ("中文 名称.png", "中文 名称.png"),
-])
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("photo.jpg", "photo.jpg"),
+        ("../../etc/passwd", "passwd"),
+        ("..\\..\\win\\evil.exe", "evil.exe"),
+        ("C:\\Users\\a\\b.srt", "b.srt"),
+        ("..", "file"),
+        ("", "file"),
+        (None, "file"),
+        (".hidden.png", "hidden.png"),
+        ("a\x00b\nc.wav", "abc.wav"),
+        ('we?ird:na*me".mp3', "we_ird_na_me_.mp3"),
+        ("中文 名称.png", "中文 名称.png"),
+    ],
+)
 def test_safe_filename(raw, expected):
     assert safe_filename(raw) == expected
 
@@ -162,7 +183,12 @@ def test_config_defaults_and_bounds():
     cfg = AgentConfig()
     assert (cfg.attachment_ttl_hours, cfg.attachment_max_mb, cfg.max_images) == (168, 500, 8)
     AgentConfig(attachment_max_mb=20480, max_images=0)
-    for bad in [{"attachment_ttl_hours": 0}, {"attachment_max_mb": 0}, {"attachment_max_mb": 20481},
-                {"max_images": 33}, {"max_images": -1}]:
+    for bad in [
+        {"attachment_ttl_hours": 0},
+        {"attachment_max_mb": 0},
+        {"attachment_max_mb": 20481},
+        {"max_images": 33},
+        {"max_images": -1},
+    ]:
         with pytest.raises(ValueError):
             AgentConfig(**bad)

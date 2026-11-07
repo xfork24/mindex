@@ -8,10 +8,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from mindex.shared.media import audio_info, probe
-from mindex.shared.work_budget import copy_file
-from mindex.studio import studio
-from mindex.studio.studio_artifacts import digest, safe_path
+from shared.media import audio_info, probe
+from shared.work_budget import copy_file
+from studio import studio
+from studio.artifacts import digest, safe_path
 
 from .plans import PlanOptions, new_plan, normalize_voice_options, set_board
 from .versions import WorkspaceState, add_version, file_info, path, persist, revision, root
@@ -66,8 +66,8 @@ def normalize_script(config, job_id, w):
 
 def load(config, job_id):
     if config.storage.backend == "s3":
-        from mindex.shared.directory_files import bind
-        from mindex.shared.storage import Store
+        from shared.directory_files import bind
+        from shared.storage import Store
 
         with bind(Store.open(config), f"studio/{job_id}/"):
             return _load(config, job_id)
@@ -79,8 +79,9 @@ def _load(config, job_id):
     studio.load_job(config, job_id)
     payload = None
     if config.storage.backend == "s3":
-        from mindex.shared import files
-        from mindex.shared.storage import Store
+        from shared import files
+        from shared.storage import Store
+
         store = Store.open(config)
         payload = files.read_bytes(store, path(config, job_id))
         for row in files.entries(store, f"studio/{job_id}/"):
@@ -110,8 +111,14 @@ def _load(config, job_id):
             duck_gain=config.studio.audio.duck_gain,
         ).model_dump(),
     )
-    w = {"schema": 2, "job_language": state.get("language", "zh"), "active_plan": p["id"],
-         "plans": {p["id"]: p}, "versions": {}, "builds": []}
+    w = {
+        "schema": 2,
+        "job_language": state.get("language", "zh"),
+        "active_plan": p["id"],
+        "plans": {p["id"]: p},
+        "versions": {},
+        "builds": [],
+    }
     del p["script"], p["board_script"]  # 由 normalize_script 统一迁移
     try:
         board = studio.load_storyboard(config, job_id)
@@ -256,7 +263,11 @@ def _load(config, job_id):
                 if not copied.exists():
                     copy_file(source, copied)
                 try:
-                    data = audio_info(copied) if stage == "tts" else json.loads(copied.read_text(encoding="utf-8"))
+                    data = (
+                        audio_info(copied)
+                        if stage == "tts"
+                        else json.loads(copied.read_text(encoding="utf-8"))
+                    )
                     selection[stage] = add_version(
                         config,
                         job_id,

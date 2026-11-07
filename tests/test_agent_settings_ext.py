@@ -5,22 +5,24 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from agent_helpers import new_session, result_text, results, send, wait_idle, wait_pending
 from fastapi.testclient import TestClient
 
-from mindex.agent.llm.scripted import ScriptedLlm, call, say
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext, ToolError
-from mindex.agent.tools.settings_tools import CONSENT, DECLINE, CloneVoice, clone_voice, specs
-from mindex.api import create_app
-from mindex.shared.storage import Store
+from agent.llm.scripted import ScriptedLlm, call, say
+from agent.loopback import MindexClient
+from agent.registry import ToolContext, ToolError
+from agent.tools.settings_tools import CONSENT, DECLINE, CloneVoice, clone_voice, specs
+from agent_helpers import new_session, result_text, results, send, wait_idle, wait_pending
+from api import create_app
+from shared.storage import Store
 
 SETTINGS_PAGE = {"page": "settings"}
 
 
 def start_agent(config, backend="openai"):
     config.studio.tts.backend = backend
-    config.studio.tts.base_url = "http://127.0.0.1:9/v1"  # 不可达：克隆在厂商调用处失败（502），不访问外部网络
+    config.studio.tts.base_url = (
+        "http://127.0.0.1:9/v1"  # 不可达：克隆在厂商调用处失败（502），不访问外部网络
+    )
     llm = ScriptedLlm()
     return TestClient(create_app(config, agent_llm=llm)), llm
 
@@ -41,7 +43,9 @@ def dashscope_agent(config):
 
 def approve(client, sid):
     pending = wait_pending(client, sid, "approval")
-    client.post(f"/api/agent/sessions/{sid}/approvals/{pending['requestId']}", json={"outcome": "allowed-once"})
+    client.post(
+        f"/api/agent/sessions/{sid}/approvals/{pending['requestId']}", json={"outcome": "allowed-once"}
+    )
     return pending
 
 
@@ -49,24 +53,45 @@ def answer_consent(client, sid, choice, name):
     pending = wait_pending(client, sid, "question")
     question = pending["questions"][0]
     assert [o["label"] for o in question["options"]] == [CONSENT, DECLINE]
-    response = client.post(f"/api/agent/sessions/{sid}/questions/{pending['requestId']}", json={"answers": [
-        {"id": question["id"], "selected": [choice], "values": {"name": name, "ref_text": "你好"}}]})
+    response = client.post(
+        f"/api/agent/sessions/{sid}/questions/{pending['requestId']}",
+        json={
+            "answers": [
+                {"id": question["id"], "selected": [choice], "values": {"name": name, "ref_text": "你好"}}
+            ]
+        },
+    )
     assert response.status_code == 200, response.text
 
 
 def test_delete_profile_guard_and_reset_business(agent):
     client, llm, config = agent
-    active = client.post("/api/settings/profiles", json={
-        "role": "writer", "name": "在用", "provider": "custom",
-        "config": {"backend": "openai", "base_url": "http://x/v1", "model": "w"}}).json()
+    active = client.post(
+        "/api/settings/profiles",
+        json={
+            "role": "writer",
+            "name": "在用",
+            "provider": "custom",
+            "config": {"backend": "openai", "base_url": "http://x/v1", "model": "w"},
+        },
+    ).json()
     client.post(f"/api/settings/profiles/{active['id']}/activate")
-    spare = client.post("/api/settings/profiles", json={
-        "role": "writer", "name": "备用", "provider": "custom",
-        "config": {"backend": "openai", "base_url": "http://y/v1", "model": "v"}}).json()
+    spare = client.post(
+        "/api/settings/profiles",
+        json={
+            "role": "writer",
+            "name": "备用",
+            "provider": "custom",
+            "config": {"backend": "openai", "base_url": "http://y/v1", "model": "v"},
+        },
+    ).json()
     client.put("/api/settings/business", json={"search": {"rrf_k": 42}})
-    llm.extend([call("delete_model_profile", profile_id=active["id"])],
-               [call("delete_model_profile", profile_id=spare["id"])],
-               [call("reset_business_settings")], [say("完成")])
+    llm.extend(
+        [call("delete_model_profile", profile_id=active["id"])],
+        [call("delete_model_profile", profile_id=spare["id"])],
+        [call("reset_business_settings")],
+        [say("完成")],
+    )
     sid = new_session(client)
     send(client, sid, "清理", context=SETTINGS_PAGE)
     assert approve(client, sid)["name"] == "delete_model_profile"
@@ -84,12 +109,18 @@ def test_delete_profile_guard_and_reset_business(agent):
 def test_clone_voice_requires_form_consent(agent):
     client, llm, config = agent
     sid = new_session(client)
-    upload = client.post("/api/agent/attachments", data={"session_id": sid},
-                         files={"file": ("sample.wav", b"RIFF0000WAVEfmt ", "audio/wav")})
+    upload = client.post(
+        "/api/agent/attachments",
+        data={"session_id": sid},
+        files={"file": ("sample.wav", b"RIFF0000WAVEfmt ", "audio/wav")},
+    )
     assert upload.status_code == 201, upload.text
     ref = upload.json()["id"]
-    llm.extend([call("clone_voice", name="旁白", attachment=ref)],
-               [call("clone_voice", name="旁白", attachment=ref)], [say("完成")])
+    llm.extend(
+        [call("clone_voice", name="旁白", attachment=ref)],
+        [call("clone_voice", name="旁白", attachment=ref)],
+        [say("完成")],
+    )
     send(client, sid, "克隆我的声音", context=SETTINGS_PAGE)
     approve(client, sid)
     answer_consent(client, sid, DECLINE, "旁白")
@@ -132,27 +163,48 @@ class FakeClient:
 
     async def upload(self, path, *, files, data=None, method="POST"):
         self.requests.append((method, path, {"files": files, "data": data}))
-        return {"ok": True, "status": 201, "data": {"id": 9, "name": data["name"], "voice_id": "v9", "status": "ready"}}
+        return {
+            "ok": True,
+            "status": 201,
+            "data": {"id": 9, "name": data["name"], "voice_id": "v9", "status": "ready"},
+        }
 
     def writes(self) -> list[tuple[str, str, dict]]:
         return [r for r in self.requests if r[0] != "GET"]
 
 
 def profile_settings() -> dict:
-    return {"business": {"tts_backend": "openai", "default_voice": None}, "voices": [], "roles": [
-        {"role": "agent", "label": "智能助手", "active_profile_id": 7, "profiles": [
-            {"id": 7, "name": "助手", "provider": "custom", "config": {"model": "a"}}]},
-        {"role": "writer", "label": "文案", "active_profile_id": 3, "profiles": [
-            {"id": 3, "name": "在用", "provider": "custom", "config": {"model": "w"}},
-            {"id": 4, "name": "备用", "provider": "custom", "config": {"model": "v"}}]},
-    ]}
+    return {
+        "business": {"tts_backend": "openai", "default_voice": None},
+        "voices": [],
+        "roles": [
+            {
+                "role": "agent",
+                "label": "智能助手",
+                "active_profile_id": 7,
+                "profiles": [{"id": 7, "name": "助手", "provider": "custom", "config": {"model": "a"}}],
+            },
+            {
+                "role": "writer",
+                "label": "文案",
+                "active_profile_id": 3,
+                "profiles": [
+                    {"id": 3, "name": "在用", "provider": "custom", "config": {"model": "w"}},
+                    {"id": 4, "name": "备用", "provider": "custom", "config": {"model": "v"}},
+                ],
+            },
+        ],
+    }
 
 
-@pytest.mark.parametrize(("profile_id", "agent_profile_id", "code"), [
-    (7, 7, "self_profile"),     # 智能助手自身正在使用的档案
-    (3, 7, "active_profile"),   # 其他角色当前激活中的档案
-    (7, None, "active_profile"),  # 无法确定自身档案时，仍按“激活中”保护
-])
+@pytest.mark.parametrize(
+    ("profile_id", "agent_profile_id", "code"),
+    [
+        (7, 7, "self_profile"),  # 智能助手自身正在使用的档案
+        (3, 7, "active_profile"),  # 其他角色当前激活中的档案
+        (7, None, "active_profile"),  # 无法确定自身档案时，仍按“激活中”保护
+    ],
+)
 def test_delete_profile_guard_in_preview_and_execute(profile_id, agent_profile_id, code):
     spec = next(s for s in specs() if s.name == "delete_model_profile")
     assert spec.risk == "danger"
@@ -182,17 +234,26 @@ def test_delete_agent_own_profile_rejected_in_session(agent):
     client, llm, config = agent
 
     def create(name, model):
-        response = client.post("/api/settings/profiles", json={
-            "role": "agent", "name": name, "provider": "custom",
-            "config": {"backend": "openai", "base_url": "http://llm.test/v1", "model": model}})
+        response = client.post(
+            "/api/settings/profiles",
+            json={
+                "role": "agent",
+                "name": name,
+                "provider": "custom",
+                "config": {"backend": "openai", "base_url": "http://llm.test/v1", "model": model},
+            },
+        )
         assert response.status_code in (200, 201), response.text
         return response.json()["id"]
 
     own = create("助手 A", "a")
     assert client.post(f"/api/settings/profiles/{own}/activate").status_code == 200
     other = create("助手 B", "b")
-    llm.extend([call("delete_model_profile", profile_id=own)],
-               [call("delete_model_profile", profile_id=other)], [say("完成")])
+    llm.extend(
+        [call("delete_model_profile", profile_id=own)],
+        [call("delete_model_profile", profile_id=other)],
+        [say("完成")],
+    )
     sid = new_session(client)
     send(client, sid, "删掉助手档案", context=SETTINGS_PAGE)
     assert approve(client, sid)["name"] == "delete_model_profile"  # 只有备用档案走到确认
@@ -208,24 +269,32 @@ def test_delete_agent_own_profile_rejected_in_session(agent):
 def test_mcp_remote_mode_protects_profiles_on_delete(config):
     """远程 MCP 模式：自身档案经远端设置解析，同样拒绝删除。"""
     pytest.importorskip("mcp")
-    from mindex.agent.mcp_server import RemoteAgentProfile, build_server
-    from mindex.agent.tools import build_registry
+    from agent.mcp_server import RemoteAgentProfile, build_server
+    from agent.tools import build_registry
 
     app = create_app(config)
     http = TestClient(app)
     ids = {}
     for role, name in (("agent", "助手"), ("writer", "在用"), ("writer", "备用")):
-        response = http.post("/api/settings/profiles", json={
-            "role": role, "name": name, "provider": "custom",
-            "config": {"backend": "openai", "base_url": "http://llm.test/v1", "model": name}})
+        response = http.post(
+            "/api/settings/profiles",
+            json={
+                "role": role,
+                "name": name,
+                "provider": "custom",
+                "config": {"backend": "openai", "base_url": "http://llm.test/v1", "model": name},
+            },
+        )
         ids[name] = response.json()["id"]
     http.post(f"/api/settings/profiles/{ids['助手']}/activate")
     http.post(f"/api/settings/profiles/{ids['在用']}/activate")
     loop_client = MindexClient(app)
-    server = build_server(build_registry(), lambda: loop_client, policy="all",
-                          agent_profile=RemoteAgentProfile(loop_client))
-    own, active, spare = mcp_calls(server, [("delete_model_profile", {"profile_id": ids[name]})
-                                            for name in ("助手", "在用", "备用")])
+    server = build_server(
+        build_registry(), lambda: loop_client, policy="all", agent_profile=RemoteAgentProfile(loop_client)
+    )
+    own, active, spare = mcp_calls(
+        server, [("delete_model_profile", {"profile_id": ids[name]}) for name in ("助手", "在用", "备用")]
+    )
     assert own.isError and "不能删除智能助手当前正在使用的档案" in mcp_text(own)
     assert active.isError and "当前正在使用的档案，无法删除" in mcp_text(active)
     assert not spare.isError, mcp_text(spare)
@@ -251,14 +320,18 @@ class FormRuntime:
 def test_clone_voice_dispatch_by_backend(backend):
     spec = next(s for s in specs() if s.name == "clone_voice")
     client = FakeClient({"business": {"tts_backend": backend}})
-    runtime = FormRuntime({"name": "旁白", "ref_text": "你好", "audio_url": "https://example.invalid/form.wav"})
+    runtime = FormRuntime(
+        {"name": "旁白", "ref_text": "你好", "audio_url": "https://example.invalid/form.wav"}
+    )
     ctx = ToolContext(client=client, session_id="s1", extra={"runtime": runtime, "call_id": "c1"})
-    args = spec.parse({"name": "旁白", "attachment": "attachment://tok", "audio_url": "https://example.invalid/arg.wav"})
+    args = spec.parse(
+        {"name": "旁白", "attachment": "attachment://tok", "audio_url": "https://example.invalid/arg.wav"}
+    )
 
     preview = asyncio.run(spec.preview(args, ctx))
     sample = next(c["after"] for c in preview.changes if c["label"] == "样本")
     asyncio.run(spec.execute(args, ctx))
-    (method, path, payload), = client.writes()
+    ((method, path, payload),) = client.writes()
     assert (method, path) == ("POST", "/api/settings/voices/clone")
     assert payload["data"]["consent"] is True and payload["data"]["name"] == "旁白"
     fields = [f["id"] for f in runtime.asked[0]["fields"]]
@@ -299,9 +372,18 @@ def test_clone_voice_dashscope_url_end_to_end(dashscope_agent):
     question = wait_pending(client, sid, "question")
     form = question["questions"][0]
     assert "audio_url" in [f["id"] for f in form["fields"]]
-    client.post(f"/api/agent/sessions/{sid}/questions/{question['requestId']}", json={"answers": [
-        {"id": form["id"], "selected": [CONSENT],
-         "values": {"name": "云端", "audio_url": "https://example.invalid/a.wav"}}]})
+    client.post(
+        f"/api/agent/sessions/{sid}/questions/{question['requestId']}",
+        json={
+            "answers": [
+                {
+                    "id": form["id"],
+                    "selected": [CONSENT],
+                    "values": {"name": "云端", "audio_url": "https://example.invalid/a.wav"},
+                }
+            ]
+        },
+    )
     events = wait_idle(client, sid)
     assert results(events)[0]["error"]["code"] == "http_502"
     rows = Store(config.data_dir).rows("SELECT name, provider, status FROM voices")
@@ -322,13 +404,18 @@ def test_register_and_delete_default_voice_clears_override(agent):
     assert registered.get("error") is None, registered
     voices = {v["name"]: v for v in client.get("/api/settings?probe_embedding=false").json()["voices"]}
     assert voices["旁白甲"]["voice_id"] == "voice-a" and voices["旁白甲"]["provider"] == "self"
-    other = client.post("/api/settings/voices", json={"name": "旁白乙", "provider": "self", "voice_id": "voice-b"})
+    other = client.post(
+        "/api/settings/voices", json={"name": "旁白乙", "provider": "self", "voice_id": "voice-b"}
+    )
     assert other.status_code == 201, other.text
     put = client.put("/api/settings/business", json={"default_voice_id": voices["旁白甲"]["id"]})
     assert put.status_code == 200 and put.json()["default_voice"] == "voice-a"
 
-    llm.extend([call("delete_voice", voice_id=other.json()["id"])],
-               [call("delete_voice", voice_id=voices["旁白甲"]["id"])], [say("完成")])
+    llm.extend(
+        [call("delete_voice", voice_id=other.json()["id"])],
+        [call("delete_voice", voice_id=voices["旁白甲"]["id"])],
+        [say("完成")],
+    )
     send(client, sid, "删除两个音色", context=SETTINGS_PAGE)
     plain = approve(client, sid)
     assert not any("默认音色" in w for w in plain["preview"]["warnings"])
@@ -352,6 +439,7 @@ def mcp_calls(server, calls):
     async def go():
         async with create_connected_server_and_client_session(server) as session:
             return [await session.call_tool(name, args) for name, args in calls]
+
     return asyncio.run(go())
 
 
@@ -361,11 +449,13 @@ def mcp_text(result) -> str:
 
 def test_mcp_clone_voice_refused(config):
     pytest.importorskip("mcp")
-    from mindex.agent.mcp_server import server_for_app
+    from agent.mcp_server import server_for_app
 
     config.studio.tts.backend = "dashscope"
     app = create_app(config)
     server = server_for_app(app, app.state.runtime_config, app.state.store, policy="all")
-    (refused,) = mcp_calls(server, [("clone_voice", {"name": "旁白", "audio_url": "https://example.invalid/a.wav"})])
+    (refused,) = mcp_calls(
+        server, [("clone_voice", {"name": "旁白", "audio_url": "https://example.invalid/a.wav"})]
+    )
     assert refused.isError and "需要在 Mindex 页面助手中确认声音授权" in mcp_text(refused)
     assert Store(config.data_dir).rows("SELECT id FROM voices") == []

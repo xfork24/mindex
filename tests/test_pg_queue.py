@@ -13,8 +13,8 @@ import time
 
 import pytest
 
-from mindex.shared.db.pg_backend import PgBackend
-from mindex.shared.db.queue_pg import PgTaskQueue
+from shared.db.pg_backend import PgBackend
+from shared.db.queue_pg import PgTaskQueue
 
 pytestmark = pytest.mark.requires_postgres
 
@@ -27,7 +27,7 @@ def queue():
         pytest.skip("需要 MINDEX_TEST_POSTGRES_DSN")
     import psycopg
 
-    from mindex.shared.db.migrate_pg import migrate_pg
+    from shared.db.migrate_pg import migrate_pg
 
     with psycopg.connect(DSN, autocommit=True) as conn:
         conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")

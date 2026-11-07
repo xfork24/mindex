@@ -4,8 +4,11 @@ const TEXT = {
   zh: {
     title: "连接远程服务",
     hint: "填写服务地址与用户访问令牌；远程数据处理与存储留在服务端，本机只保存连接信息。保存后需重启应用。",
-    url: "服务地址", token: "用户访问令牌",
-    save: "保存并重启", clear: "清除远程配置", cancel: "取消",
+    url: "服务地址",
+    token: "用户访问令牌",
+    save: "保存并重启",
+    clear: "清除远程配置",
+    cancel: "取消",
     saved: "已保存，正在重启…",
     cleared: "已清除远程配置，正在重启…",
     invalidUrl: "服务地址必须是 http(s) 地址，不能包含路径、凭据或查询参数",
@@ -19,26 +22,39 @@ const TEXT = {
   en: {
     title: "Connect to a remote server",
     hint: "Enter the server URL and your access token. Processing and storage stay on the server; only connection details are kept locally. Restart is required.",
-    url: "Server URL", token: "Access token",
-    save: "Save and restart", clear: "Clear remote settings", cancel: "Cancel",
+    url: "Server URL",
+    token: "Access token",
+    save: "Save and restart",
+    clear: "Clear remote settings",
+    cancel: "Cancel",
     saved: "Saved. Restarting…",
     cleared: "Remote settings cleared. Restarting…",
     invalidUrl: "Use an http(s) server address without paths, credentials, or query parameters",
     invalidToken: "Access token is required",
     invalidConfig: "Remote settings are damaged. Save them again or clear them.",
-    storageUnavailable: "Secure credential storage is unavailable. Unlock the system keyring or use environment variables.",
+    storageUnavailable:
+      "Secure credential storage is unavailable. Unlock the system keyring or use environment variables.",
     decryptFailed: "The remote credential could not be decrypted. Save it again.",
     failed: "Save failed: ",
-    envNotice: "Connected via environment variables (MINDEX_DESKTOP_REMOTE_URL); they take precedence over the saved file.",
+    envNotice:
+      "Connected via environment variables (MINDEX_DESKTOP_REMOTE_URL); they take precedence over the saved file.",
   },
 };
 
 const lang = (navigator.language || "zh").toLowerCase().startsWith("zh") ? "zh" : "en";
 const t = TEXT[lang];
-const errorText = (value) => t[{
-  "invalid-url": "invalidUrl", "invalid-token": "invalidToken", "invalid-config": "invalidConfig",
-  "storage-unavailable": "storageUnavailable", "decrypt-failed": "decryptFailed",
-}[value?.code]] || value?.error || "";
+const errorText = (value) =>
+  t[
+    {
+      "invalid-url": "invalidUrl",
+      "invalid-token": "invalidToken",
+      "invalid-config": "invalidConfig",
+      "storage-unavailable": "storageUnavailable",
+      "decrypt-failed": "decryptFailed",
+    }[value?.code]
+  ] ||
+  value?.error ||
+  "";
 
 const $ = (id) => document.getElementById(id);
 const status = (message, kind) => {

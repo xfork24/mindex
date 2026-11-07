@@ -3,7 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from mindex.api import create_app
+from api import create_app
 
 TOKEN = "unit-test-token"
 
@@ -96,11 +96,11 @@ def test_login_keeps_site_relative_next(client):
 def _serve(monkeypatch, tmp_path, args, token=None):
     from typer.testing import CliRunner
 
-    from mindex.cli import app
+    from cli import app
 
     calls = []
     monkeypatch.setattr("uvicorn.run", lambda app, host, port: calls.append((host, port)))
-    monkeypatch.setattr("mindex.search.warmup.warm_up_in_background", lambda *_: None)
+    monkeypatch.setattr("search.warmup.warm_up_in_background", lambda *_: None)
     if token is None:
         monkeypatch.delenv("MINDEX_WEB_TOKEN", raising=False)
     else:

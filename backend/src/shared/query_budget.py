@@ -1,4 +1,5 @@
 """查询总期限与同一数据库快照；超限明确可重试，不转为全库或假空结果。"""
+
 from __future__ import annotations
 
 import time
@@ -66,7 +67,9 @@ def scope(store, seconds):
             if connection_for(store) is not None:
                 yield
                 return
-            db = stack.enter_context(store.backend.connect(snapshot=True) if store.pg else store.backend.connect())
+            db = stack.enter_context(
+                store.backend.connect(snapshot=True) if store.pg else store.backend.connect()
+            )
             if not store.pg:
                 db.execute("BEGIN")
             bound = _CONNECTION.set((store.cache_identity, db))
@@ -93,8 +96,10 @@ def http_request(method, url, **kwargs):
 
     async def request():
         try:
-            async with asyncio.timeout(remaining()), httpx.AsyncClient(
-                    timeout=timeout, trust_env=trust_env, verify=verify) as client:
+            async with (
+                asyncio.timeout(remaining()),
+                httpx.AsyncClient(timeout=timeout, trust_env=trust_env, verify=verify) as client,
+            ):
                 response = await client.request(method, url, **kwargs)
                 check()
                 return response

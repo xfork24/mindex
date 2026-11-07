@@ -4,8 +4,8 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from mindex.shared.agent_domains import LOADABLE_DOMAINS
-from mindex.shared.config import AgentMcpConfig, Config
+from shared.agent_domains import LOADABLE_DOMAINS
+from shared.config import AgentMcpConfig, Config
 
 ROOT = Path(__file__).resolve().parents[1]
 

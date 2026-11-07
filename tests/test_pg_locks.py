@@ -15,7 +15,7 @@ import time
 import pytest
 from filelock import Timeout
 
-from mindex.shared.db.locks_pg import LEASE_TTL_SECONDS, PgLockProvider
+from shared.db.locks_pg import LEASE_TTL_SECONDS, PgLockProvider
 
 pytestmark = pytest.mark.requires_postgres
 
@@ -29,8 +29,8 @@ def providers():
         pytest.skip("需要 MINDEX_TEST_POSTGRES_DSN")
     import psycopg
 
-    from mindex.shared.db.migrate_pg import migrate_pg
-    from mindex.shared.db.pg_backend import PgBackend
+    from shared.db.migrate_pg import migrate_pg
+    from shared.db.pg_backend import PgBackend
 
     with psycopg.connect(DSN, autocommit=True) as conn:
         conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
@@ -137,8 +137,7 @@ def test_threaded_contenders_see_serialized_exclusive(providers):
             if len(active) >= 12:
                 stop.set()
 
-    threads = [threading.Thread(target=contender, args=(provider,))
-               for provider in (one, one, two, two)]
+    threads = [threading.Thread(target=contender, args=(provider,)) for provider in (one, one, two, two)]
     for thread in threads:
         thread.start()
     for thread in threads:
@@ -148,7 +147,7 @@ def test_threaded_contenders_see_serialized_exclusive(providers):
 
 
 def test_lease_constants_match_plan():
-    from mindex.shared.db.locks_pg import HEARTBEAT_SECONDS, LeaseLost
+    from shared.db.locks_pg import HEARTBEAT_SECONDS, LeaseLost
 
     assert LEASE_TTL_SECONDS == 90.0  # plans §7.1：初始 TTL 90s、心跳 20s
     assert HEARTBEAT_SECONDS == 20.0

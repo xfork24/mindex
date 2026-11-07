@@ -1,4 +1,5 @@
 """任务冻结配置及索引提交参数；队列提交与上层执行器共用。"""
+
 from __future__ import annotations
 
 import json
@@ -6,11 +7,19 @@ from typing import Literal
 
 from pydantic import Field
 
-from mindex.shared.config import Config, StrictModel, absolutize_config_paths, relativize_config_paths
-from mindex.shared.storage import dumps
+from shared.config import Config, StrictModel, absolutize_config_paths, relativize_config_paths
+from shared.storage import dumps
 
 BASE_ROLES = ("asr", "embedding", "analyzer", "person")
-STUDIO_ROLES = ("generator", "writer", "tts", "video_generator", "image_generator", "music_generator", "animator")
+STUDIO_ROLES = (
+    "generator",
+    "writer",
+    "tts",
+    "video_generator",
+    "image_generator",
+    "music_generator",
+    "animator",
+)
 
 
 def freeze_config(config, store, *, studio=False):
@@ -22,12 +31,17 @@ def freeze_config(config, store, *, studio=False):
     snapshot = relativize_config_paths(config.data_dir, snapshot)
     snapshot["_credential_profiles"] = {
         role: row["value"] if row else None
-        for role in (*BASE_ROLES, *STUDIO_ROLES) if studio or role in BASE_ROLES
+        for role in (*BASE_ROLES, *STUDIO_ROLES)
+        if studio or role in BASE_ROLES
         for row in [store.one("SELECT value FROM settings WHERE key=?", ("active.profile." + role,))]
     }
     if studio and snapshot["_credential_profiles"].get("writer") is None:
         writer, generator = config.studio.writer, config.studio.generator
-        if (writer.base_url, writer.model, writer.api_key) == (generator.base_url, generator.model, generator.api_key):
+        if (writer.base_url, writer.model, writer.api_key) == (
+            generator.base_url,
+            generator.model,
+            generator.api_key,
+        ):
             snapshot["_credential_profiles"]["writer"] = snapshot["_credential_profiles"].get("generator")
     return dumps(snapshot)
 
@@ -45,8 +59,14 @@ def restore_config(raw, runtime, store):
         setattr(config, key, getattr(runtime.base, key))
     for role in (*BASE_ROLES, *STUDIO_ROLES):
         reference = profiles.get(role)
-        profile = store.one("SELECT api_key,role,config FROM model_profiles WHERE id=?", (reference,)) if reference else None
-        if reference and (profile is None or profile["role"] not in ({role, "generator"} if role == "writer" else {role})):
+        profile = (
+            store.one("SELECT api_key,role,config FROM model_profiles WHERE id=?", (reference,))
+            if reference
+            else None
+        )
+        if reference and (
+            profile is None or profile["role"] not in ({role, "generator"} if role == "writer" else {role})
+        ):
             raise ValueError(f"任务引用的 {role} 模型凭据已不存在或归属不符，请核对后重新提交")
         target = getattr(config if role in BASE_ROLES else config.studio, role)
         node = getattr(runtime.base if role in BASE_ROLES else runtime.base.studio, role)
@@ -54,8 +74,11 @@ def restore_config(raw, runtime, store):
             routing = json.loads(profile["config"])
             if any(key in routing and routing[key] != getattr(target, key) for key in ("base_url", "model")):
                 raise ValueError(f"任务引用的 {role} 模型地址或身份已变化，请重新提交")
-        target.api_key = profile["api_key"] or "" if profile else (
-            node.api_key if (node.base_url, node.model) == (target.base_url, target.model) else "")
+        target.api_key = (
+            profile["api_key"] or ""
+            if profile
+            else (node.api_key if (node.base_url, node.model) == (target.base_url, target.model) else "")
+        )
     return config
 
 

@@ -1,4 +1,5 @@
 """显式工作集作用域：未知输出按写入前增长预约，不允许先写后核算。"""
+
 from __future__ import annotations
 
 import threading
@@ -128,6 +129,7 @@ def budgeted(method):
     def wrapped(self, *args, **kwargs):
         with scope(self.store):
             return method(self, *args, **kwargs)
+
     return wrapped
 
 
@@ -136,6 +138,7 @@ def resource_write(method):
     def wrapped(store, *args, **kwargs):
         with scope(store):
             return method(store, *args, **kwargs)
+
     return wrapped
 
 
@@ -144,11 +147,22 @@ def stream_command(args, output, *, timeout):
     import subprocess
     from collections import deque
 
-    from mindex.shared.media import MediaError
+    from shared.media import MediaError
 
-    formats = {".mp4": "mp4", ".m4a": "mp4", ".mov": "mov", ".mkv": "matroska", ".webm": "webm",
-               ".wav": "wav", ".mp3": "mp3", ".flac": "flac", ".ogg": "ogg",
-               ".png": "image2pipe", ".jpg": "image2pipe", ".jpeg": "image2pipe"}
+    formats = {
+        ".mp4": "mp4",
+        ".m4a": "mp4",
+        ".mov": "mov",
+        ".mkv": "matroska",
+        ".webm": "webm",
+        ".wav": "wav",
+        ".mp3": "mp3",
+        ".flac": "flac",
+        ".ogg": "ogg",
+        ".png": "image2pipe",
+        ".jpg": "image2pipe",
+        ".jpeg": "image2pipe",
+    }
     suffix = output.suffix.lower()
     if suffix not in formats or "%" in output.name:
         raise MediaError("输出类型不能可靠预约工作集；请使用受支持的单文件输出")
@@ -177,7 +191,7 @@ def stream_command(args, output, *, timeout):
     try:
         with GrowingReservation(output) as reservation, output.open("wb") as target:
             while chunk := process.stdout.read(65536):
-                from mindex.shared.db.fencing import current_attempt
+                from shared.db.fencing import current_attempt
 
                 attempt = current_attempt()
                 if attempt is not None:
@@ -188,7 +202,7 @@ def stream_command(args, output, *, timeout):
             process.wait()
             reader.join()
             if timed_out.is_set():
-                from mindex.shared.query_budget import check
+                from shared.query_budget import check
 
                 check()
                 raise MediaError("媒体处理超过期限，已终止")
@@ -213,12 +227,13 @@ def stream_command(args, output, *, timeout):
 def configured(method):
     @wraps(method)
     def wrapped(config, *args, **kwargs):
-        from mindex.shared.storage import Store
+        from shared.storage import Store
 
         if config.storage.backend != "s3":
             return method(config, *args, **kwargs)
         with Store.open(config) as store, scope(store):
             return method(config, *args, **kwargs)
+
     return wrapped
 
 

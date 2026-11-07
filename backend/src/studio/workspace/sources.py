@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mindex.studio import studio
-from mindex.studio.studio_artifacts import digest
+from studio import studio
+from studio.artifacts import digest
 
 from .versions import root, version
 
@@ -20,7 +20,12 @@ FILE_KINDS = ("clip", "image")
 VIDEO_SUFFIXES = (".mp4", ".mov", ".mkv", ".webm", ".avi")
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
 AUDIO_SUFFIXES = (".mp3", ".wav", ".flac", ".m4a", ".aac")
-KIND_SUFFIXES = {"clip": VIDEO_SUFFIXES, "image": IMAGE_SUFFIXES, "video": VIDEO_SUFFIXES, "audio": AUDIO_SUFFIXES}
+KIND_SUFFIXES = {
+    "clip": VIDEO_SUFFIXES,
+    "image": IMAGE_SUFFIXES,
+    "video": VIDEO_SUFFIXES,
+    "audio": AUDIO_SUFFIXES,
+}
 
 
 def content_source(content) -> dict | None:
@@ -74,7 +79,10 @@ def source_file(config, job_id, source) -> Path:
 
 
 def reference_image(config, job_id, source, key="image_id") -> Path | None:
-    """aigc 来源的首帧（或 ``key`` 指定的尾帧/主体参考）图片（复验摘要）；未设置返回 None，缺失或被改动时报中文错误。"""
+    (
+        """aigc 来源的首帧（或 ``key`` 指定的尾帧/主体参考）图片（复验摘要）；未设置返回 """
+        """None，缺失或被改动时报中文错误。"""
+    )
     if not source.get(key):
         return None
     found = find_input(config, job_id, source[key], IMAGE_SUFFIXES)

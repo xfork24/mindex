@@ -17,15 +17,10 @@ import base64
 from dataclasses import dataclass
 from pathlib import Path
 
-from mindex.models import adapters
-from mindex.models.adapters import ModelError
-from mindex.models.video_generators import (
-    MINIMAX_AUTH,
-    _error_body,
-    _redact_images,
-    data_url,
-)
-from mindex.shared.config import Config
+from models import adapters
+from models.adapters import ModelError
+from models.video_generators import MINIMAX_AUTH, _error_body, _redact_images, data_url
+from shared.config import Config
 
 IMAGE_RATIOS = ("1:1", "16:9", "4:3", "3:2", "2:3", "3:4", "9:16", "21:9")
 
@@ -149,8 +144,8 @@ class ComfyUIImageGenerator:
     完成后从历史记录取第一张输出图片。"""
 
     def __init__(self, config: Config):
-        from mindex.models.video_generators import ComfyUIVideoGenerator
-        from mindex.shared.comfyui import IMAGE_MAPPING_FIELDS
+        from models.video_generators import ComfyUIVideoGenerator
+        from shared.comfyui import IMAGE_MAPPING_FIELDS
 
         class Runner(ComfyUIVideoGenerator):
             label, noun, role = "ComfyUI 图片生成", "图片", "图片生成"

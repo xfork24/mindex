@@ -2,7 +2,8 @@
 
 运行：
 
-    uv run python eval/split_eval.py [--cases eval/split_cases.jsonl] [--materials JOB_ID] [--recall] [--output PATH]
+    uv run python eval/split_eval.py [--cases eval/split_cases.jsonl] [--materials JOB_ID] [--recall]
+[--output PATH]
 
 只读访问 data/：读取配置、生效索引与任务 job.json，不读写任务 workspace，不加锁；
 唯一写入的是评测报告（默认 data/eval-split-YYYYMMDD-HHMMSS.json）。
@@ -17,13 +18,13 @@ from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
 
-from mindex.models.storyboard import hard_check, is_short, measure, whole_sentence
+from models.storyboard import hard_check, is_short, measure, whole_sentence
 
 DEFAULT_CASES = Path(__file__).with_name("split_cases.jsonl")
 RECALL_TOP = 3
 NO_RECALL = "该镜无召回结果"
-WORDS_PER_SECOND = 2.5   # 英文每秒词数
-HAN_PER_SECOND = 4       # 中文每秒字数
+WORDS_PER_SECOND = 2.5  # 英文每秒词数
+HAN_PER_SECOND = 4  # 中文每秒字数
 
 
 # ---- 纯函数：指标（需求 11.2、11.11），供单元测试与属性测试直接调用 ----
@@ -106,22 +107,22 @@ def load_cases(path: Path) -> list[dict]:
 
 def recall_rows(searcher, query: str, granularity: str, filters) -> list[dict]:
     """与工作台召回阶段同一路径：TextSearch + 任务范围过滤，取前 3 条。"""
-    from mindex.shared.types import TextSearch
+    from shared.types import TextSearch
 
     if not query.strip():
         return []
-    result = searcher.text(
-        TextSearch(text=query, granularity=granularity, limit=RECALL_TOP, filters=filters)
-    )
+    result = searcher.text(TextSearch(text=query, granularity=granularity, limit=RECALL_TOP, filters=filters))
     rows = []
     for item in result.get("results", [])[:RECALL_TOP]:
         annotation = item.get("annotation") or {}
-        rows.append({
-            "source_name": item.get("source_name"),
-            "start": item.get("start"),
-            "end": item.get("end"),
-            "description": annotation.get("description") or item.get("description") or "",
-        })
+        rows.append(
+            {
+                "source_name": item.get("source_name"),
+                "start": item.get("start"),
+                "end": item.get("end"),
+                "description": annotation.get("description") or item.get("description") or "",
+            }
+        )
     return rows
 
 
@@ -184,11 +185,11 @@ def run(
 
     ``storyboarder``、``searcher``（SearchEngine 兼容，提供 ``text(TextSearch)``）、``store`` 可注入测试替身。
     """
-    from mindex.models.adapters import make_storyboarder
-    from mindex.shared.types import Filters
-    from mindex.studio import studio
-    from mindex.studio.material_digest import build_digest, merged_vocabulary
-    from mindex.studio.studio import SPLIT_VERSION
+    from models.adapters import make_storyboarder
+    from shared.types import Filters
+    from studio import studio
+    from studio.material_digest import build_digest, merged_vocabulary
+    from studio.studio import SPLIT_VERSION
 
     vocabulary = None
     scope = None
@@ -197,7 +198,7 @@ def run(
         state = studio.load_job(config, job_id)  # 只读 job.json；不存在时抛 EntityNotFound
         scope = studio.material_scope(state)
         if store is None:
-            from mindex.shared.storage import Store
+            from shared.storage import Store
 
             store = Store(config.data_dir)
         digest = build_digest(config, store, state)
@@ -206,13 +207,16 @@ def run(
             log(f"素材摘要为空：{digest.empty_reason}，本次拆分不使用素材画面词表")
         else:
             vocabulary = merged_vocabulary(digest)
-            log(f"素材摘要：{digest.source_count} 个素材、{digest.segment_count} 个镜头，画面词 {len(vocabulary or [])} 个")
+            log(
+                f"素材摘要：{digest.source_count} 个素材、{digest.segment_count} 个镜头，画面词 "
+                f"{len(vocabulary or [])} 个"
+            )
 
     search = None
     if recall:
         if searcher is None:
-            from mindex.search.search import SearchEngine
-            from mindex.shared.storage import Store
+            from search.search import SearchEngine
+            from shared.storage import Store
 
             active = (store or Store(config.data_dir)).active_index()
             if active is None:
@@ -230,7 +234,9 @@ def run(
         result = evaluate_case(
             case, storyboarder, max_shots=config.studio.max_shots, vocabulary=vocabulary, search=search
         )
-        state_text = "吻合" if result["matched"] else ("失败：" + result["error"] if result["error"] else "不吻合")
+        state_text = (
+            ("吻合") if result["matched"] else ("失败：" + result["error"] if result["error"] else "不吻合")
+        )
         log(f"[{number}/{len(cases)}] {result['id']}：{state_text}")
         results.append(result)
 
@@ -252,9 +258,9 @@ def report_path(data_dir: Path, now: datetime | None = None) -> Path:
 
 def effective_config(config_path: str | None):
     """读取配置并只读合并设置页的激活档案（不执行任何迁移写入）。"""
-    from mindex.settings.runtime_settings import apply_overrides
-    from mindex.shared.config import load_config
-    from mindex.shared.storage import Store
+    from settings.runtime_settings import apply_overrides
+    from shared.config import load_config
+    from shared.storage import Store
 
     config = load_config(config_path)
     if config.runtime_overrides and (config.data_dir / "metadata.sqlite3").is_file():
@@ -263,7 +269,7 @@ def effective_config(config_path: str | None):
 
 
 def main(argv: Sequence[str] | None = None, *, config=None, storyboarder=None, searcher=None) -> int:
-    from mindex.admin.curation import EntityNotFound
+    from admin.curation import EntityNotFound
 
     parser = argparse.ArgumentParser(description="拆分镜全链路评测")
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES, help="用例文件（JSONL）")
@@ -281,8 +287,12 @@ def main(argv: Sequence[str] | None = None, *, config=None, storyboarder=None, s
         return 2
     try:
         report = run(
-            config, cases, job_id=args.materials, recall=args.recall,
-            storyboarder=storyboarder, searcher=searcher,
+            config,
+            cases,
+            job_id=args.materials,
+            recall=args.recall,
+            storyboarder=storyboarder,
+            searcher=searcher,
         )
     except EntityNotFound:
         print(f"找不到创作任务：{args.materials}", file=sys.stderr)
@@ -292,7 +302,8 @@ def main(argv: Sequence[str] | None = None, *, config=None, storyboarder=None, s
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     m = report["metrics"]
     print(
-        f"切分吻合度 {m['match_rate']}%，过短分镜 {m['short_shots']} 个，平均分镜时长 {m['average_seconds']} 秒"
+        f"切分吻合度 {m['match_rate']}%，过短分镜 {m['short_shots']} 个，平均分镜时长 {m['average_seconds']} "
+        f"秒"
     )
     print(f"报告已写入 {output}")
     return 0

@@ -34,8 +34,14 @@ class TaskReceipt:
 class TaskQueue(Protocol):
     backend: str
 
-    def enqueue(self, fn: Callable[[], Any], *, task_id: str | None = None,
-                kind: str = "", dedupe_key: str | None = None) -> TaskReceipt: ...
+    def enqueue(
+        self,
+        fn: Callable[[], Any],
+        *,
+        task_id: str | None = None,
+        kind: str = "",
+        dedupe_key: str | None = None,
+    ) -> TaskReceipt: ...
 
 
 class InlineTaskQueue:
@@ -46,8 +52,14 @@ class InlineTaskQueue:
     def __init__(self):
         self.threads: dict[str, threading.Thread] = {}
 
-    def enqueue(self, fn: Callable[[], Any], *, task_id: str | None = None,
-                kind: str = "", dedupe_key: str | None = None) -> TaskReceipt:
+    def enqueue(
+        self,
+        fn: Callable[[], Any],
+        *,
+        task_id: str | None = None,
+        kind: str = "",
+        dedupe_key: str | None = None,
+    ) -> TaskReceipt:
         task_id = task_id or f"inline-{uuid.uuid4().hex}"
         thread = threading.Thread(
             target=fn, daemon=True, name=f"{kind or 'queue'}-{next(_THREAD_IDS)}-{task_id[:8]}"

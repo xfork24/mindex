@@ -11,7 +11,7 @@ const page = {
   job: query.get("job"), // 来源任务：“创作任务”标签回到该任务
   saving: false,
   previewing: false,
-  previewTimer: null
+  previewTimer: null,
 };
 const $ = (id) => document.getElementById(id);
 function el(tag, text, cls) {
@@ -22,7 +22,8 @@ function el(tag, text, cls) {
 }
 function notice(text, error = false) {
   const value = error ? MindexI18n.system(text) : text;
-  if (globalThis.MindexFeedback) return MindexFeedback.show("notice", value, error ? "error" : "info");
+  if (globalThis.MindexFeedback)
+    return MindexFeedback.show("notice", value, error ? "error" : "info");
   MindexI18n.setText($("notice"), value);
   $("notice").dataset.type = error ? "error" : "info";
 }
@@ -43,8 +44,15 @@ const editable = () => Boolean(page.selected && !page.selected.builtin);
 // ------------------------------------------------------------ 列表
 function matches(item, needle) {
   if (!needle) return true;
-  const text = [MindexI18n.render(templateName(item)), MindexI18n.render(templateCategory(item)), item.id,
-    MindexI18n.render(templateDescription(item)), item.instructions || ""].join("\n").toLowerCase();
+  const text = [
+    MindexI18n.render(templateName(item)),
+    MindexI18n.render(templateCategory(item)),
+    item.id,
+    MindexI18n.render(templateDescription(item)),
+    item.instructions || "",
+  ]
+    .join("\n")
+    .toLowerCase();
   return text.includes(needle);
 }
 function renderList() {
@@ -53,7 +61,7 @@ function renderList() {
   box.replaceChildren();
   const groups = [
     ["ui.templates_group_builtin", page.items.filter((item) => item.builtin)],
-    ["ui.templates_group_user", page.items.filter((item) => !item.builtin)]
+    ["ui.templates_group_user", page.items.filter((item) => !item.builtin)],
   ];
   let shown = 0;
   for (const [title, items] of groups) {
@@ -64,7 +72,9 @@ function renderList() {
     heading.append(el("span", String(items.length), "muted"));
     group.append(heading);
     if (!items.length && !needle && title === "ui.templates_group_user")
-      group.append(el("p", MindexI18n.msg("ui.templates_user_empty"), "muted template-group-empty"));
+      group.append(
+        el("p", MindexI18n.msg("ui.templates_user_empty"), "muted template-group-empty"),
+      );
     const list = el("ul", null, "template-items");
     for (const item of visible) {
       const li = el("li");
@@ -79,14 +89,17 @@ function renderList() {
       const sub = el("div", null, "job-sub");
       sub.append(el("span", templateCategory(item)), el("span", templateKind(item.kind)));
       entry.append(sub);
-      entry.addEventListener("click", () => select(item.id).catch((error) => notice(error.message, true)));
+      entry.addEventListener("click", () =>
+        select(item.id).catch((error) => notice(error.message, true)),
+      );
       li.append(entry);
       list.append(li);
     }
     if (visible.length) group.append(list);
     box.append(group);
   }
-  if (needle && !shown) box.append(el("p", MindexI18n.msg("ui.templates_filter_empty"), "muted template-group-empty"));
+  if (needle && !shown)
+    box.append(el("p", MindexI18n.msg("ui.templates_filter_empty"), "muted template-group-empty"));
 }
 
 // ------------------------------------------------------------ 详情与编辑
@@ -98,7 +111,7 @@ function formValues() {
     kind: $("tf-kind").value,
     description: $("tf-description").value.trim(),
     instructions: $("tf-instructions").value,
-    max_chars: limit ? Number(limit) : null
+    max_chars: limit ? Number(limit) : null,
   };
 }
 function itemValues(item) {
@@ -108,38 +121,59 @@ function itemValues(item) {
     kind: item.kind,
     description: item.description || "",
     instructions: item.instructions,
-    max_chars: item.constraints?.max_chars ?? null
+    max_chars: item.constraints?.max_chars ?? null,
   };
 }
 function dirty() {
-  return editable() && page.saved !== null && JSON.stringify(formValues()) !== JSON.stringify(page.saved);
+  return (
+    editable() && page.saved !== null && JSON.stringify(formValues()) !== JSON.stringify(page.saved)
+  );
 }
 function fillForm(item) {
   // 内置模板的名称、分类与说明按当前语言显示（只读）；自定义模板显示用户填写的原文。
   const values = itemValues(item);
   $("tf-name").value = item.builtin ? MindexI18n.render(templateName(item)) : values.name;
-  $("tf-category").value = item.builtin ? MindexI18n.render(templateCategory(item)) : values.category;
+  $("tf-category").value = item.builtin
+    ? MindexI18n.render(templateCategory(item))
+    : values.category;
   $("tf-kind").value = values.kind;
   $("tf-max-chars").value = values.max_chars ?? "";
-  $("tf-description").value = item.builtin ? MindexI18n.render(templateDescription(item)) : values.description;
+  $("tf-description").value = item.builtin
+    ? MindexI18n.render(templateDescription(item))
+    : values.description;
   $("tf-instructions").value = values.instructions;
   page.saved = item.builtin ? null : itemValues(item);
 }
 function renderTags(item) {
   const box = $("template-tags");
   box.replaceChildren(
-    el("span", MindexI18n.msg(item.builtin ? "ui.template_builtin" : "ui.template_user"), "template-tag"),
+    el(
+      "span",
+      MindexI18n.msg(item.builtin ? "ui.template_builtin" : "ui.template_user"),
+      "template-tag",
+    ),
     el("span", templateCategory(item), "template-tag"),
-    el("span", templateKind(item.kind), "template-tag")
+    el("span", templateKind(item.kind), "template-tag"),
   );
 }
 function renderMeta(item) {
-  const parts = [MindexI18n.msg("ui.templates_meta", { p0: item.id, p1: item.version, p2: String(item.hash || "").slice(0, 10) })];
+  const parts = [
+    MindexI18n.msg("ui.templates_meta", {
+      p0: item.id,
+      p1: item.version,
+      p2: String(item.hash || "").slice(0, 10),
+    }),
+  ];
   if (item.base_id) {
     const base = page.items.find((entry) => entry.id === item.base_id);
-    parts.push(MindexI18n.msg("ui.templates_meta_base", { p0: base ? templateName(base) : item.base_id }));
+    parts.push(
+      MindexI18n.msg("ui.templates_meta_base", { p0: base ? templateName(base) : item.base_id }),
+    );
   }
-  if (item.updated_at) parts.push(MindexI18n.msg("ui.templates_meta_updated", { p0: MindexI18n.date(item.updated_at) }));
+  if (item.updated_at)
+    parts.push(
+      MindexI18n.msg("ui.templates_meta_updated", { p0: MindexI18n.date(item.updated_at) }),
+    );
   MindexI18n.setText($("template-meta"), parts.join(" · "));
 }
 function renderDetail() {
@@ -150,21 +184,36 @@ function renderDetail() {
   MindexI18n.setText($("template-title"), templateName(item));
   renderTags(item);
   MindexI18n.setText($("template-description"), templateDescription(item));
-  MindexI18n.setText($("template-note"), MindexI18n.msg(item.builtin ? "ui.templates_builtin_note" : "ui.templates_user_note"));
+  MindexI18n.setText(
+    $("template-note"),
+    MindexI18n.msg(item.builtin ? "ui.templates_builtin_note" : "ui.templates_user_note"),
+  );
   $("template-note").classList.toggle("is-readonly", item.builtin);
-  for (const id of ["tf-name", "tf-category", "tf-max-chars", "tf-description", "tf-instructions"]) $(id).readOnly = item.builtin;
+  for (const id of ["tf-name", "tf-category", "tf-max-chars", "tf-description", "tf-instructions"])
+    $(id).readOnly = item.builtin;
   $("tf-kind").disabled = item.builtin;
   $("template-delete").hidden = item.builtin;
   $("template-revert").hidden = $("template-save").hidden = item.builtin;
-  MindexI18n.setAttr($("template-copy"), "aria-label", MindexI18n.msg("ui.template_copy_aria", { p0: templateName(item) }));
-  MindexI18n.setAttr($("template-delete"), "aria-label", MindexI18n.msg("ui.template_delete_aria", { p0: item.name }));
+  MindexI18n.setAttr(
+    $("template-copy"),
+    "aria-label",
+    MindexI18n.msg("ui.template_copy_aria", { p0: templateName(item) }),
+  );
+  MindexI18n.setAttr(
+    $("template-delete"),
+    "aria-label",
+    MindexI18n.msg("ui.template_delete_aria", { p0: item.name }),
+  );
   renderMeta(item);
   showError("template-error", null);
   updateForm();
 }
 function updateForm() {
   const value = $("tf-instructions").value;
-  MindexI18n.setText($("tf-instructions-count"), MindexI18n.msg("ui.templates_instructions_count", { p0: value.length }));
+  MindexI18n.setText(
+    $("tf-instructions-count"),
+    MindexI18n.msg("ui.templates_instructions_count", { p0: value.length }),
+  );
   const changed = dirty();
   $("template-dirty").hidden = !changed;
   $("template-save").disabled = !changed || page.saving;
@@ -172,7 +221,9 @@ function updateForm() {
   $("template-copy").disabled = $("template-delete").disabled = page.saving;
 }
 function confirmDiscard() {
-  return !dirty() || window.confirm(MindexI18n.render(MindexI18n.msg("ui.templates_discard_confirm")));
+  return (
+    !dirty() || window.confirm(MindexI18n.render(MindexI18n.msg("ui.templates_discard_confirm")))
+  );
 }
 function syncUrl() {
   const url = templatesPageUrl(page.selected?.id, page.job);
@@ -232,7 +283,9 @@ async function save(event) {
 async function copy() {
   if (!page.selected || !confirmDiscard()) return;
   const source = page.selected;
-  const name = MindexI18n.render(MindexI18n.msg("ui.template_copy_name", { p0: templateName(source) })).slice(0, 40);
+  const name = MindexI18n.render(
+    MindexI18n.msg("ui.template_copy_name", { p0: templateName(source) }),
+  ).slice(0, 40);
   const created = await api(templateUrl(source.id, "/copy"), "POST", { name });
   page.saved = null; // 已确认放弃当前修改
   await load(created.id);
@@ -243,7 +296,12 @@ async function copy() {
 async function remove() {
   if (!editable()) return;
   const item = page.selected;
-  if (!window.confirm(MindexI18n.render(MindexI18n.msg("ui.template_delete_confirm", { p0: item.name })))) return;
+  if (
+    !window.confirm(
+      MindexI18n.render(MindexI18n.msg("ui.template_delete_confirm", { p0: item.name })),
+    )
+  )
+    return;
   await api(templateUrl(item.id), "DELETE");
   page.selected = page.saved = null;
   await load(item.base_id || "base");
@@ -258,13 +316,20 @@ function revert() {
 
 // ------------------------------------------------------------ 试写
 function splitReferences(text) {
-  return text.split(/^\s*---\s*$/m).map((part) => part.trim()).filter(Boolean);
+  return text
+    .split(/^\s*---\s*$/m)
+    .map((part) => part.trim())
+    .filter(Boolean);
 }
 function rememberPreview() {
   try {
-    localStorage.setItem(PREVIEW_STORAGE, JSON.stringify({
-      outline: $("preview-outline").value, references: $("preview-references").value
-    }));
+    localStorage.setItem(
+      PREVIEW_STORAGE,
+      JSON.stringify({
+        outline: $("preview-outline").value,
+        references: $("preview-references").value,
+      }),
+    );
   } catch {}
 }
 function restorePreview() {
@@ -277,11 +342,18 @@ function restorePreview() {
   } catch {}
 }
 function previewBody() {
-  const body = { outline: $("preview-outline").value.trim(), references: splitReferences($("preview-references").value) };
+  const body = {
+    outline: $("preview-outline").value.trim(),
+    references: splitReferences($("preview-references").value),
+  };
   // 自定义模板总是带上表单里影响生成的字段（含未保存的修改）；内置模板只读，按服务端内容试写。
   if (editable()) {
     const values = formValues();
-    Object.assign(body, { kind: values.kind, instructions: values.instructions, max_chars: values.max_chars });
+    Object.assign(body, {
+      kind: values.kind,
+      instructions: values.instructions,
+      max_chars: values.max_chars,
+    });
   }
   return body;
 }
@@ -294,8 +366,13 @@ function setPreviewing(on) {
     return;
   }
   const started = Date.now();
-  const tick = () => MindexI18n.setText($("preview-status"),
-    MindexI18n.msg("ui.templates_preview_running", { p0: Math.round((Date.now() - started) / 1000) }));
+  const tick = () =>
+    MindexI18n.setText(
+      $("preview-status"),
+      MindexI18n.msg("ui.templates_preview_running", {
+        p0: Math.round((Date.now() - started) / 1000),
+      }),
+    );
   tick();
   page.previewTimer = setInterval(tick, 1000);
 }
@@ -304,18 +381,24 @@ async function runPreview() {
   showError("preview-error", null);
   const body = previewBody();
   const kind = body.kind || page.selected.kind;
-  if (!body.outline && !body.references.length) return showError("preview-error", MindexI18n.msg("ui.templates_preview_needs_input"));
+  if (!body.outline && !body.references.length)
+    return showError("preview-error", MindexI18n.msg("ui.templates_preview_needs_input"));
   if (kind === "rewrite" && !body.references.length)
     return showError("preview-error", MindexI18n.msg("ui.templates_preview_needs_references"));
-  if (editable() && !body.instructions.trim()) return showError("preview-error", MindexI18n.msg("ui.templates_required_fields"));
+  if (editable() && !body.instructions.trim())
+    return showError("preview-error", MindexI18n.msg("ui.templates_required_fields"));
   rememberPreview();
   const draft = dirty();
   setPreviewing(true);
   try {
     const result = await api(templateUrl(page.selected.id, "/preview"), "POST", body);
-    const meta = [MindexI18n.msg("ui.templates_preview_result", {
-      p0: result.chars, p1: result.limit, p2: (result.elapsed_ms / 1000).toFixed(1)
-    })];
+    const meta = [
+      MindexI18n.msg("ui.templates_preview_result", {
+        p0: result.chars,
+        p1: result.limit,
+        p2: (result.elapsed_ms / 1000).toFixed(1),
+      }),
+    ];
     if (draft) meta.push(MindexI18n.msg("ui.templates_preview_draft"));
     MindexI18n.setText($("preview-meta"), meta.join(" · "));
     $("preview-text").textContent = result.text; // 模型输出是内容，不做文案目录匹配
@@ -381,13 +464,21 @@ window.addEventListener("mindex:agent-mutation", (event) => {
   const detail = event.detail || {};
   if (detail.domain !== "studio" || !detail.templates) return;
   if (dirty()) {
-    api("/api/studio/templates").then((data) => {
-      page.items = data.items.map((item) => (item.id === page.selected?.id ? page.selected : item));
-      renderList();
-    }).catch(() => {});
+    api("/api/studio/templates")
+      .then((data) => {
+        page.items = data.items.map((item) =>
+          item.id === page.selected?.id ? page.selected : item,
+        );
+        renderList();
+      })
+      .catch(() => {});
   } else load().catch(() => {});
 });
-window.MindexAgentContext = () => ({ page: "studio", section: "templates", template_id: page.selected?.id || null });
+window.MindexAgentContext = () => ({
+  page: "studio",
+  section: "templates",
+  template_id: page.selected?.id || null,
+});
 // 助手要定位到某个创作任务时回到创作页；模板页本身没有可定位的区块。
 window.MindexAgentFocus = async (focus, { passive = false } = {}) => {
   if (focus.job_id && !passive) location.href = `/?job=${encodeURIComponent(focus.job_id)}`;

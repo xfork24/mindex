@@ -21,11 +21,11 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-from mindex.models.adapters import ModelError
-from mindex.models.deployment import create_manifest, read_manifest, space_contract
-from mindex.models.llama_cpp import checked_runtime, inspect_service
-from mindex.shared.config import Config, fingerprint
-from mindex.shared.jsonio import save
+from models.adapters import ModelError
+from models.deployment import create_manifest, read_manifest, space_contract
+from models.llama_cpp import checked_runtime, inspect_service
+from shared.config import Config, fingerprint
+from shared.jsonio import save
 
 PIN_ROLES = ("embedding", "asr", "analyzer")
 LOOPBACK = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
@@ -70,7 +70,9 @@ def _flag(argv: list[str], names: tuple[str, ...]) -> str | None:
 
 def listening_process(port: int) -> dict | None:
     """本机监听该端口的进程：pid、命令行与工作目录（尽力而为，失败返回 None）。"""
-    pids = [line.strip() for line in _run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"]).splitlines()]
+    pids = [
+        line.strip() for line in _run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"]).splitlines()
+    ]
     pid = next((p for p in pids if p.isdigit()), None)
     if pid is None:
         return None
@@ -79,8 +81,14 @@ def listening_process(port: int) -> dict | None:
     if proc_cwd.exists():
         cwd = os.readlink(proc_cwd)
     else:
-        cwd = next((line[1:] for line in _run(["lsof", "-a", "-p", pid, "-d", "cwd", "-Fn"]).splitlines()
-                    if line.startswith("n")), None)
+        cwd = next(
+            (
+                line[1:]
+                for line in _run(["lsof", "-a", "-p", pid, "-d", "cwd", "-Fn"]).splitlines()
+                if line.startswith("n")
+            ),
+            None,
+        )
     try:
         argv = shlex.split(command)
     except ValueError:
@@ -160,7 +168,9 @@ def matching_manifests(config: Config, role: str, report: dict, prefer: str | No
             if role == "embedding" and service.quantization != pinned["quantization"]:
                 continue
             checked_runtime(service, pinned)
-            if role == "embedding" and pinned["space_contract"] != space_contract(config, pinned["file_identity"]):
+            if role == "embedding" and pinned["space_contract"] != space_contract(
+                config, pinned["file_identity"]
+            ):
                 continue
             matches.append(path)
         except (ModelError, OSError, ValueError, KeyError, TypeError):
@@ -174,8 +184,13 @@ def probe(config: Config, role: str, *, current_manifest: str | None = None) -> 
     try:
         report = inspect_service(service)
     except (ModelError, ValueError, KeyError, TypeError) as exc:
-        return {"ready": False, "role": role, "base_url": service.base_url, "error": str(exc),
-                "error_type": type(exc).__name__}
+        return {
+            "ready": False,
+            "role": role,
+            "base_url": service.base_url,
+            "error": str(exc),
+            "error_type": type(exc).__name__,
+        }
     detected = detect_files(config, service, report)
     reusable = matching_manifests(config, role, report, prefer=current_manifest)
     return {
@@ -186,8 +201,8 @@ def probe(config: Config, role: str, *, current_manifest: str | None = None) -> 
         "detected": detected,
         "reusable_manifests": [manifest_ref(config, p) for p in reusable],
         "current_manifest": current_manifest,
-        "current_manifest_valid": bool(current_manifest) and any(
-            p.resolve() == Path(current_manifest).resolve() for p in reusable),
+        "current_manifest_valid": bool(current_manifest)
+        and any(p.resolve() == Path(current_manifest).resolve() for p in reusable),
     }
 
 
@@ -233,20 +248,32 @@ def pin(
         weights_file = weights_file or detected["weights_file"]
         mmproj_file = mmproj_file or detected["mmproj_file"]
         server_cwd = server_cwd or detected["server_cwd"]
-        missing = [name for name, value in (("weights_file", weights_file), ("mmproj_file", mmproj_file),
-                                            ("server_cwd", server_cwd)) if not value]
+        missing = [
+            name
+            for name, value in (
+                ("weights_file", weights_file),
+                ("mmproj_file", mmproj_file),
+                ("server_cwd", server_cwd),
+            )
+            if not value
+        ]
         if missing:
             raise ModelError(
                 f"无法自动定位 {', '.join(missing)}（服务不在本机或 /props 未报告）；"
-                "请提供部署机上的 GGUF/mmproj 文件路径，或改用 weights_sha256/mmproj_sha256 声明")
+                "请提供部署机上的 GGUF/mmproj 文件路径，或改用 weights_sha256/mmproj_sha256 声明"
+            )
     if not quantization:
         quantization = service.quantization if role == "embedding" else report["metadata"].get("ftype")
     pinned = create_manifest(
-        config, role, report, str(quantization or ""),
+        config,
+        role,
+        report,
+        str(quantization or ""),
         weights_file=Path(weights_file).expanduser() if not remote else None,
         mmproj_file=Path(mmproj_file).expanduser() if not remote else None,
         server_cwd=Path(server_cwd).expanduser() if not remote else None,
-        weights_sha256=weights_sha256, mmproj_sha256=mmproj_sha256,
+        weights_sha256=weights_sha256,
+        mmproj_sha256=mmproj_sha256,
         launch_parameters=launch_parameters or {},
     )
     folder = Path(config.data_dir) / "deployments"
@@ -280,7 +307,7 @@ def _with_manifest(config: Config, role: str, path: Path) -> Config:
 
 def gate_status(config: Config) -> dict:
     """嵌入清单关联后，核对六片段 smoke 能力门槛（不推理）。"""
-    from mindex.models.adapters import make_embedder
+    from models.adapters import make_embedder
 
     embedder = make_embedder(config)
     try:

@@ -1,3 +1,5 @@
+"""素材管理页 REST 接口:素材列表、上传与处理任务的 HTTP 路由。"""
+
 from __future__ import annotations
 
 import threading
@@ -5,9 +7,9 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, UploadFile
 
-from mindex.admin.curation import CurationPatch, Library, Visibility, segment_public
-from mindex.shared.shot_media import file_response as FileResponse
-from mindex.shared.storage import Store
+from admin.curation import CurationPatch, Library, Visibility, segment_public
+from shared.shot_media import file_response as FileResponse
+from shared.storage import Store
 
 # Process-wide cap on concurrent FFmpeg frame decodes for /sources/{id}/frame.
 FRAME_SLOTS = threading.BoundedSemaphore(4)
@@ -27,10 +29,11 @@ def admin_router(store: Store, runtime=None, backends=None) -> APIRouter:
     media = backends.media if backends is not None else None
     pins = None
     if media is not None and getattr(media, "backend", "local") == "s3":
-        from mindex.shared.media_delivery import DownloadPins
+        from shared.media_delivery import DownloadPins
 
         pins = DownloadPins(store, backends.library_id)
-    from mindex.admin.work_cache import WorkCache
+    from admin.work_cache import WorkCache
+
     work_cache = WorkCache(library)
 
     @router.post("/sources/upload", status_code=201)
@@ -40,15 +43,16 @@ def admin_router(store: Store, runtime=None, backends=None) -> APIRouter:
 
         from starlette.concurrency import run_in_threadpool
 
-        from mindex.processing.pipeline import Pipeline
-        from mindex.shared.media import MediaError
-        from mindex.shared.uploads import save_upload
+        from processing.pipeline import Pipeline
+        from shared.media import MediaError
+        from shared.uploads import save_upload
 
         config = runtime.current().model_copy(deep=True)
         name = (file.filename or "video.mp4").replace("\\", "/").rsplit("/", 1)[-1]
         if name in {"", ".", ".."}:
             await file.close()
             raise HTTPException(422, "无效的文件名")
+
         def reserve() -> Path:
             directory = store.root / "sources" / ".uploads"
             directory.mkdir(parents=True, exist_ok=True)
@@ -59,7 +63,7 @@ def admin_router(store: Store, runtime=None, backends=None) -> APIRouter:
         try:
             await save_upload(file, path, config.source_upload_max_bytes)
             try:
-                from mindex.shared.upload_sessions import adopt_path
+                from shared.upload_sessions import adopt_path
 
                 await run_in_threadpool(adopt_path, store, config, path, name)
                 return await run_in_threadpool(Pipeline(config).register, path, original_name=name, move=True)
@@ -71,7 +75,7 @@ def admin_router(store: Store, runtime=None, backends=None) -> APIRouter:
 
     @router.post("/sources/import-upload/{asset_id}", status_code=201)
     def import_uploaded_source(asset_id: str):
-        from mindex.processing.pipeline import Pipeline
+        from processing.pipeline import Pipeline
 
         row = store.one("SELECT * FROM uploaded_assets WHERE id=?", (asset_id,))
         if row is None:
@@ -94,23 +98,28 @@ def admin_router(store: Store, runtime=None, backends=None) -> APIRouter:
     def source(source_id: str, detail: Literal["full", "summary", "work"] = "full"):
         config = runtime.current() if runtime else None
         value = work_cache.get(source_id) if detail == "work" else library.source(source_id, detail=detail)
-        from mindex.shared.media_groups import Groups
+        from shared.media_groups import Groups
+
         value["groups"] = Groups(store).for_member("source", source_id)
         return {**value, "enforce_gpu_lock": config.enforce_gpu_lock if config else False}
 
     @router.post("/sources/{source_id}/work-cache/refresh")
     def refresh_work_cache(source_id: str):
         config = runtime.current() if runtime else None
-        return {**work_cache.refresh(source_id), "work_refreshing": False,
-                "enforce_gpu_lock": config.enforce_gpu_lock if config else False}
+        return {
+            **work_cache.refresh(source_id),
+            "work_refreshing": False,
+            "enforce_gpu_lock": config.enforce_gpu_lock if config else False,
+        }
 
     @router.api_route("/sources/{source_id}/media", methods=["GET", "HEAD"])
     def source_media(source_id: str):
         library.source_row(source_id)
         try:
-            from mindex.shared.shot_media import ShotMedia
+            from shared.shot_media import ShotMedia
+
             if pins is not None:
-                from mindex.shared.media_delivery import materialized_response
+                from shared.media_delivery import materialized_response
 
                 return materialized_response(ShotMedia(store).materialized(source_id), media_type="video/mp4")
             return FileResponse(ShotMedia(store).materialize(source_id), media_type="video/mp4")
@@ -119,7 +128,8 @@ def admin_router(store: Store, runtime=None, backends=None) -> APIRouter:
 
     @router.get("/sources/{source_id}/playlist")
     def source_playlist(source_id: str):
-        from mindex.shared.shot_media import ShotMedia
+        from shared.shot_media import ShotMedia
+
         library.source_row(source_id)
         return ShotMedia(store).playlist(source_id, prefix="/api/admin/shots")
 
@@ -134,8 +144,8 @@ def admin_router(store: Store, runtime=None, backends=None) -> APIRouter:
         import json
         import math
 
-        from mindex.shared.media import MediaError
-        from mindex.shared.shot_media import ShotMedia
+        from shared.media import MediaError
+        from shared.shot_media import ShotMedia
 
         row = store.one("SELECT media FROM sources WHERE id=?", (source_id,))
         if row is None:
@@ -161,8 +171,8 @@ def admin_router(store: Store, runtime=None, backends=None) -> APIRouter:
     @router.get("/sources/{source_id}/report")
     def source_report(source_id: str):
         # 同步端点：FastAPI 在线程池执行，避免逐文件检查阻塞事件循环。
-        from mindex.diagnostics.film import source_report as build_report
-        from mindex.shared.config import Config
+        from diagnostics.film import source_report as build_report
+        from shared.config import Config
 
         library.source_row(source_id)
         config = runtime.current() if runtime else Config(data_dir=store.root)
@@ -176,7 +186,7 @@ def admin_router(store: Store, runtime=None, backends=None) -> APIRouter:
         shot = store.one("SELECT * FROM segments WHERE id=? AND kind='shot'", (shot_id,))
         if not shot:
             raise HTTPException(404, "找不到镜头")
-        return FileResponse(store.resolve_media(shot['path']), media_type="video/mp4")
+        return FileResponse(store.resolve_media(shot["path"]), media_type="video/mp4")
 
     @router.patch("/sources/{source_id}")
     def patch_source(source_id: str, value: CurationPatch):
@@ -186,9 +196,9 @@ def admin_router(store: Store, runtime=None, backends=None) -> APIRouter:
     def delete_source(source_id: str):
         from filelock import Timeout
 
-        from mindex.maintenance.purge import PurgeRefused, purge_source
-        from mindex.shared.config import Config
-        from mindex.shared.processing_lock import ProcessingLock, index_write_lock
+        from maintenance.purge import PurgeRefused, purge_source
+        from shared.config import Config
+        from shared.processing_lock import ProcessingLock, index_write_lock
 
         config = runtime.current() if runtime else Config(data_dir=store.root)
         lock = ProcessingLock(config, source_id=source_id, deleting=True)
@@ -225,7 +235,8 @@ def admin_router(store: Store, runtime=None, backends=None) -> APIRouter:
 
     @router.get("/segments/{segment_id}/details")
     def details(segment_id: str):
-        from mindex.admin.segment_details import segment_details
+        from admin.segment_details import segment_details
+
         return segment_details(store, segment_id)
 
     @router.patch("/segments/{segment_id}")
@@ -244,11 +255,14 @@ def admin_router(store: Store, runtime=None, backends=None) -> APIRouter:
             name = name.replace("/", "_").replace("\\", "_")
             filename = f"{name}_{row['kind']}_{row['start']:.3f}-{row['end']:.3f}.mp4"
         if pins is not None:
-            from mindex.shared.media_delivery import materialized_response
+            from shared.media_delivery import materialized_response
 
             try:
-                return materialized_response(store.materialize_media(row[field]),
-                    media_type="video/mp4" if field == "path" else "image/jpeg", filename=filename)
+                return materialized_response(
+                    store.materialize_media(row[field]),
+                    media_type="video/mp4" if field == "path" else "image/jpeg",
+                    filename=filename,
+                )
             except FileNotFoundError as exc:
                 raise HTTPException(404, "素材文件缺失，请通过 split 命令修复") from exc
         return FileResponse(
@@ -257,9 +271,12 @@ def admin_router(store: Store, runtime=None, backends=None) -> APIRouter:
 
     @router.get("/segments/{segment_id}/playlist")
     def segment_playlist(segment_id: str):
-        from mindex.shared.shot_media import ShotMedia
+        from shared.shot_media import ShotMedia
+
         row = library.segment_row(segment_id)
-        return ShotMedia(store).playlist(row['source_id'], row['start'], row['end'], prefix="/api/admin/shots")
+        return ShotMedia(store).playlist(
+            row["source_id"], row["start"], row["end"], prefix="/api/admin/shots"
+        )
 
     @router.api_route("/segments/{segment_id}/media", methods=["GET", "HEAD"])
     def media(segment_id: str, download: bool = False):

@@ -1,14 +1,15 @@
 """闭合计划：运行准入、物理资源占用与冷节点身份边界。"""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 
 import pytest
 
-from mindex.shared.backends import open_context
-from mindex.shared.config import Config
-from mindex.shared.external_calls import ReviewRequired
-from mindex.shared.gpu_resources import GpuResources, required_groups
+from shared.backends import open_context
+from shared.config import Config
+from shared.external_calls import ReviewRequired
+from shared.gpu_resources import GpuResources, required_groups
 
 
 def _task(number):
@@ -24,8 +25,18 @@ def test_cluster_requires_explicit_resource_declaration(tmp_path):
 
 
 def test_physical_groups_share_capacity_and_unknown_is_not_reclaimed(tmp_path):
-    config = Config(data_dir=tmp_path, gpu={"groups": {
-        "physical-0": {"capacity": 1, "queues": ["source", "dialogue"], "services": ["embedding", "asr"]}}})
+    config = Config(
+        data_dir=tmp_path,
+        gpu={
+            "groups": {
+                "physical-0": {
+                    "capacity": 1,
+                    "queues": ["source", "dialogue"],
+                    "services": ["embedding", "asr"],
+                }
+            }
+        },
+    )
     with open_context(config) as context:
         resources = GpuResources(context.store)
         assert resources.acquire(config, _task(1))
@@ -54,8 +65,8 @@ def test_resource_capacity_mismatch_cannot_override_existing_declaration(tmp_pat
 
 
 def test_protocol_and_derived_index_admission(tmp_path):
-    from mindex.models.adapters import ModelError
-    from mindex.shared.admission import validate_index, validate_protocol
+    from models.adapters import ModelError
+    from shared.admission import validate_index, validate_protocol
 
     with open_context(Config(data_dir=tmp_path)) as context:
         validate_protocol(context.store)
@@ -89,33 +100,39 @@ def pg_config(tmp_path, monkeypatch):
         pytest.skip("需要隔离 MINDEX_TEST_POSTGRES_DSN")
     import psycopg
 
-    from mindex.shared.db.migrate_pg import migrate_pg
+    from shared.db.migrate_pg import migrate_pg
 
     monkeypatch.setenv("MINDEX_DATABASE_DSN", dsn)
     with psycopg.connect(dsn, autocommit=True) as db:
         db.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public")
     with psycopg.connect(dsn) as db:
         migrate_pg(db)
-    return Config(data_dir=tmp_path / "node-a", runtime_overrides=False,
-                  database={"backend": "postgres"}, queue={"backend": "postgres"}, locks={"backend": "postgres"})
+    return Config(
+        data_dir=tmp_path / "node-a",
+        runtime_overrides=False,
+        database={"backend": "postgres"},
+        queue={"backend": "postgres"},
+        locks={"backend": "postgres"},
+    )
 
 
 @pytest.mark.requires_postgres
 def test_pg_resource_occupancy_survives_task_ttl_and_reclaim(pg_config):
     import time
 
-    from mindex.shared.db.queue_pg import PgTaskQueue
+    from shared.db.queue_pg import PgTaskQueue
 
-    pg_config.gpu = type(pg_config.gpu).model_validate({"groups": {
-        "physical": {"capacity": 1, "queues": ["source", "dialogue"]}}})
+    pg_config.gpu = type(pg_config.gpu).model_validate(
+        {"groups": {"physical": {"capacity": 1, "queues": ["source", "dialogue"]}}}
+    )
     with open_context(pg_config) as context:
         queue = PgTaskQueue(context.library_id)
         with context.store.connect() as db:
             queue.enqueue(db, "source", {})
-            task = queue.claim(db, "old", ["source"], ttl=.03)
+            task = queue.claim(db, "old", ["source"], ttl=0.03)
         resources = GpuResources(context.store)
         assert resources.acquire(pg_config, task)
-        time.sleep(.05)
+        time.sleep(0.05)
         with context.store.connect() as db:
             assert queue.reclaim_expired(db) == 1
         assert resources.pending()[0]["state"] == "unknown"
@@ -132,14 +149,23 @@ def test_cli_prepare_uses_same_persistent_source_ledger(pg_config, video_file, t
 
     import yaml
     from typer.testing import CliRunner
+    from worker_runtime import Worker
 
-    from mindex.cli import app
-    from mindex.shared.storage import Store
-    from mindex.worker_runtime import Worker
+    from cli import app
+    from shared.storage import Store
 
     config_file = tmp_path / "node.yaml"
-    config_file.write_text(yaml.safe_dump({"data_dir": str(pg_config.data_dir), "runtime_overrides": False,
-        "database": {"backend": "postgres"}, "queue": {"backend": "postgres"}, "locks": {"backend": "postgres"}}))
+    config_file.write_text(
+        yaml.safe_dump(
+            {
+                "data_dir": str(pg_config.data_dir),
+                "runtime_overrides": False,
+                "database": {"backend": "postgres"},
+                "queue": {"backend": "postgres"},
+                "locks": {"backend": "postgres"},
+            }
+        )
+    )
     worker = Worker(pg_config, queues=["source"], idle_exit=15)
     thread = threading.Thread(target=worker.run)
     thread.start()

@@ -10,11 +10,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from mindex.shared.config import fingerprint, portable_parameters
-from mindex.shared.shot_media import ShotMedia
-from mindex.shared.storage import Store
-from mindex.studio import studio
-from mindex.studio.studio_artifacts import digest
+from shared.config import fingerprint, portable_parameters
+from shared.shot_media import ShotMedia
+from shared.storage import Store
+from studio import studio
+from studio.artifacts import digest
 
 from .stages import handler, names, parse_final_key
 from .versions import root, valid_files, version
@@ -42,7 +42,7 @@ class DetailContext:
         results in memory across shots and reads the persisted probe cache without a
         per-file lock, so a job's shots that share source media are probed once."""
         if self._media is None:
-            from mindex.shared.shot_media import ShotMedia
+            from shared.shot_media import ShotMedia
 
             self._media = ShotMedia(self.database(config), reuse_checks=True)
         return self._media
@@ -51,11 +51,16 @@ class DetailContext:
 def settings(config, p, stage, *, context=None):
     if context is not None:
         if stage not in context.settings:
-            context.settings[stage] = portable_parameters(config, _settings(
-                config, p, stage,
-                store=context.database(config) if handler(stage).uses_store else None,
-                display=context.display,
-            ))
+            context.settings[stage] = portable_parameters(
+                config,
+                _settings(
+                    config,
+                    p,
+                    stage,
+                    store=context.database(config) if handler(stage).uses_store else None,
+                    display=context.display,
+                ),
+            )
         return context.settings[stage]
     return portable_parameters(config, _settings(config, p, stage))
 
@@ -85,7 +90,9 @@ def recall_signature(recall):
     if not recall:
         return None
     value = studio.ShotRecall.model_validate(recall) if isinstance(recall, dict) else recall
-    filters = {k: v for k, v in value.filters.model_dump().items() if k != "source_ids" and v not in (None, 0, [])}
+    filters = {
+        k: v for k, v in value.filters.model_dump().items() if k != "source_ids" and v not in (None, 0, [])
+    }
     if value.filters.source_group_ids:
         filters["source_group_ids"] = sorted(set(value.filters.source_group_ids))
     sources = sorted(value.filters.selected_sources())
@@ -152,7 +159,9 @@ def comparable_parameters(config, parameters, expected):
 
 
 def parameters_match(config, parameters, expected):
-    return comparable_parameters(config, parameters, expected) == comparable_parameters(config, expected, expected)
+    return comparable_parameters(config, parameters, expected) == comparable_parameters(
+        config, expected, expected
+    )
 
 
 PARAMETER_LABELS = {
@@ -180,6 +189,7 @@ def parameter_conflicts(config, previous, current):
 
     def display(value):
         import json
+
         return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
     def walk(old, new, path=""):
@@ -201,8 +211,7 @@ def signature_matches(config, job_id, w, p, stage, sid, item, expected, *, conte
         return False
     # Reconstruct the current payload with the historical path spelling. This
     # verifies the original hash without rewriting immutable version records.
-    legacy = specification(config, job_id, w, p, stage, sid, context=context,
-                           parameters=item["parameters"])
+    legacy = specification(config, job_id, w, p, stage, sid, context=context, parameters=item["parameters"])
     return item["signature"] == legacy["signature"]
 
 
@@ -218,7 +227,9 @@ def conflicts(config, job_id, w, p, stage, sid, vid, *, context=None):
     if item["incomplete"]:
         messages.append("历史记录不完整，无法验证依赖与参数")
     # 钉住的版本（人工修改的动画源码）按设计跨签名复用，不报告自身的签名差异；上游冲突照常递归。
-    if not pinned and not signature_matches(config, job_id, w, p, stage, sid, item, expected, context=context):
+    if not pinned and not signature_matches(
+        config, job_id, w, p, stage, sid, item, expected, context=context
+    ):
         messages.extend(stage_handler.conflict_labels(config, w, item, expected, list(messages)))
         for key, value in expected["inputs"].items():
             if key != "content" and item["inputs"].get(key) != value:

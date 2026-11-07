@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from mindex.shared.config import Config
+from shared.config import Config
 
 pytestmark = pytest.mark.requires_postgres
 
@@ -23,15 +23,16 @@ DSN = os.environ.get("MINDEX_TEST_POSTGRES_DSN", "")
 def _pg_config(tmp_path, monkeypatch) -> Config:
     import psycopg
 
-    from mindex.shared.db.migrate_pg import migrate_pg
+    from shared.db.migrate_pg import migrate_pg
 
     monkeypatch.setenv("MINDEX_DATABASE_DSN", DSN)
     with psycopg.connect(DSN, autocommit=True) as conn:
         conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
     with psycopg.connect(DSN) as conn:
         migrate_pg(conn)
-    config = Config(data_dir=tmp_path / "data",
-                    database={"backend": "postgres"}, queue={"backend": "postgres"})
+    config = Config(
+        data_dir=tmp_path / "data", database={"backend": "postgres"}, queue={"backend": "postgres"}
+    )
     config.embedding.dimensions = 8
     return config
 
@@ -44,8 +45,8 @@ def pg_config(tmp_path, monkeypatch):
 
 
 def _enqueue(pg_config, kind, payload, **kwargs):
-    from mindex.shared.backends import open_context
-    from mindex.shared.db.queue_pg import PgTaskQueue
+    from shared.backends import open_context
+    from shared.db.queue_pg import PgTaskQueue
 
     ctx = open_context(pg_config)
     queue = PgTaskQueue(ctx.library_id)
@@ -54,23 +55,24 @@ def _enqueue(pg_config, kind, payload, **kwargs):
 
 
 def test_worker_executes_selftest_and_completes(pg_config, tmp_path):
-    from mindex.worker_runtime import Worker
+    from worker_runtime import Worker
 
     marker = tmp_path / "selftest.json"
     done = marker  # 处理器把 attempt 信息写盘，验证外部产物按 attempt 组织
 
     def selftest(config, task):
-        done.write_text(json.dumps({"task": task.id, "attempt": task.attempt_id,
-                                    "token": task.fencing_token}), encoding="utf-8")
+        done.write_text(
+            json.dumps({"task": task.id, "attempt": task.attempt_id, "token": task.fencing_token}),
+            encoding="utf-8",
+        )
 
     task_id = _enqueue(pg_config, "selftest", {"note": "hi"}, dedupe_key="st-1")
-    worker = Worker(pg_config, queues=["selftest"], once=True,
-                    extra_handlers={"selftest": selftest})
+    worker = Worker(pg_config, queues=["selftest"], once=True, extra_handlers={"selftest": selftest})
     executed = worker.run()
     assert executed == 1
     recorded = json.loads(done.read_text(encoding="utf-8"))
     assert recorded["task"] == task_id and recorded["attempt"]
-    from mindex.shared.backends import open_context
+    from shared.backends import open_context
 
     ctx = open_context(pg_config)
     with ctx.db.connect() as db:
@@ -80,35 +82,43 @@ def test_worker_executes_selftest_and_completes(pg_config, tmp_path):
 
 def test_worker_stale_attempt_does_not_commit(pg_config):
     """暂停超过 TTL 的执行不得提交（plans §11 阶段 3 闸门）。"""
-    from mindex.shared.backends import open_context
-    from mindex.shared.db.queue_pg import PgTaskQueue
-    from mindex.worker_runtime import Worker
+    from worker_runtime import Worker
+
+    from shared.backends import open_context
+    from shared.db.queue_pg import PgTaskQueue
 
     _enqueue(pg_config, "selftest", {}, dedupe_key="stale-1")
     # ttl=0.5s、心跳间隔 10s（不会抢救）：处理器睡 1.5s → 租约过期 → 完成被拒
-    worker = Worker(pg_config, queues=["selftest"], once=True, task_ttl=0.5,
-                    renew_interval=10.0,
-                    extra_handlers={"selftest": lambda config, task: time.sleep(1.5)})
+    worker = Worker(
+        pg_config,
+        queues=["selftest"],
+        once=True,
+        task_ttl=0.5,
+        renew_interval=10.0,
+        extra_handlers={"selftest": lambda config, task: time.sleep(1.5)},
+    )
     assert worker.run() == 1  # 执行了，但完成提交被拒
     ctx = open_context(pg_config)
     with ctx.db.connect() as db:
         row = db.execute("SELECT status FROM task_queue WHERE dedupe_key='stale-1'").fetchone()
         assert row["status"] in ("running", "pending")  # 未被认定成功；回收后重派
         PgTaskQueue(ctx.library_id).reclaim_expired(db)
-        assert db.execute("SELECT status FROM task_queue WHERE dedupe_key='stale-1'"
-                          ).fetchone()["status"] == "pending"
+        assert (
+            db.execute("SELECT status FROM task_queue WHERE dedupe_key='stale-1'").fetchone()["status"]
+            == "pending"
+        )
 
 
 def test_worker_failure_goes_to_retry(pg_config):
-    from mindex.shared.backends import open_context
-    from mindex.worker_runtime import Worker
+    from worker_runtime import Worker
+
+    from shared.backends import open_context
 
     def boom(config, task):
         raise RuntimeError("合成失败")
 
     _enqueue(pg_config, "selftest", {}, dedupe_key="fail-1", max_attempts=1)
-    Worker(pg_config, queues=["selftest"], once=True,
-           extra_handlers={"selftest": boom}).run()
+    Worker(pg_config, queues=["selftest"], once=True, extra_handlers={"selftest": boom}).run()
     ctx = open_context(pg_config)
     with ctx.db.connect() as db:
         row = db.execute("SELECT status, error FROM task_queue WHERE dedupe_key='fail-1'").fetchone()
@@ -117,31 +127,35 @@ def test_worker_failure_goes_to_retry(pg_config):
 
 def test_backlog_scan_enqueues_stranded_ledger_rows(pg_config):
     """账本 queued 但入队前崩溃：补偿扫描幂等补入（durable outbox 简化变体）。"""
-    from mindex.shared.queue_dispatch import enqueue_backlog
-    from mindex.shared.storage import Store
+    from shared.queue_dispatch import enqueue_backlog
+    from shared.storage import Store
 
     store = Store.open(pg_config)
-    store.execute("INSERT INTO source_tasks(id,source_id,work,status,config,options) "
-                  "VALUES('t-strand','s1','detect','queued','{}','{}')")
+    store.execute(
+        "INSERT INTO source_tasks(id,source_id,work,status,config,options) "
+        "VALUES('t-strand','s1','detect','queued','{}','{}')"
+    )
     first = enqueue_backlog(pg_config)
     again = enqueue_backlog(pg_config)
     assert first == {"source_tasks": 1}
     assert again == {"source_tasks": 1}  # 幂等：dedupe 命中
     with store.backend.connect() as db:
-        rows = db.execute("SELECT count(*) AS n FROM task_queue WHERE dedupe_key='source_tasks:t-strand'").fetchone()
+        rows = db.execute(
+            "SELECT count(*) AS n FROM task_queue WHERE dedupe_key='source_tasks:t-strand'"
+        ).fetchone()
     assert rows["n"] == 1
 
 
 def test_dispatch_api_to_worker_end_to_end(pg_config, video_file):
     """API 创建 source 任务（postgres 队列）→ worker 执行 → 账本与队列同为终态。"""
-    from conftest import FixtureAnalyzer, FixtureEmbedder
     from fastapi.testclient import TestClient
+    from worker_runtime import Worker
 
-    from mindex.api import create_app
-    from mindex.processing.pipeline import Pipeline
-    from mindex.shared.backends import open_context
-    from mindex.shared.db.queue_pg import PgTaskQueue
-    from mindex.worker_runtime import Worker
+    from api import create_app
+    from conftest import FixtureAnalyzer, FixtureEmbedder
+    from processing.pipeline import Pipeline
+    from shared.backends import open_context
+    from shared.db.queue_pg import PgTaskQueue
 
     embedder = FixtureEmbedder(pg_config)
     pipeline = Pipeline(pg_config, analyzer=FixtureAnalyzer(embedder))
@@ -162,8 +176,8 @@ def test_dispatch_api_to_worker_end_to_end(pg_config, video_file):
     assert ledger["status"] == "complete"
     with ctx.db.connect() as db:
         queue_row = db.execute(
-            "SELECT status FROM task_queue WHERE dedupe_key=%s",
-            (f"source_tasks:{task['id']}",)).fetchone()
+            "SELECT status FROM task_queue WHERE dedupe_key=%s", (f"source_tasks:{task['id']}",)
+        ).fetchone()
     assert queue_row["status"] == "succeeded"
     assert PgTaskQueue(ctx.library_id)  # 队列原语与上下文共享 library_id 语义
 
@@ -171,9 +185,9 @@ def test_dispatch_api_to_worker_end_to_end(pg_config, video_file):
 def test_topic_scheduler_leader_lease_gates_ticks(pg_config):
     """locks.backend=postgres 时同一时刻只有一个调度角色触发（plans §7.2）。"""
 
-    from mindex.shared.backends import open_context
-    from mindex.shared.db.locks_pg import PgLockProvider
-    from mindex.topics.scheduler import LEADER_NAME, TopicScheduler
+    from shared.backends import open_context
+    from shared.db.locks_pg import PgLockProvider
+    from topics.scheduler import LEADER_NAME, TopicScheduler
 
     ctx = open_context(pg_config)
     provider_a = PgLockProvider(ctx.db.backend, library_id=ctx.library_id)

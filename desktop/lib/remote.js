@@ -21,25 +21,45 @@ function problem(code) {
 }
 
 function normalizeUrl(raw) {
-  const value = String(raw || "").trim().replace(/\/+$/, "");
+  const value = String(raw || "")
+    .trim()
+    .replace(/\/+$/, "");
   if (!value) return null;
   let parsed;
-  try { parsed = new URL(value); } catch { return null; }
-  if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password ||
-      parsed.search || parsed.hash || !["", "/"].includes(parsed.pathname)) return null;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+  if (
+    !["http:", "https:"].includes(parsed.protocol) ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    !["", "/"].includes(parsed.pathname)
+  )
+    return null;
   return parsed.origin;
 }
 
 function requireStorage(storage) {
-  if (!storage?.isEncryptionAvailable() ||
-      (process.platform === "linux" && ["basic_text", "unknown"].includes(storage.getSelectedStorageBackend()))) {
+  if (
+    !storage?.isEncryptionAvailable() ||
+    (process.platform === "linux" &&
+      ["basic_text", "unknown"].includes(storage.getSelectedStorageBackend()))
+  ) {
     throw problem("storage-unavailable");
   }
   return storage;
 }
 
-function remoteConfig({ env = process.env, userData, storage,
-  readFile = (file) => fs.readFileSync(file, "utf8") } = {}) {
+function remoteConfig({
+  env = process.env,
+  userData,
+  storage,
+  readFile = (file) => fs.readFileSync(file, "utf8"),
+} = {}) {
   if (env[ENV_URL] !== undefined || env[ENV_TOKEN] !== undefined) {
     const url = normalizeUrl(env[ENV_URL]);
     const token = String(env[ENV_TOKEN] || "").trim();
@@ -50,41 +70,63 @@ function remoteConfig({ env = process.env, userData, storage,
   if (!userData) return null;
   const file = path.join(userData, "remote.json");
   let body;
-  try { body = JSON.parse(readFile(file)); } catch (error) {
+  try {
+    body = JSON.parse(readFile(file));
+  } catch (error) {
     if (error.code === "ENOENT") return null;
     throw problem("invalid-config");
   }
   const url = normalizeUrl(body?.url);
   if (!url) throw problem("invalid-url");
   // 旧明文只在加密存储可用且原子替换成功后迁移；失败保留原件并明确报错。
-  if (typeof body.token === "string") return saveRemote({ url, token: body.token }, { userData, storage });
+  if (typeof body.token === "string")
+    return saveRemote({ url, token: body.token }, { userData, storage });
   if (body.credential?.version !== 1 || typeof body.credential?.ciphertext !== "string") {
     throw problem("invalid-config");
   }
   const secure = requireStorage(storage);
   let token;
-  try { token = secure.decryptString(Buffer.from(body.credential.ciphertext, "base64")); }
-  catch { throw problem("decrypt-failed"); }
+  try {
+    token = secure.decryptString(Buffer.from(body.credential.ciphertext, "base64"));
+  } catch {
+    throw problem("decrypt-failed");
+  }
   if (typeof token !== "string" || !token.trim()) throw problem("decrypt-failed");
   return { url, token, source: file };
 }
 
-function saveRemote({ url, token }, { userData, storage,
-  writeFile = (file, body, options) => fs.writeFileSync(file, body, options),
-  rename = (from, to) => fs.renameSync(from, to) } = {}) {
+function saveRemote(
+  { url, token },
+  {
+    userData,
+    storage,
+    writeFile = (file, body, options) => fs.writeFileSync(file, body, options),
+    rename = (from, to) => fs.renameSync(from, to),
+  } = {},
+) {
   const normalized = normalizeUrl(url);
   const value = String(token || "").trim();
   if (!normalized) throw problem("invalid-url");
   if (!value) throw problem("invalid-token");
   const secure = requireStorage(storage);
   let encrypted;
-  try { encrypted = secure.encryptString(value).toString("base64"); }
-  catch { throw problem("storage-unavailable"); }
+  try {
+    encrypted = secure.encryptString(value).toString("base64");
+  } catch {
+    throw problem("storage-unavailable");
+  }
   const file = path.join(userData, "remote.json");
   const temporary = `${file}.${randomUUID()}.partial`;
   try {
-    writeFile(temporary, JSON.stringify({ url: normalized, credential: { version: 1, ciphertext: encrypted } }, null, 2),
-      { mode: 0o600, flag: "wx" });
+    writeFile(
+      temporary,
+      JSON.stringify(
+        { url: normalized, credential: { version: 1, ciphertext: encrypted } },
+        null,
+        2,
+      ),
+      { mode: 0o600, flag: "wx" },
+    );
     rename(temporary, file);
   } finally {
     fs.rmSync(temporary, { force: true });

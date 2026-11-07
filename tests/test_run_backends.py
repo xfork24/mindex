@@ -32,12 +32,17 @@ def launch(tmp_path):
     for name in SCRIPTS:
         shutil.copy(ROOT / "scripts" / name, scripts / name)
     (project / "models" / "WeMM-Embedding").mkdir(parents=True)
-    for executable in ("bin/llama-server", "bin/tts-server", "bin/audiocpp_server",
-                       ".venv-person/bin/python", ".venv-detector/bin/python"):
+    for executable in (
+        "bin/llama-server",
+        "bin/tts-server",
+        "bin/audiocpp_server",
+        ".venv-person/bin/python",
+        ".venv-detector/bin/python",
+    ):
         target = project / executable
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(
-            '#!/usr/bin/env python3\nimport json, os, sys\n'
+            "#!/usr/bin/env python3\nimport json, os, sys\n"
             'print(json.dumps({"args": sys.argv[1:], "env": dict(os.environ), "cwd": os.getcwd()}))\n'
         )
         target.chmod(0o755)
@@ -45,8 +50,13 @@ def launch(tmp_path):
     def run(name, *args, env=None):
         clean_env = {k: v for k, v in os.environ.items() if not k.startswith("MINDEX_")}
         return subprocess.run(
-            ["bash", str(scripts / name), *args], cwd=tmp_path,
-            env={**clean_env, **(env or {})}, text=True, capture_output=True, timeout=10, check=False,
+            ["bash", str(scripts / name), *args],
+            cwd=tmp_path,
+            env={**clean_env, **(env or {})},
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
         )
 
     return run
@@ -121,7 +131,11 @@ def test_help_without_models_or_installed_services(tmp_path, name):
     shutil.copytree(ROOT / "scripts" / "lib", scripts / "lib")
     shutil.copy(ROOT / "scripts" / name, scripts / name)
     result = subprocess.run(
-        ["bash", str(scripts / name), "--help"], text=True, capture_output=True, timeout=10, check=False,
+        ["bash", str(scripts / name), "--help"],
+        text=True,
+        capture_output=True,
+        timeout=10,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     assert "--backend metal|cuda|cpu" in result.stdout

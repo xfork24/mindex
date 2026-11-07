@@ -9,11 +9,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, cast
 
-from mindex.shared.db.pg_backend import PgBackend
+from shared.db.pg_backend import PgBackend
 
 if TYPE_CHECKING:
-    from mindex.shared.backends import BackendContext
-    from mindex.shared.config import Config
+    from shared.backends import BackendContext
+    from shared.config import Config
 
 log = logging.getLogger(__name__)
 
@@ -28,7 +28,9 @@ def metrics_snapshot(backends: BackendContext, config: Config) -> dict:
         import resource
         import sys
 
-        out["peak_rss_bytes"] = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) * (1 if sys.platform == "darwin" else 1024)
+        out["peak_rss_bytes"] = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) * (
+            1 if sys.platform == "darwin" else 1024
+        )
     except ImportError:  # Windows 的实际安装验收使用平台专用进程指标
         out["peak_rss_bytes"] = None
     if config.database.backend == "postgres":
@@ -44,14 +46,16 @@ def metrics_snapshot(backends: BackendContext, config: Config) -> dict:
                 row = db.execute(
                     "SELECT count(*) AS total,"
                     " count(*) FILTER (WHERE expires_at < clock_timestamp()) AS expired"
-                    " FROM lock_holders WHERE library_id=?", (backends.library_id,)).fetchone()
+                    " FROM lock_holders WHERE library_id=?",
+                    (backends.library_id,),
+                ).fetchone()
             out["lease_expired"] = int(row["expired"])
             out["lease_holders"] = int(row["total"])
         except Exception as exc:  # noqa: BLE001
             log.debug("租约指标不可用：%s", exc)
         if config.queue.backend == "postgres":
             try:
-                from mindex.shared.db.queue_pg import PgTaskQueue
+                from shared.db.queue_pg import PgTaskQueue
 
                 with backend.connect() as db:
                     out["queue"] = PgTaskQueue(backends.library_id).stats(db)

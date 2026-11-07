@@ -47,8 +47,7 @@ class VectorStore(Protocol):
 
     def ids(self) -> set[str]: ...
 
-    def query(self, vector: Sequence[float], *, count: int,
-              where: dict | None = None) -> list[dict]: ...
+    def query(self, vector: Sequence[float], *, count: int, where: dict | None = None) -> list[dict]: ...
 
     def delete(self, identifiers: Sequence[str]) -> None: ...
 
@@ -79,9 +78,15 @@ class LocalVectorStore:
             ids=[entry[0] for entry in entries],
             embeddings=[entry[1] for entry in entries],
             documents=[entry[4] or entry[3] for entry in entries],
-            metadatas=[{"segment_id": segment["id"], "source_id": segment["source_id"],
-                        "granularity": segment["kind"], "view": view}
-                       for _, _, segment, view, _ in entries],
+            metadatas=[
+                {
+                    "segment_id": segment["id"],
+                    "source_id": segment["source_id"],
+                    "granularity": segment["kind"],
+                    "view": view,
+                }
+                for _, _, segment, view, _ in entries
+            ],
         )
 
     def vector(self, identifier: str) -> list[float] | None:
@@ -101,10 +106,12 @@ class LocalVectorStore:
         except Exception as exc:
             if "Error finding id" not in str(exc):
                 raise
-            return {identifier: vector for identifier in identifiers
-                    if (vector := self.vector(identifier)) is not None}
-        return {identifier: vector.tolist()
-                for identifier, vector in zip(raw["ids"], raw["embeddings"])}
+            return {
+                identifier: vector
+                for identifier in identifiers
+                if (vector := self.vector(identifier)) is not None
+            }
+        return {identifier: vector.tolist() for identifier, vector in zip(raw["ids"], raw["embeddings"])}
 
     def ids(self) -> set[str]:
         result: set[str] = set()
@@ -116,10 +123,11 @@ class LocalVectorStore:
                 return result
             offset += _PAGE
 
-    def query(self, vector: Sequence[float], *, count: int,
-              where: dict | None = None) -> list[dict]:
+    def query(self, vector: Sequence[float], *, count: int, where: dict | None = None) -> list[dict]:
         raw = self.collection.query(
-            query_embeddings=[list(vector)], n_results=count, where=where,
+            query_embeddings=[list(vector)],
+            n_results=count,
+            where=where,
             include=["metadatas", "distances"],
         )
         return [
@@ -210,12 +218,16 @@ def chroma_http_client(section, *, shared=True):
                 settings=Settings(anonymized_telemetry=False),
             )
         else:
-            from mindex.shared.backends.chroma_client import ChromaClient
+            from shared.backends.chroma_client import ChromaClient
 
-            settings = Settings(anonymized_telemetry=False, chroma_api_impl="chromadb.api.fastapi.FastAPI",
+            settings = Settings(
+                anonymized_telemetry=False,
+                chroma_api_impl="chromadb.api.fastapi.FastAPI",
                 chroma_server_host=parsed.hostname or "127.0.0.1",
                 chroma_server_http_port=parsed.port or (443 if parsed.scheme == "https" else 8000),
-                chroma_server_ssl_enabled=parsed.scheme == "https", chroma_server_headers=headers)
+                chroma_server_ssl_enabled=parsed.scheme == "https",
+                chroma_server_headers=headers,
+            )
             client = ChromaClient(settings, section.request_timeout_seconds)
         if shared:
             _HTTP_CLIENTS[key] = client

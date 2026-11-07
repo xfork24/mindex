@@ -20,11 +20,11 @@ import base64
 from dataclasses import dataclass
 from pathlib import Path
 
-from mindex.models import adapters
-from mindex.models.adapters import ModelError
-from mindex.models.image_generators import minimax_health
-from mindex.models.video_generators import MINIMAX_AUTH, _error_body
-from mindex.shared.config import Config
+from models import adapters
+from models.adapters import ModelError
+from models.image_generators import minimax_health
+from models.video_generators import MINIMAX_AUTH, _error_body
+from shared.config import Config
 
 AUDIO_SETTING = {"sample_rate": 44100, "bitrate": 256000, "format": "mp3"}
 
@@ -151,8 +151,8 @@ class ComfyUIMusicGenerator:
     「导出（API）」工作流，完成后取第一个输出音频。歌词生成不受支持。"""
 
     def __init__(self, config: Config):
-        from mindex.models.video_generators import ComfyUIVideoGenerator
-        from mindex.shared.comfyui import MUSIC_MAPPING_FIELDS
+        from models.video_generators import ComfyUIVideoGenerator
+        from shared.comfyui import MUSIC_MAPPING_FIELDS
 
         class Runner(ComfyUIVideoGenerator):
             label, noun, role = "ComfyUI 音乐生成", "音频", "音乐生成"

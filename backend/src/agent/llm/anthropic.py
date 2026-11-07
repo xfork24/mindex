@@ -14,7 +14,7 @@ import os
 
 import httpx
 
-from mindex.agent.llm.types import LlmError, LlmRequest, StreamEmitter, message_text, parse_arguments
+from agent.llm.types import LlmError, LlmRequest, StreamEmitter, message_text, parse_arguments
 
 RETRY_STATUS = {429, 500, 502, 503, 504, 529}
 API_VERSION = "2023-06-01"
@@ -25,8 +25,14 @@ def image_part(block: dict) -> dict | None:
     """已解析图片块 → Anthropic ``image`` 块；未解析的引用块（只有 ``ref``）防御性跳过。"""
     if block.get("type") != "image" or not block.get("data"):
         return None
-    return {"type": "image", "source": {"type": "base64", "media_type": block.get("mediaType") or "image/jpeg",
-                                        "data": block["data"]}}
+    return {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": block.get("mediaType") or "image/jpeg",
+            "data": block["data"],
+        },
+    }
 
 
 def content_parts(message: dict, empty: str) -> list[dict]:
@@ -74,18 +80,30 @@ def convert_messages(messages: list[dict]) -> list[dict]:
                         arguments = parse_arguments(block["arguments"])
                     except json.JSONDecodeError:
                         arguments = {}
-                    blocks.append({"type": "tool_use", "id": block["id"], "name": block["name"],
-                                   "input": arguments if isinstance(arguments, dict) else {}})
+                    blocks.append(
+                        {
+                            "type": "tool_use",
+                            "id": block["id"],
+                            "name": block["name"],
+                            "input": arguments if isinstance(arguments, dict) else {},
+                        }
+                    )
             push("assistant", blocks or [{"type": "text", "text": "（空）"}])
         elif role == "tool":
-            push("user", [{
-                "type": "tool_result",
-                "tool_use_id": message["toolCallId"],
-                # 带图片的工具结果用块数组（text + image）；纯文本保持字符串。
-                "content": content_parts(message, "（无内容）") if has_images(message)
-                else message_text(message) or "（无内容）",
-                **({"is_error": True} if message.get("isError") else {}),
-            }])
+            push(
+                "user",
+                [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": message["toolCallId"],
+                        # 带图片的工具结果用块数组（text + image）；纯文本保持字符串。
+                        "content": content_parts(message, "（无内容）")
+                        if has_images(message)
+                        else message_text(message) or "（无内容）",
+                        **({"is_error": True} if message.get("isError") else {}),
+                    }
+                ],
+            )
     if result and result[0]["role"] != "user":
         result.insert(0, {"role": "user", "content": [{"type": "text", "text": "（继续）"}]})
     return result
@@ -132,7 +150,9 @@ class AnthropicClient:
         async with httpx.AsyncClient(timeout=self.profile.timeout, transport=self.transport) as client:
             for attempt in range(self.retries + 1):
                 try:
-                    async with client.stream("POST", self.url(), json=body, headers=self.headers()) as response:
+                    async with client.stream(
+                        "POST", self.url(), json=body, headers=self.headers()
+                    ) as response:
                         if response.status_code >= 400:
                             detail = (await response.aread()).decode("utf-8", "replace")[:500]
                             if response.status_code in RETRY_STATUS and attempt < self.retries:
@@ -168,8 +188,10 @@ class AnthropicClient:
             kind = event.get("type")
             if kind == "error":
                 error = event.get("error") or {}
-                raise LlmError(f"智能助手模型服务报错：{error.get('message') or error}",
-                               code=error.get("type") or "provider_error")
+                raise LlmError(
+                    f"智能助手模型服务报错：{error.get('message') or error}",
+                    code=error.get("type") or "provider_error",
+                )
             if kind == "message_start":
                 raw = (event.get("message") or {}).get("usage") or {}
                 usage["inputTokens"] = int(raw.get("input_tokens") or 0)
@@ -200,7 +222,9 @@ class AnthropicClient:
                     for chunk in emitter.text(key, delta.get("thinking", ""), "reasoning"):
                         yield chunk
                 elif delta.get("type") == "input_json_delta":
-                    for chunk in emitter.tool(key, call_id=None, name=None, delta=delta.get("partial_json", "")):
+                    for chunk in emitter.tool(
+                        key, call_id=None, name=None, delta=delta.get("partial_json", "")
+                    ):
                         yield chunk
             elif kind == "content_block_stop":
                 for chunk in emitter.close(keys.get(event["index"], f"block:{event['index']}")):

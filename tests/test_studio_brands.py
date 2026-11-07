@@ -9,13 +9,13 @@ import shutil
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
-from test_studio_sources import make_clip, setup, shot, small  # noqa: F401 — small 是夹具
 
-from mindex.api import create_app
-from mindex.shared.storage import Store
-from mindex.studio import brands
-from mindex.studio import workspace as ws
-from mindex.studio.workspace import ass, post
+from api import create_app
+from shared.storage import Store
+from studio import brands
+from studio import workspace as ws
+from studio.workspace import ass, post
+from test_studio_sources import make_clip, setup, shot, small  # noqa: F401 — small 是夹具
 
 
 def png() -> bytes:
@@ -51,19 +51,34 @@ def test_copy_update_assets_and_hash(client, tmp_path):
     assert (config.data_dir / "brand" / f"{logo['sha256']}.png").is_file()
     assert client.get(logo["url"]).status_code == 200
     clip = make_clip(tmp_path / "intro.mp4", 1.0)
-    intro = client.post("/api/studio/brand-assets", files={"file": ("intro.mp4", clip.read_bytes(), "video/mp4")}).json()
+    intro = client.post(
+        "/api/studio/brand-assets", files={"file": ("intro.mp4", clip.read_bytes(), "video/mp4")}
+    ).json()
     assert intro["kind"] == "video" and intro["duration"] == pytest.approx(1.0, abs=0.1)
     asset = lambda item: {key: item[key] for key in ("sha256", "suffix", "kind")}
     renamed = client.put(f"/api/studio/brands/{copied['id']}", json={"name": "改名"}).json()
     assert renamed["hash"] == copied["hash"] and renamed["version"] == 1  # 名称不影响成片
-    updated = client.put(f"/api/studio/brands/{copied['id']}", json={
-        "watermark": {"asset": asset(logo), "position": "bottom-right"}, "intro": {"asset": asset(intro)}}).json()
+    updated = client.put(
+        f"/api/studio/brands/{copied['id']}",
+        json={
+            "watermark": {"asset": asset(logo), "position": "bottom-right"},
+            "intro": {"asset": asset(intro)},
+        },
+    ).json()
     assert updated["hash"] != copied["hash"] and updated["version"] == 2
     assert updated["watermark"]["position"] == "bottom-right" and updated["intro"]["volume"] == 1.0
     # 水印必须是图片、片头必须是视频；素材缺失时拒绝。
-    assert client.put(f"/api/studio/brands/{copied['id']}", json={"watermark": {"asset": asset(intro)}}).status_code == 422
+    assert (
+        client.put(
+            f"/api/studio/brands/{copied['id']}", json={"watermark": {"asset": asset(intro)}}
+        ).status_code
+        == 422
+    )
     missing = {"sha256": "0" * 64, "suffix": ".png", "kind": "image"}
-    assert client.put(f"/api/studio/brands/{copied['id']}", json={"watermark": {"asset": missing}}).status_code == 422
+    assert (
+        client.put(f"/api/studio/brands/{copied['id']}", json={"watermark": {"asset": missing}}).status_code
+        == 422
+    )
     removed = client.put(f"/api/studio/brands/{copied['id']}", json={"intro": None}).json()
     assert removed["intro"] is None and removed["watermark"]
     bad = client.post("/api/studio/brand-assets", files={"file": ("x.png", b"not an image", "image/png")})
@@ -75,22 +90,37 @@ def test_plan_selects_brand_with_overrides_and_delete_is_protected(client):
     job_id, _, p = setup(config, [shot("a", "红色开场。")])
     copied = client.post("/api/studio/brands/tech/copy", json={"name": "频道"}).json()
     data = client.get(f"/api/studio/jobs/{job_id}/workspace").json()
-    options = {**data["plans"][data["active_plan"]]["options"], "burn": True, "brand_id": copied["id"],
-               "brand_overrides": {"overlay": {"accent": "#123456"}}}
-    response = client.patch(f"/api/studio/jobs/{job_id}/plans/{p['id']}",
-                            json={"revision": data["revision"], "options": options})
+    options = {
+        **data["plans"][data["active_plan"]]["options"],
+        "burn": True,
+        "brand_id": copied["id"],
+        "brand_overrides": {"overlay": {"accent": "#123456"}},
+    }
+    response = client.patch(
+        f"/api/studio/jobs/{job_id}/plans/{p['id']}", json={"revision": data["revision"], "options": options}
+    )
     assert response.status_code == 200, response.text
     saved = response.json()["plans"][p["id"]]["options"]
     assert saved["brand_id"] == copied["id"] and saved["brand_overrides"]["overlay"]["accent"] == "#123456"
     assert client.delete(f"/api/studio/brands/{copied['id']}").status_code == 409
     unknown = {**options, "brand_id": "user-missing"}
     fresh = client.get(f"/api/studio/jobs/{job_id}/workspace").json()
-    assert client.patch(f"/api/studio/jobs/{job_id}/plans/{p['id']}",
-                        json={"revision": fresh["revision"], "options": unknown}).status_code == 422
+    assert (
+        client.patch(
+            f"/api/studio/jobs/{job_id}/plans/{p['id']}",
+            json={"revision": fresh["revision"], "options": unknown},
+        ).status_code
+        == 422
+    )
     # 换回无品牌后可以删除。
     plain = {**fresh["plans"][p["id"]]["options"], "brand_id": None, "brand_overrides": None}
-    assert client.patch(f"/api/studio/jobs/{job_id}/plans/{p['id']}",
-                        json={"revision": fresh["revision"], "options": plain}).status_code == 200
+    assert (
+        client.patch(
+            f"/api/studio/jobs/{job_id}/plans/{p['id']}",
+            json={"revision": fresh["revision"], "options": plain},
+        ).status_code
+        == 200
+    )
     assert client.delete(f"/api/studio/brands/{copied['id']}").status_code == 200
 
 
@@ -123,24 +153,35 @@ def test_style_precedence_and_compose_payload(small):  # noqa: F811
 # ---------------------------------------------------------------- 片头片尾与水印（需求 8）
 
 
-def brand_with_assets(config, client, tmp_path, *, intro=True, outro=True, watermark=True, include_bookends=False):
+def brand_with_assets(
+    config, client, tmp_path, *, intro=True, outro=True, watermark=True, include_bookends=False
+):
     copied = client.post("/api/studio/brands/plain/copy", json={"name": "频道"}).json()
 
     def upload(path, kind):
-        item = client.post("/api/studio/brand-assets", files={"file": (path.name, path.read_bytes(), kind)}).json()
+        item = client.post(
+            "/api/studio/brand-assets", files={"file": (path.name, path.read_bytes(), kind)}
+        ).json()
         return {key: item[key] for key in ("sha256", "suffix", "kind")}
 
     changes = {}
     if intro:
         changes["intro"] = {"asset": upload(make_clip(tmp_path / "intro.mp4", 1.0, color="red"), "video/mp4")}
     if outro:
-        changes["outro"] = {"asset": upload(make_clip(tmp_path / "outro.mp4", 0.6, audio=False, color="blue"),
-                                            "video/mp4")}
+        changes["outro"] = {
+            "asset": upload(make_clip(tmp_path / "outro.mp4", 0.6, audio=False, color="blue"), "video/mp4")
+        }
     if watermark:
         logo = tmp_path / "logo.png"
         Image.new("RGBA", (60, 60), (255, 255, 255, 255)).save(logo)
-        changes["watermark"] = {"asset": upload(logo, "image/png"), "position": "bottom-left", "opacity": 1.0,
-                                "scale": 0.3, "margin": 0.02, "include_bookends": include_bookends}
+        changes["watermark"] = {
+            "asset": upload(logo, "image/png"),
+            "position": "bottom-left",
+            "opacity": 1.0,
+            "scale": 0.3,
+            "margin": 0.02,
+            "include_bookends": include_bookends,
+        }
     response = client.put(f"/api/studio/brands/{copied['id']}", json=changes)
     assert response.status_code == 200, response.text
     return response.json()
@@ -168,15 +209,20 @@ def test_build_with_intro_outro_and_watermark(client, tmp_path):
     import subprocess
 
     from PIL import ImageStat
-    from test_studio_sources import build, frame_count, make_image, store_input
 
-    from mindex.shared.media import command
+    from shared.media import command
+    from test_studio_sources import build, frame_count, make_image, store_input
 
     config, client = client
     job_id, w, p = setup(config, [shot("a", "红色开场。")])
     image = store_input(config, job_id, make_image(tmp_path / "i.png", color=(10, 10, 10, 255)))
-    ws.set_board(config, job_id, w, p, [shot("a", "开场画面旁白。", source={"kind": "image", "media_id": image,
-                                                                     "motion": "none"})])
+    ws.set_board(
+        config,
+        job_id,
+        w,
+        p,
+        [shot("a", "开场画面旁白。", source={"kind": "image", "media_id": image, "motion": "none"})],
+    )
     ws.persist(config, job_id, w)
     w, p = build(config, job_id, w, p)
     plain = ws.version(w, p["final"])
@@ -195,15 +241,20 @@ def test_build_with_intro_outro_and_watermark(client, tmp_path):
     assert frame_count(mp4)[0] == data["total_frames"]
     srt = ws.file_path(config, job_id, final, "srt").read_text(encoding="utf-8")
     assert "00:00:01,000 -->" in srt
-    streams = json.loads(command(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,duration", "-of",
-                                  "json", str(mp4)]))["streams"]
+    streams = json.loads(
+        command(
+            ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,duration", "-of", "json", str(mp4)]
+        )
+    )["streams"]
     audio = next(item for item in streams if item["codec_type"] == "audio")
     assert float(audio["duration"]) == pytest.approx(data["total_seconds"], abs=0.08)
 
     def frame(at, name):
         target = tmp_path / name
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", str(at), "-i", str(mp4), "-frames:v", "1", str(target)],
-                       check=True)
+        subprocess.run(
+            ["ffmpeg", "-v", "error", "-y", "-ss", str(at), "-i", str(mp4), "-frames:v", "1", str(target)],
+            check=True,
+        )
         return Image.open(target).convert("L")
 
     def corner(img):
@@ -221,8 +272,11 @@ def test_builtin_brand_text_bilingual():
     import json
     from pathlib import Path
 
-    catalog = json.loads((Path(__file__).resolve().parents[1] / "frontend" / "src" / "shared" / "messages.json")
-                         .read_text(encoding="utf-8"))
+    catalog = json.loads(
+        (Path(__file__).resolve().parents[1] / "frontend" / "src" / "shared" / "messages.json").read_text(
+            encoding="utf-8"
+        )
+    )
     for brand_id, template in brands.builtins().items():
         name = catalog[f"ui.brands_name_{brand_id}"]
         desc = catalog[f"ui.brands_desc_{brand_id}"]
@@ -235,6 +289,12 @@ def test_studio_brand_text_controls():
     import subprocess
     from pathlib import Path
 
-    result = subprocess.run(["node", "tests/studio_brand_text_unit.cjs"], cwd=Path(__file__).resolve().parents[1],
-                            capture_output=True, text=True, timeout=30, check=False)
+    result = subprocess.run(
+        ["node", "tests/studio_brand_text_unit.cjs"],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
     assert result.returncode == 0, result.stdout + result.stderr

@@ -1,4 +1,5 @@
 """开发环境和安装包共用的前端资源定位。"""
+
 from pathlib import Path
 
 

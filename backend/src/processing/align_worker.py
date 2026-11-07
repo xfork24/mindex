@@ -68,7 +68,8 @@ def main():
                     "revision": args.revision,
                 },
                 ensure_ascii=False,
-            ), encoding="utf-8"
+            ),
+            encoding="utf-8",
         )
         temporary.replace(target)
     finally:

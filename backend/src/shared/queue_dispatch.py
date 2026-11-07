@@ -13,7 +13,7 @@ import logging
 from contextlib import contextmanager
 from typing import cast
 
-from mindex.shared.db.pg_backend import PgBackend
+from shared.db.pg_backend import PgBackend
 
 log = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ QUEUE_KINDS = {
 
 
 def validate_index_options(store, options):
-    from mindex.shared.task_config import IndexOptions
+    from shared.task_config import IndexOptions
 
     parsed = IndexOptions.model_validate(options or {})
     if parsed.action == "activate" and not parsed.index_id:
@@ -39,7 +39,8 @@ def validate_index_options(store, options):
     if parsed.action == "activate-release" and not parsed.release_id:
         raise ValueError("激活检索组合必须指定 release_id")
     if parsed.action == "activate-release" and not store.one(
-            "SELECT id FROM search_releases WHERE id=?", (parsed.release_id,)):
+        "SELECT id FROM search_releases WHERE id=?", (parsed.release_id,)
+    ):
         raise ValueError("找不到检索发布记录")
     if parsed.index_id is not None:
         version = store.index_version(parsed.index_id)
@@ -49,12 +50,16 @@ def validate_index_options(store, options):
 
 
 def insert_index_task(store, task_id, config, options):
-    from mindex.shared.task_config import freeze_config
+    from shared.task_config import freeze_config
 
     parsed = validate_index_options(store, options)
-    insert_ledger(store, "index_tasks", task_id,
+    insert_ledger(
+        store,
+        "index_tasks",
+        task_id,
         "INSERT INTO index_tasks(id,source_id,status,config,options) VALUES(?,?,'queued',?,?)",
-        (task_id, parsed.source_id, freeze_config(config, store), parsed.model_dump_json()))
+        (task_id, parsed.source_id, freeze_config(config, store), parsed.model_dump_json()),
+    )
 
 
 def wait_index_task(store, task_id, *, progress=None):
@@ -68,7 +73,7 @@ def wait_ledger_task(store, table, task_id, *, progress=None):
 
     from fastapi import HTTPException
 
-    from mindex.shared.background_tasks import public_task
+    from shared.background_tasks import public_task
 
     while True:
         row = store.one(f"SELECT * FROM {table} WHERE id=?", (task_id,))
@@ -79,11 +84,14 @@ def wait_ledger_task(store, table, task_id, *, progress=None):
             break
         if progress:
             progress(task["progress"])
-        time.sleep(.2)
+        time.sleep(0.2)
     if task["status"] != "complete":
         error = task["error"] or "索引任务未完成，请查看任务状态"
-        code = 409 if task["status"] == "cancelled" or error.startswith("Timeout:") else (
-            503 if error.startswith("ModelError:") else 422)
+        code = (
+            409
+            if task["status"] == "cancelled" or error.startswith("Timeout:")
+            else (503 if error.startswith("ModelError:") else 422)
+        )
         raise HTTPException(code, error)
     return task["result"]
 
@@ -92,7 +100,7 @@ def run_index_task(config, store, options, *, progress=None):
     """底层构建器只依赖共享队列提交协议；执行编排由 worker 的上层 runner 负责。"""
     from uuid import uuid4
 
-    from mindex.shared import lock_backend
+    from shared import lock_backend
 
     task_id = uuid4().hex
     with lock_backend.resource(store, "index-task:" + task_id, timeout=0):
@@ -107,17 +115,23 @@ def ledger_transaction(store, table, task_id, *, restart=False):
         raise ValueError("无效的任务表")
     config = getattr(store, "deployment_config", None)
     if getattr(store, "deployment_form", None) == "cluster" and config is not None:
-        from mindex.shared.gpu_resources import required_groups
+        from shared.gpu_resources import required_groups
 
         required_groups(config, QUEUE_KINDS[table], cluster=True)
     with store.connect() as db:
         yield db
         if getattr(store, "queue_backend", "inline") == "postgres":
-            from mindex.shared.db.queue_pg import PgTaskQueue
+            from shared.db.queue_pg import PgTaskQueue
 
             PgTaskQueue(store.library_id).enqueue(
-                db, QUEUE_KINDS[table], {"ledger_table": table, "task_id": task_id},
-                ledger_table=table, ledger_id=task_id, dedupe_key=f"{table}:{task_id}", restart=restart)
+                db,
+                QUEUE_KINDS[table],
+                {"ledger_table": table, "task_id": task_id},
+                ledger_table=table,
+                ledger_id=task_id,
+                dedupe_key=f"{table}:{task_id}",
+                restart=restart,
+            )
 
 
 def insert_ledger(store, table, task_id, sql, args):
@@ -131,37 +145,44 @@ def queue_backend(runtime_or_config) -> str:
 
 
 def _library_id(store) -> str:
-    return getattr(store, "library_id", None) or (
-        store.one("SELECT value FROM settings WHERE key='library.id'") or {"value": ""})["value"]
+    return (
+        getattr(store, "library_id", None)
+        or (store.one("SELECT value FROM settings WHERE key='library.id'") or {"value": ""})["value"]
+    )
 
 
 def enqueue_task(runtime_or_config, table: str, task_id: str, *, priority: int = 100) -> int | None:
-    from mindex.shared.db.queue_pg import PgTaskQueue
-    from mindex.shared.storage import Store
+    from shared.db.queue_pg import PgTaskQueue
+    from shared.storage import Store
 
     config = runtime_or_config.current() if hasattr(runtime_or_config, "current") else runtime_or_config
     store = Store.open(config)
     queue = PgTaskQueue(_library_id(store))
     with cast(PgBackend, store.backend).connect() as db:
         return queue.enqueue(
-            db, QUEUE_KINDS[table], {"ledger_table": table, "task_id": task_id},
-            ledger_table=table, ledger_id=task_id, dedupe_key=f"{table}:{task_id}",
-            priority=priority)
+            db,
+            QUEUE_KINDS[table],
+            {"ledger_table": table, "task_id": task_id},
+            ledger_table=table,
+            ledger_id=task_id,
+            dedupe_key=f"{table}:{task_id}",
+            priority=priority,
+        )
 
 
 def enqueue_backlog(runtime_or_config) -> dict[str, int]:
     """把 queued 账本行补入队列（幂等）。API/worker 启动时调用。"""
     if queue_backend(runtime_or_config) != "postgres":
         return {}
-    from mindex.shared.db.queue_pg import PgTaskQueue
-    from mindex.shared.storage import Store
+    from shared.db.queue_pg import PgTaskQueue
+    from shared.storage import Store
 
     config = runtime_or_config.current() if hasattr(runtime_or_config, "current") else runtime_or_config
     store = Store.open(config)
     queue = PgTaskQueue(_library_id(store))
     counts: dict[str, int] = {}
     with cast(PgBackend, store.backend).connect() as db:
-        from mindex.shared.migration_state import pending
+        from shared.migration_state import pending
 
         if pending(db):
             return {}
@@ -170,8 +191,13 @@ def enqueue_backlog(runtime_or_config) -> dict[str, int]:
             for row in rows:
                 task_id = row["id"]
                 queue.enqueue(
-                    db, kind, {"ledger_table": table, "task_id": task_id},
-                    ledger_table=table, ledger_id=task_id, dedupe_key=f"{table}:{task_id}")
+                    db,
+                    kind,
+                    {"ledger_table": table, "task_id": task_id},
+                    ledger_table=table,
+                    ledger_id=task_id,
+                    dedupe_key=f"{table}:{task_id}",
+                )
                 counts[table] = counts.get(table, 0) + 1
     if counts:
         log.info("队列补偿扫描入队：%s", counts)

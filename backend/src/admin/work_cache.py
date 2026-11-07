@@ -1,4 +1,5 @@
 """Persistent work summaries; serve the last result while refreshing expensive coverage."""
+
 from __future__ import annotations
 
 import hashlib
@@ -9,10 +10,10 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from mindex.admin.curation import source_public
-from mindex.admin.source_work import attach_tasks
-from mindex.shared.config import fingerprint
-from mindex.shared.work_budget import budgeted
+from admin.curation import source_public
+from admin.source_work import attach_tasks
+from shared.config import fingerprint
+from shared.work_budget import budgeted
 
 log = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ class WorkCache:
             path = self.path(sid)
             temporary = path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
             try:
-                from mindex.shared.jsonio import save
+                from shared.jsonio import save
 
                 save(temporary, entry)
                 temporary.replace(path)

@@ -9,21 +9,21 @@ import json
 import re
 
 import pytest
-from conftest import FixtureEmbedder
 from fastapi.testclient import TestClient
 from PIL import Image
-from test_channel_recall import add_analysis, add_dialogue
 
-from mindex.agent.attachments import AttachmentStore
-from mindex.agent.loopback import MindexClient
-from mindex.agent.registry import ToolContext, ToolError
-from mindex.agent.tools import build_registry
-from mindex.agent.tools.search import frame_times, frame_url
-from mindex.api import create_app
-from mindex.models.adapters import ModelError
-from mindex.processing.indexing import IndexBuilder
-from mindex.processing.pipeline import Pipeline
-from mindex.shared.config import Config
+from agent.attachments import AttachmentStore
+from agent.loopback import MindexClient
+from agent.registry import ToolContext, ToolError
+from agent.tools import build_registry
+from agent.tools.search import frame_times, frame_url
+from api import create_app
+from conftest import FixtureEmbedder
+from models.adapters import ModelError
+from processing.indexing import IndexBuilder
+from processing.pipeline import Pipeline
+from shared.config import Config
+from test_channel_recall import add_analysis, add_dialogue
 
 
 def test_frame_times_even_inclusive_and_midpoint():
@@ -50,15 +50,27 @@ def test_search_specs_and_argument_rules():
         assert spec.domain == "search" and spec.risk == "read" and spec.mcp
     assert registry.domain_tools()["search"][0] == "search_media"
     frames = registry.get("sample_frames")
-    for bad in ({}, {"source_id": "a", "segment_id": "b"}, {"segment_id": "b", "start": 1},
-                {"source_id": "a", "start": 5, "end": 2}, {"source_id": "a", "count": 13}):
+    for bad in (
+        {},
+        {"source_id": "a", "segment_id": "b"},
+        {"segment_id": "b", "start": 1},
+        {"source_id": "a", "start": 5, "end": 2},
+        {"source_id": "a", "count": 13},
+    ):
         with pytest.raises(ToolError):
             frames.parse(bad)
     search = registry.get("search_media")
     with pytest.raises(ToolError):
         search.parse({"text": "  "})
-    parsed = search.parse({"text": "", "person_ids": ["actor-1"], "granularity": "scene",
-                           "channels": ["dialogue"], "filters": {"min_duration": 1}})
+    parsed = search.parse(
+        {
+            "text": "",
+            "person_ids": ["actor-1"],
+            "granularity": "scene",
+            "channels": ["dialogue"],
+            "filters": {"min_duration": 1},
+        }
+    )
     assert parsed.granularity == "scene" and parsed.channels == ["dialogue"]
     with pytest.raises(ToolError):
         registry.get("search_by_media").parse({"attachment": "/tmp/x.png"})
@@ -95,8 +107,17 @@ def library(tmp_path_factory, video_file):
     add_dialogue(config, sid)
     add_analysis(pipeline.store, pipeline.store.segments(sid, "moment")[0])
     IndexBuilder(config, FixtureEmbedder(config)).build(activate=True)
-    with Client(config, FixtureEmbedder(config)) as online, Client(config, OfflineEmbedder(config)) as offline:
-        yield {"config": config, "source_id": sid, "store": pipeline.store, "online": online, "offline": offline}
+    with (
+        Client(config, FixtureEmbedder(config)) as online,
+        Client(config, OfflineEmbedder(config)) as offline,
+    ):
+        yield {
+            "config": config,
+            "source_id": sid,
+            "store": pipeline.store,
+            "online": online,
+            "offline": offline,
+        }
 
 
 def multipart_fields(body: bytes) -> dict[str, str]:
@@ -174,29 +195,60 @@ def searches(sent: list[dict]) -> list[dict]:
 
 def test_search_media_passes_every_argument(online, library):
     sid = library["source_id"]
-    arguments = {"text": "阿明", "granularity": "shot", "limit": 3, "source_ids": [sid],
-                 "channels": ["dialogue", "visual"],
-                 "filters": {"min_duration": 0.5, "max_duration": 9, "scene": "室内", "emotion": "平静",
-                             "shot_size": "近景"}}
+    arguments = {
+        "text": "阿明",
+        "granularity": "shot",
+        "limit": 3,
+        "source_ids": [sid],
+        "channels": ["dialogue", "visual"],
+        "filters": {
+            "min_duration": 0.5,
+            "max_duration": 9,
+            "scene": "室内",
+            "emotion": "平静",
+            "shot_size": "近景",
+        },
+    }
     with pytest.raises(ToolError) as excinfo:
         # 未登记的人物在出镜模式下被服务端拒绝；请求体仍完整记录，用于核对透传。
-        call(online, "search_media", {**arguments, "person_ids": ["ghost"], "person_mode": "onscreen",
-                                      "person_relation": "any"})
+        call(
+            online,
+            "search_media",
+            {**arguments, "person_ids": ["ghost"], "person_mode": "onscreen", "person_relation": "any"},
+        )
     (request,) = searches(excinfo.value.sent)
     assert request["path"] == "/api/search/text"
     assert request["json"] == {
-        "text": "阿明", "granularity": "shot", "limit": 3, "channels": ["dialogue", "visual"],
-        "person_ids": ["ghost"], "person_mode": "onscreen", "person_relation": "any",
-        "filters": {"min_duration": 0.5, "max_duration": 9, "scene": "室内", "emotion": "平静",
-                    "shot_size": "近景", "source_ids": [sid]},
+        "text": "阿明",
+        "granularity": "shot",
+        "limit": 3,
+        "channels": ["dialogue", "visual"],
+        "person_ids": ["ghost"],
+        "person_mode": "onscreen",
+        "person_relation": "any",
+        "filters": {
+            "min_duration": 0.5,
+            "max_duration": 9,
+            "scene": "室内",
+            "emotion": "平静",
+            "shot_size": "近景",
+            "source_ids": [sid],
+        },
     }
     # 服务端的中文拒绝原因原样转述。
     assert excinfo.value.code == "http_422" and "人物" in str(excinfo.value)
 
-    _, sent = call(online, "search_media", {"text": "绿色", "limit": 2, "source_ids": [sid],
-                                              "filters": {"min_duration": 0.5}})
-    assert searches(sent)[0]["json"] == {"text": "绿色", "granularity": "moment", "limit": 2,
-                                         "filters": {"min_duration": 0.5, "source_ids": [sid]}}
+    _, sent = call(
+        online,
+        "search_media",
+        {"text": "绿色", "limit": 2, "source_ids": [sid], "filters": {"min_duration": 0.5}},
+    )
+    assert searches(sent)[0]["json"] == {
+        "text": "绿色",
+        "granularity": "moment",
+        "limit": 2,
+        "filters": {"min_duration": 0.5, "source_ids": [sid]},
+    }
     # 缺省值不透传多余字段：人物、渠道未给出时由服务端使用默认值。
     _, sent = call(online, "search_media", {"text": "绿色"})
     assert searches(sent)[0]["json"] == {"text": "绿色", "granularity": "moment", "limit": 8}
@@ -225,7 +277,9 @@ def test_search_media_reports_degraded_and_warnings(offline):
     assert out.value["channels"] == ["dialogue"]
     assert out.value["warnings"] and "BM25" in out.value["warnings"][0]
     assert "本次检索已降级" in out.text
-    assert "警告：嵌入不可用，已降级为所选文本渠道的 BM25 检索" in out.text and "connection refused" in out.text
+    assert (
+        "警告：嵌入不可用，已降级为所选文本渠道的 BM25 检索" in out.text and "connection refused" in out.text
+    )
 
 
 def test_search_media_relays_embedding_unavailable(offline):
@@ -239,8 +293,17 @@ def test_search_media_relays_embedding_unavailable(offline):
 def test_search_by_media_image_attachment_chain(online, library):
     ref = upload(online, png("red"), "红色.png", "image/png")
     sid = library["source_id"]
-    out, sent = call(online, "search_by_media", {"attachment": ref, "granularity": "shot", "limit": 2,
-                                                 "source_ids": [sid], "filters": {"min_duration": 0.2}})
+    out, sent = call(
+        online,
+        "search_by_media",
+        {
+            "attachment": ref,
+            "granularity": "shot",
+            "limit": 2,
+            "source_ids": [sid],
+            "filters": {"min_duration": 0.2},
+        },
+    )
     # 先读元数据推断类型，再以 multipart 提交：file 字段是附件内容，filters 是 JSON 字符串。
     assert sent[0]["method"] == "GET" and sent[0]["path"] == f"/api/agent/attachments/{ref[13:]}"
     (request,) = searches(sent)
@@ -293,10 +356,23 @@ def test_find_similar_passthrough_offline_and_errors(offline, library):
     shots = [s for s in store.snapshots(store.active_index()["id"]) if s["kind"] == "shot"]
     seed = shots[0]
     # 嵌入服务离线时仍可用：只读库内向量（Req 7.4）。
-    out, sent = call(offline, "find_similar", {"segment_id": seed["id"], "granularity": "shot", "limit": 2,
-                                               "source_ids": [sid], "filters": {"min_duration": 0.1}})
-    assert sent[0]["json"] == {"segment_id": seed["id"], "limit": 2, "granularity": "shot",
-                               "filters": {"min_duration": 0.1, "source_ids": [sid]}}
+    out, sent = call(
+        offline,
+        "find_similar",
+        {
+            "segment_id": seed["id"],
+            "granularity": "shot",
+            "limit": 2,
+            "source_ids": [sid],
+            "filters": {"min_duration": 0.1},
+        },
+    )
+    assert sent[0]["json"] == {
+        "segment_id": seed["id"],
+        "limit": 2,
+        "granularity": "shot",
+        "filters": {"min_duration": 0.1, "source_ids": [sid]},
+    }
     assert out.value["seed_segment_id"] == seed["id"] and out.focus == {"page": "search"}
     rows = out.value["results"]
     assert rows and all(r["segment_id"] != seed["id"] and r["kind"] == "shot" for r in rows)
@@ -323,14 +399,14 @@ def test_system_status_reports_index_coverage_and_embedding(online, library, mon
     assert out.focus == {"page": "search"} and "embedding" not in out.value
     assert f"活动索引：{active['id']}" in out.text and "渠道覆盖：画面" in out.text
 
-    monkeypatch.setattr("mindex.settings.settings_api.make_embedder", FixtureEmbedder)
+    monkeypatch.setattr("settings.api.make_embedder", FixtureEmbedder)
     out, sent = call(online, "get_system_status", {"include_embedding": True})
     assert sent[-1]["path"] == "/api/settings/embedding-status"
     assert out.value["embedding"]["matches_index"] is True
     assert "嵌入身份：与活动索引一致，检索可用" in out.text
 
     # 嵌入服务未就绪：如实报告不可用及原因，并提示画面检索可能降级。
-    monkeypatch.setattr("mindex.settings.settings_api.make_embedder", OfflineEmbedder)
+    monkeypatch.setattr("settings.api.make_embedder", OfflineEmbedder)
     out, _ = call(online, "get_system_status", {"include_embedding": True})
     assert out.value["embedding"]["matches_index"] is False
     assert "connection refused" in out.value["embedding"]["error"]

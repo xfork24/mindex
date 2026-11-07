@@ -1,10 +1,12 @@
 """AI 动画录制组件（Playwright 的 Chromium headless shell）的检测与按需安装。
 
 动画录制（``studio/animation_capture.py``）以无头模式启动 Chromium，Playwright 使用 headless shell 构建，
-所以只安装它（``playwright install --only-shell chromium``，约 100 MB）。浏览器目录取 ``PLAYWRIGHT_BROWSERS_PATH``
+所以只安装它（``playwright install --only-shell chromium``，约 100 MB）。浏览器目录取
+``PLAYWRIGHT_BROWSERS_PATH``
 （桌面版设为用户数据目录的 ``browsers/``），未设置时为 Playwright 的缺省缓存目录。
 
-安装在后台线程中以子进程运行 ``<sys.executable> -m playwright install``；冻结的桌面后端经 ``mindex.desktop_entry``
+安装在后台线程中以子进程运行 ``<sys.executable> -m playwright install``；冻结的桌面后端经 ``server.
+desktop_entry``
 分发 ``-m``。进程内同时只有一个安装任务，状态（运行中/完成/失败与日志尾部）保存在内存里，页面轮询读取。
 """
 
@@ -88,8 +90,13 @@ class BrowserInstaller:
                 "installed": installed(),
                 "revision": revision,
                 "path": str(browsers_path()),
-                "task": {"status": self.status, "error": self.error, "started_at": self.started_at,
-                         "finished_at": self.finished_at, "log": "\n".join(self._log)},
+                "task": {
+                    "status": self.status,
+                    "error": self.error,
+                    "started_at": self.started_at,
+                    "finished_at": self.finished_at,
+                    "log": "\n".join(self._log),
+                },
             }
 
     def start(self) -> dict:
@@ -116,8 +123,9 @@ class BrowserInstaller:
         try:
             browsers_path().mkdir(parents=True, exist_ok=True)
             # 以字节读取：文本模式会把进度刷新用的 \r 当成换行。
-            process = subprocess.Popen(command, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                       stderr=subprocess.STDOUT)
+            process = subprocess.Popen(
+                command, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+            )
             for raw in process.stdout:
                 # 下载进度用 \r 刷新同一行：只保留最后一段（Windows 的 \r\n 换行见 progress_line）。
                 text = progress_line(raw)

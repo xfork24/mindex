@@ -18,11 +18,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from mindex.shared.storage import dumps
-from mindex.shared.tokenizer import document_terms, tokenizer_version
+from shared.storage import dumps
+from shared.tokenizer import document_terms, tokenizer_version
 
 if TYPE_CHECKING:
-    from mindex.shared.storage import Store
+    from shared.storage import Store
 
 log = logging.getLogger(__name__)
 
@@ -36,8 +36,7 @@ _BATCH = 500
 
 def lexical_ready(store: Store, index_id: str) -> bool:
     """派生索引是否可用于该索引版本：已构建且分词器版本与本节点一致。"""
-    meta = store.one(
-        "SELECT tokenizer_version FROM lexical_index_meta WHERE index_id=?", (index_id,))
+    meta = store.one("SELECT tokenizer_version FROM lexical_index_meta WHERE index_id=?", (index_id,))
     if meta is None:
         return False
     if meta["tokenizer_version"] != tokenizer_version():
@@ -54,11 +53,11 @@ def build_lexical_index(store: Store, index_id: str, *, replace: bool = False) -
     """
     version = tokenizer_version()
     meta = store.one(
-        "SELECT tokenizer_version,segments FROM lexical_index_meta WHERE index_id=?", (index_id,))
+        "SELECT tokenizer_version,segments FROM lexical_index_meta WHERE index_id=?", (index_id,)
+    )
     if meta and not replace:
         if meta["tokenizer_version"] != version:
-            raise ValueError(
-                "派生词法索引分词器版本与当前节点不一致；需 replace=True 强制重建")
+            raise ValueError("派生词法索引分词器版本与当前节点不一致；需 replace=True 强制重建")
         return {"index_id": index_id, "skipped": True, "segments": meta["segments"]}
 
     counts = {"segments": 0, "docs": 0, "terms": 0}
@@ -69,8 +68,12 @@ def build_lexical_index(store: Store, index_id: str, *, replace: bool = False) -
         cursor = None
         while True:
             boundary, args = ("", ()) if cursor is None else (" AND segment_id>?", (cursor,))
-            rows = db.execute("SELECT segment_id,snapshot FROM index_members WHERE index_id=? AND complete=1" +
-                              boundary + " ORDER BY segment_id LIMIT ?", (index_id, *args, _BATCH)).fetchall()
+            rows = db.execute(
+                "SELECT segment_id,snapshot FROM index_members WHERE index_id=? AND complete=1"
+                + boundary
+                + " ORDER BY segment_id LIMIT ?",
+                (index_id, *args, _BATCH),
+            ).fetchall()
             if not rows:
                 break
             segments, docs = [], []
@@ -80,27 +83,52 @@ def build_lexical_index(store: Store, index_id: str, *, replace: bool = False) -
 
                 snapshot = json.loads(row["snapshot"])
                 annotation = snapshot.get("annotation") or {}
-                segments.append((index_id, snapshot["id"], snapshot["source_id"], snapshot.get("parent_id"),
-                    snapshot["kind"], snapshot["start"], snapshot["end"],
-                    dumps({field: list(annotation.get(field) or []) for field in _ANNOTATION_FIELDS}),
-                    dumps(sorted(snapshot.get("indexed_views") or []))))
+                segments.append(
+                    (
+                        index_id,
+                        snapshot["id"],
+                        snapshot["source_id"],
+                        snapshot.get("parent_id"),
+                        snapshot["kind"],
+                        snapshot["start"],
+                        snapshot["end"],
+                        dumps({field: list(annotation.get(field) or []) for field in _ANNOTATION_FIELDS}),
+                        dumps(sorted(snapshot.get("indexed_views") or [])),
+                    )
+                )
                 views = snapshot.get("views") or {}
                 for channel in LEXICAL_CHANNELS:
-                    counter, total = document_terms("\n".join(value for key, value in views.items() if key == channel))
+                    counter, total = document_terms(
+                        "\n".join(value for key, value in views.items() if key == channel)
+                    )
                     docs.append((index_id, snapshot["id"], channel, total))
-                    terms.extend((index_id, channel, term, snapshot["id"], tf) for term, tf in counter.items())
-            db.executemany("INSERT INTO search_segments(index_id,segment_id,source_id,parent_id,kind,"
-                           'start,"end",annotation_projection,indexed_views) VALUES(?,?,?,?,?,?,?,?,?)', segments)
-            db.executemany("INSERT INTO lexical_docs(index_id,segment_id,channel,doc_length) VALUES(?,?,?,?)", docs)
+                    terms.extend(
+                        (index_id, channel, term, snapshot["id"], tf) for term, tf in counter.items()
+                    )
+            db.executemany(
+                "INSERT INTO search_segments(index_id,segment_id,source_id,parent_id,kind,"
+                'start,"end",annotation_projection,indexed_views) VALUES(?,?,?,?,?,?,?,?,?)',
+                segments,
+            )
+            db.executemany(
+                "INSERT INTO lexical_docs(index_id,segment_id,channel,doc_length) VALUES(?,?,?,?)", docs
+            )
             for offset in range(0, len(terms), _BATCH):
-                db.executemany("INSERT INTO lexical_terms(index_id,channel,term,segment_id,tf) VALUES(?,?,?,?,?)",
-                               terms[offset:offset + _BATCH])
+                db.executemany(
+                    "INSERT INTO lexical_terms(index_id,channel,term,segment_id,tf) VALUES(?,?,?,?,?)",
+                    terms[offset : offset + _BATCH],
+                )
             for key, values in (("segments", segments), ("docs", docs), ("terms", terms)):
                 counts[key] += len(values)
             cursor = rows[-1]["segment_id"]
-        db.execute("INSERT INTO lexical_index_meta(index_id,tokenizer_version,segments,docs,terms) VALUES(?,?,?,?,?)",
-                   (index_id, version, counts["segments"], counts["docs"], counts["terms"]))
-    log.info("派生词法索引构建完成 · %s · %d segments · %d terms", index_id, counts["segments"], counts["terms"])
+        db.execute(
+            "INSERT INTO lexical_index_meta(index_id,tokenizer_version,segments,docs,terms) "
+            "VALUES(?,?,?,?,?)",
+            (index_id, version, counts["segments"], counts["docs"], counts["terms"]),
+        )
+    log.info(
+        "派生词法索引构建完成 · %s · %d segments · %d terms", index_id, counts["segments"], counts["terms"]
+    )
     return {"index_id": index_id, **counts}
 
 

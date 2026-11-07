@@ -9,17 +9,17 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from mindex.models import adapters
-from mindex.models.adapters import ModelError
-from mindex.models.writer import (
+from models import adapters
+from models.adapters import ModelError
+from models.writer import (
     MATERIAL_HEADER,
     MATERIAL_RULES,
     WRITER_PROMPT_VERSION,
     WRITER_TEMPERATURE,
     QwenWriter,
 )
-from mindex.shared.types import DigestEmptyReason, DigestSource, MaterialDigest
-from mindex.studio.script_templates import builtins
+from shared.types import DigestEmptyReason, DigestSource, MaterialDigest
+from studio.script_templates import builtins
 
 BASE = builtins()["base"]
 INSTRUCTIONS = BASE.instructions.strip()  # 通用解说模板即原内置提示词的改进版
@@ -33,8 +33,13 @@ def chat_payload(content: str, finish_reason: str = "stop") -> dict:
 def writer_config(config):
     copied = config.model_copy(deep=True)
     copied.studio.writer = copied.studio.writer.model_copy(
-        update={"base_url": "http://writer.test/v1", "model": "writer-model", "llama_template": False,
-                "max_tokens": 777, "split_retries": 1}
+        update={
+            "base_url": "http://writer.test/v1",
+            "model": "writer-model",
+            "llama_template": False,
+            "max_tokens": 777,
+            "split_retries": 1,
+        }
     )
     return copied
 
@@ -91,9 +96,20 @@ def test_writer_rejects_empty_outline_and_truncation(writer_config, monkeypatch)
 def sample_digest() -> MaterialDigest:
     return MaterialDigest(
         text="【海港纪录】时长 120 秒\n画面词：灯塔、渔船\n故事线：清晨的港口；夜晚的灯塔\n",
-        sources=[DigestSource(source_id="s1", name="海港纪录", duration=120.0, segments=4,
-                              storyline=["清晨的港口", "夜晚的灯塔"], vocabulary=["灯塔", "渔船"])],
-        source_count=1, segment_count=4, fingerprint="fp", content_index_id="idx",
+        sources=[
+            DigestSource(
+                source_id="s1",
+                name="海港纪录",
+                duration=120.0,
+                segments=4,
+                storyline=["清晨的港口", "夜晚的灯塔"],
+                vocabulary=["灯塔", "渔船"],
+            )
+        ],
+        source_count=1,
+        segment_count=4,
+        fingerprint="fp",
+        content_index_id="idx",
     )
 
 
@@ -103,7 +119,9 @@ def test_writer_prompt_version_is_three():
 
 def test_writer_empty_digest_matches_none_and_omits_material_rules(writer_config, monkeypatch):
     bodies = []
-    monkeypatch.setattr(adapters, "request", lambda m, u, **k: bodies.append(k["json"]) or chat_payload("文案。"))
+    monkeypatch.setattr(
+        adapters, "request", lambda m, u, **k: bodies.append(k["json"]) or chat_payload("文案。")
+    )
     writer = QwenWriter(writer_config)
     writer.write("大纲", template=BASE)
     writer.write("大纲", template=BASE, materials=None)
@@ -236,8 +254,9 @@ GOOD_REPLY = "短文案。"
     retries=st.integers(min_value=0, max_value=3),
     data=st.data(),
 )
-def test_property_nonempty_digest_sent_as_separate_segment_every_attempt(writer_config, outline, digest,
-                                                                         retries, data):
+def test_property_nonempty_digest_sent_as_separate_segment_every_attempt(
+    writer_config, outline, digest, retries, data
+):
     """**Validates: Requirements 4.4, 4.6, 4.7, 4.8, 4.9**"""
     config = writer_config.model_copy(deep=True)
     config.studio.max_input_chars = 10

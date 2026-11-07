@@ -45,8 +45,7 @@ class StagingArea:
     暂停进程仍持锁，不能因心跳延迟删除它正在使用的缓存。
     """
 
-    def __init__(self, root: Path, *, quota_bytes: int, min_free_bytes: int = 0,
-                 disk_probe=None):
+    def __init__(self, root: Path, *, quota_bytes: int, min_free_bytes: int = 0, disk_probe=None):
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.quota = quota_bytes
@@ -82,7 +81,10 @@ class StagingArea:
             if self._ledger_path.exists():
                 self._state = json.loads(self._ledger_path.read_text(encoding="utf-8"))
                 if (self._state.get("version"), self._state.get("quota"), self._state.get("min_free")) != (
-                        1, self.quota, self.min_free):
+                    1,
+                    self.quota,
+                    self.min_free,
+                ):
                     raise RuntimeError("同一 staging 目录的预算配置不一致；请统一配置后重启")
             else:
                 self._state = {"version": 1, "quota": self.quota, "min_free": self.min_free, "owners": {}}
@@ -128,14 +130,23 @@ class StagingArea:
     def _rescan(self) -> None:
         """启动时把既有文件按访问时间登记进 LRU（崩溃残留按可淘汰处理）。"""
         self._entries.clear()
-        covered = {key for owner in self._state["owners"].values()
-                   for key, size in owner.get("reservations", {}).items() if size > 0}
+        covered = {
+            key
+            for owner in self._state["owners"].values()
+            for key, size in owner.get("reservations", {}).items()
+            if size > 0
+        }
         found = []
         for path in self.root.rglob("*"):
-            if (path.is_file() and not any(part in {".staging-state", "locks", "models", "chroma"}
-                                           for part in path.relative_to(self.root).parts)
-                    and self._key_of(path) not in covered
-                    and not path.name.endswith((".lock", ".sqlite3", "-wal", "-shm"))):
+            if (
+                path.is_file()
+                and not any(
+                    part in {".staging-state", "locks", "models", "chroma"}
+                    for part in path.relative_to(self.root).parts
+                )
+                and self._key_of(path) not in covered
+                and not path.name.endswith((".lock", ".sqlite3", "-wal", "-shm"))
+            ):
                 try:
                     stat = path.stat()
                     found.append((stat.st_mtime_ns, path, stat.st_size))
@@ -147,11 +158,14 @@ class StagingArea:
     def usage(self) -> dict:
         with self._accounting():
             pinned = sum(size for path, size in self._entries.items() if self._is_pinned(path))
-            return {"quota": self.quota, "reserved": self._reserved, "pinned": pinned,
-                    "cached": sum(self._entries.values()),
-                    "evictable": sum(size for path, size in self._entries.items()
-                                     if not self._is_pinned(path)),
-                    "files": len(self._entries)}
+            return {
+                "quota": self.quota,
+                "reserved": self._reserved,
+                "pinned": pinned,
+                "cached": sum(self._entries.values()),
+                "evictable": sum(size for path, size in self._entries.items() if not self._is_pinned(path)),
+                "files": len(self._entries),
+            }
 
     def _is_pinned(self, path: Path) -> bool:
         return self._pins.get(self._key_of(path), 0) > 0
@@ -169,7 +183,8 @@ class StagingArea:
             raise StagingFull(
                 f"单次工作集 {size} 字节超过 staging 总预算 {self.quota} 字节"
                 f"{'（' + purpose + '）' if purpose else ''}；请提高 storage.staging_quota_gb"
-                " 或拆分任务")
+                " 或拆分任务"
+            )
         with self._accounting():
             self._evict_locked(size - max(0, self.quota - self._reserved - self._used_locked()))
             written = 0
@@ -184,14 +199,16 @@ class StagingArea:
             if self._reserved + size + self._used_locked() > self.quota:
                 raise StagingFull(
                     f"staging 并发预算不足：预约 {size} 字节（{purpose}）后将超过总预算"
-                    f" {self.quota} 字节；请降低并发或等待在跑任务释放")
+                    f" {self.quota} 字节；请降低并发或等待在跑任务释放"
+                )
             if usage.free < free_needed:
                 self._evict_locked(min(free_needed - usage.free, self._evictable_locked()))
                 usage = self._disk(self.root)
                 if usage.free < free_needed:
                     raise StagingFull(
                         f"磁盘剩余 {usage.free} 字节不足（预约 {size} + 最低余量 "
-                        f"{self.min_free}）；请清理节点磁盘或下调并发")
+                        f"{self.min_free}）；请清理节点磁盘或下调并发"
+                    )
             owner = self._state["owners"][self._owner]
             owner["reserved"] += size
             if path is not None:

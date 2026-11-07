@@ -10,14 +10,14 @@ import hashlib
 from pathlib import Path
 
 import pytest
-from conftest import FixtureStoryboarder, legacy_job
 from fastapi.testclient import TestClient
 from filelock import FileLock
 
-from mindex.api import create_app
-from mindex.models.adapters import ModelError
-from mindex.studio import studio
-from mindex.studio import workspace as ws
+from api import create_app
+from conftest import FixtureStoryboarder, legacy_job
+from models.adapters import ModelError
+from studio import studio
+from studio import workspace as ws
 
 
 def tree_hashes(directory: Path) -> dict[str, str]:
@@ -39,9 +39,13 @@ def setup_workspace(config):
         w,
         p,
         [
-            studio.Shot(id="a", text="红色开场。", query="红色", estimated_seconds=1, visual="红色 幕布 拉开"),
+            studio.Shot(
+                id="a", text="红色开场。", query="红色", estimated_seconds=1, visual="红色 幕布 拉开"
+            ),
             studio.Shot(id="b", text="蓝色过渡。", query="蓝色", estimated_seconds=1),
-            studio.Shot(id="c", text="绿色结尾。", query="绿色", estimated_seconds=1, visual="绿色 草地 远景"),
+            studio.Shot(
+                id="c", text="绿色结尾。", query="绿色", estimated_seconds=1, visual="绿色 草地 远景"
+            ),
         ],
     )
     p["board_script"] = p["script"]

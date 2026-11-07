@@ -8,19 +8,27 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from mindex.api import create_app
-from mindex.models import adapters
-from mindex.settings import voice_clone, voices_catalog
-from mindex.shared.config import Config
+from api import create_app
+from models import adapters
+from settings import voice_clone, voices_catalog
+from shared.config import Config
 
 
 def roles(config: Config) -> dict:
     s = config.studio
     return {
-        "person": config.person, "embedding": config.embedding, "analyzer": config.analyzer, "asr": config.asr,
-        "generator": s.generator, "writer": s.writer, "tts": s.tts, "agent": config.agent.llm,
-        "video_generator": s.video_generator, "image_generator": s.image_generator,
-        "music_generator": s.music_generator, "animator": s.animator,
+        "person": config.person,
+        "embedding": config.embedding,
+        "analyzer": config.analyzer,
+        "asr": config.asr,
+        "generator": s.generator,
+        "writer": s.writer,
+        "tts": s.tts,
+        "agent": config.agent.llm,
+        "video_generator": s.video_generator,
+        "image_generator": s.image_generator,
+        "music_generator": s.music_generator,
+        "animator": s.animator,
     }
 
 
@@ -34,18 +42,28 @@ def test_default_timeouts(config):
 
 def test_settings_profile_timeout_is_applied_and_shown(config):
     client = TestClient(create_app(config))
-    created = client.post("/api/settings/profiles", json={
-        "role": "writer", "provider": "custom", "name": "慢模型",
-        "config": {"backend": "openai", "base_url": "http://127.0.0.1:9/v1", "model": "m", "timeout": 42},
-    })
+    created = client.post(
+        "/api/settings/profiles",
+        json={
+            "role": "writer",
+            "provider": "custom",
+            "name": "慢模型",
+            "config": {"backend": "openai", "base_url": "http://127.0.0.1:9/v1", "model": "m", "timeout": 42},
+        },
+    )
     assert created.status_code == 201, created.text
     assert client.post(f"/api/settings/profiles/{created.json()['id']}/activate").status_code == 200
     writer = {r["role"]: r for r in client.get("/api/settings").json()["roles"]}["writer"]
     assert writer["effective"]["timeout"] == 42
-    bad = client.post("/api/settings/profiles", json={
-        "role": "tts", "provider": "custom", "name": "x",
-        "config": {"backend": "openai", "base_url": "http://127.0.0.1:9/v1", "model": "m", "timeout": 0},
-    })
+    bad = client.post(
+        "/api/settings/profiles",
+        json={
+            "role": "tts",
+            "provider": "custom",
+            "name": "x",
+            "config": {"backend": "openai", "base_url": "http://127.0.0.1:9/v1", "model": "m", "timeout": 0},
+        },
+    )
     assert bad.status_code == 422
 
 
@@ -55,8 +73,14 @@ def seen(monkeypatch):
 
     def fake(method, url, **kwargs):
         calls.append(kwargs.get("timeout"))
-        return {"base_resp": {"status_code": 0}, "file": {"file_id": "f"}, "data": {}, "voices": [],
-                "system_voice": [], "output": {"voice_id": "v"}}
+        return {
+            "base_resp": {"status_code": 0},
+            "file": {"file_id": "f"},
+            "data": {},
+            "voices": [],
+            "system_voice": [],
+            "output": {"voice_id": "v"},
+        }
 
     monkeypatch.setattr(adapters, "request", fake)
     return calls
@@ -70,7 +94,7 @@ def test_interactive_calls_use_profile_timeout(config, seen, tmp_path):
     sample.write_bytes(b"RIFF")
     voice_clone.minimax_clone("http://x", "", sample, "v", "m", timeout=tts.timeout)
     voice_clone.aliyun_enroll("http://x", "", "http://a", "p", "m", timeout=tts.timeout)
-    from mindex.models.image_generators import minimax_health
+    from models.image_generators import minimax_health
 
     image = config.studio.image_generator.model_copy(update={"timeout": 33})
     minimax_health("http://x", image, {}, "ok", "图片生成")
@@ -79,16 +103,26 @@ def test_interactive_calls_use_profile_timeout(config, seen, tmp_path):
 
 def test_connection_test_uses_profile_timeout(config, seen):
     client = TestClient(create_app(config))
-    created = client.post("/api/settings/profiles", json={
-        "role": "generator", "provider": "custom", "name": "g",
-        "config": {"backend": "openai", "base_url": "http://127.0.0.1:9/v1", "model": "m", "timeout": 250},
-    }).json()
+    created = client.post(
+        "/api/settings/profiles",
+        json={
+            "role": "generator",
+            "provider": "custom",
+            "name": "g",
+            "config": {
+                "backend": "openai",
+                "base_url": "http://127.0.0.1:9/v1",
+                "model": "m",
+                "timeout": 250,
+            },
+        },
+    ).json()
     client.post(f"/api/settings/profiles/{created['id']}/test")
     assert seen == [250]
 
 
 def test_video_download_and_detector_use_configured_timeout(config, monkeypatch, tmp_path):
-    from mindex.models import detectors, video_generators
+    from models import detectors, video_generators
 
     captured = {}
 

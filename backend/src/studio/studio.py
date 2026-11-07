@@ -18,16 +18,17 @@ from uuid import uuid4
 from filelock import Timeout
 from pydantic import Discriminator, Field, Tag, field_validator, model_serializer, model_validator
 
-from mindex.admin.curation import EntityNotFound
-from mindex.models.storyboard import coverage_warning
-from mindex.shared import jsonio, lock_backend
-from mindex.shared.config import Config, StrictModel, fingerprint, portable_parameters
-from mindex.shared.trace import record as trace_record
-from mindex.shared.types import Filters, Granularity
-from mindex.shared.work_budget import copy_file
+from admin.curation import EntityNotFound
+from models.storyboard import coverage_warning
+from shared import jsonio, lock_backend
+from shared.config import Config, StrictModel, fingerprint, portable_parameters
+from shared.trace import record as trace_record
+from shared.types import Filters, Granularity
+from shared.work_budget import copy_file
 
 STEPS = ("split", "recall", "tts", "select", "render")
-SPLIT_VERSION = 8  # 8: 创建语言决定 visual/query；7: 具体意象单独成镜、抽象列举不拆、最短长度、visual 字段与召回词公共规则
+# 8: 创建语言决定 visual/query；7: 具体意象单独成镜、抽象列举不拆、最短长度、visual 字段与召回词公共规则
+SPLIT_VERSION = 8
 STEP_LABELS = {
     "split": "文本拆分镜",
     "recall": "语义召回",
@@ -102,13 +103,16 @@ def now() -> str:
 def save(path: Path, value, *, config=None):
     """原子写入 JSON；实现见 ``shared/jsonio``。"""
     if config is not None:
-        from mindex.shared.migration_state import writable_config
+        from shared.migration_state import writable_config
 
         writable_config(config)
     if config is not None and config.storage.backend == "s3":
-        from mindex.shared import files
-        from mindex.shared.storage import Store
-        files.save_bytes(Store.open(config), path, json.dumps(value, ensure_ascii=False, indent=2).encode("utf-8"))
+        from shared import files
+        from shared.storage import Store
+
+        files.save_bytes(
+            Store.open(config), path, json.dumps(value, ensure_ascii=False, indent=2).encode("utf-8")
+        )
     else:
         jsonio.save(path, value)
 
@@ -183,7 +187,10 @@ AIGC_OPTIONAL = ("mode", "last_image_id", "references", "model", "resolution", "
 
 
 class MediaReference(StrictModel):
-    """多模态参考素材：任务 ``inputs/`` 内的图片、视频或音频（sha256），经 query-media purpose=source 上传。"""
+    (
+        """多模态参考素材：任务 ``inputs/`` 内的图片、视频或音频（sha256），经 query-media purpose=source """
+        """上传。"""
+    )
 
     kind: Literal["image", "video", "audio"]
     media_id: str = Field(pattern=MEDIA_ID)
@@ -192,11 +199,14 @@ class MediaReference(StrictModel):
 class AigcSource(StrictModel):
     """AI 生成视频：generate 阶段按提示词（缺省用画面意象，再缺省用召回查询）生成片段，再在片段内选窗对齐。
 
-    ``image_id`` 是首帧参考图（任务 ``inputs/`` 内的图片 sha256，经 query-media purpose=source 上传）。
-    生成方式 ``mode``：text 文生视频、first_frame 首帧图生视频、last_frame 尾帧图生视频、first_last 首尾帧生视频、
-    reference 主体（多模态）参考生视频；None = 有首帧图时为 first_frame，否则 text。尾帧图 ``last_image_id``、
-    参考素材 ``references``（≤9 图、≤3 视频、≤3 音频）、模型档位、分辨率、比例与时长（None = 按配音时长取整）
-    只对 MiniMax H3 生效。"""
+        ``image_id`` 是首帧参考图（任务 ``inputs/`` 内的图片 sha256，经 query-media purpose=source 上传）。
+        生成方式 ``mode``：text 文生视频、first_frame 首帧图生视频、last_frame 尾帧图生视频、first_last
+    首尾帧生视频、
+        reference 主体（多模态）参考生视频；None = 有首帧图时为 first_frame，否则 text。
+        尾帧图 ``last_image_id``、
+        参考素材 ``references``（≤9 图、≤3 视频、≤3 音频）、模型档位、分辨率、比例与时长
+        （None = 按配音时长取整）
+        只对 MiniMax H3 生效。"""
 
     kind: Literal["aigc"]
     prompt: str | None = Field(default=None, max_length=AIGC_PROMPT_LIMIT)
@@ -268,8 +278,10 @@ IMAGE_PROMPT_LIMIT = 1500
 
 
 class AiImageSource(StrictModel):
-    """AI 生成图片：draw 阶段调用图片生成模型（MiniMax image-01，文生图；给出 ``reference_id`` 时为主体参考图生图）
-    按提示词（缺省用画面意象，再缺省用召回查询）生成一张图片，之后与静态图片相同：按 motion/strength 推拉/平移渲染。"""
+    """AI 生成图片：draw 阶段调用图片生成模型（MiniMax image-01，文生图；
+    给出 ``reference_id`` 时为主体参考图生图）
+    按提示词（缺省用画面意象，再缺省用召回查询）生成一张图片，
+    之后与静态图片相同：按 motion/strength 推拉/平移渲染。"""
 
     kind: Literal["aigc_image"]
     prompt: str | None = Field(default=None, max_length=IMAGE_PROMPT_LIMIT)
@@ -294,7 +306,8 @@ ANIMATION_BRIEF_LIMIT = 2000
 class AnimationSource(StrictModel):
     """AI 动画：animate 阶段由动画生成 LLM 按画面说明写 HTML/JS 动画，render 阶段在沙箱里逐帧录制。
 
-    ``brief`` 为画面说明（≤2000 字）；None = 用画面意象，再缺省用旁白。动画源码可在创作页人工修改（origin=manual）。"""
+    ``brief`` 为画面说明（≤2000 字）；None = 用画面意象，再缺省用旁白。
+    动画源码可在创作页人工修改（origin=manual）。"""
 
     kind: Literal["animation"]
     brief: str | None = Field(default=None, max_length=ANIMATION_BRIEF_LIMIT)
@@ -364,10 +377,12 @@ MUSIC_LYRICS_LIMIT = 3500
 class ShotMusic(StrictModel):
     """背景音乐提示点：从这个分镜开始换成新的背景音乐（或停止），之后的分镜顺延，直到下一个提示点。
 
-    kind：generate 由音乐生成模型（music-3.0）按描述生成（缺省纯音乐；给出歌词或关闭纯音乐时为带人声歌曲）；
-    cover 按参考音频（``audio_id``，inputs 内的音频 sha256）翻唱；library 选用曲库曲目（``track_id``，曲目内容 sha256）；
-    none 从此分镜起不再有背景音乐。``volume`` 为混音音量（0–1），配音出现时背景音乐自动压低。
-    ``track_id`` 为 None 时 dump 省略，旧提示点数据形态不变。"""
+        kind：generate 由音乐生成模型（music-3.0）按描述生成
+        （缺省纯音乐；给出歌词或关闭纯音乐时为带人声歌曲）；
+        cover 按参考音频（``audio_id``，inputs 内的音频 sha256）翻唱；library 选用曲库曲目（``track_id``，
+    曲目内容 sha256）；
+        none 从此分镜起不再有背景音乐。``volume`` 为混音音量（0–1），配音出现时背景音乐自动压低。
+        ``track_id`` 为 None 时 dump 省略，旧提示点数据形态不变。"""
 
     kind: Literal["generate", "cover", "library", "none"]
     prompt: str | None = Field(default=None, max_length=MUSIC_PROMPT_LIMIT)
@@ -411,8 +426,20 @@ class ShotMusic(StrictModel):
 # 镜内转场：只作用于本镜开头（enter）或结尾（leave），不改变镜头时长。
 EDGE_KINDS = Literal["fade", "white", "zoom", "slide"]
 # 重叠转场（ffmpeg xfade 的 transition 取值子集）：本镜与下一镜交叉过渡，由本镜多渲染的尾部余量承担。
-OVERLAP_KINDS = Literal["fade", "dissolve", "fadeblack", "fadewhite", "wipeleft", "wiperight", "slideleft",
-                        "slideright", "circleopen", "circleclose", "smoothleft", "smoothright"]
+OVERLAP_KINDS = Literal[
+    "fade",
+    "dissolve",
+    "fadeblack",
+    "fadewhite",
+    "wipeleft",
+    "wiperight",
+    "slideleft",
+    "slideright",
+    "circleopen",
+    "circleclose",
+    "smoothleft",
+    "smoothright",
+]
 
 
 class TransitionEdge(StrictModel):
@@ -939,16 +966,26 @@ def _migration_writable(method):
 
     @wraps(method)
     def wrapped(config, *args, **kwargs):
-        from mindex.shared.migration_state import writable_config
+        from shared.migration_state import writable_config
 
         writable_config(config)
         return method(config, *args, **kwargs)
+
     return wrapped
 
 
 @_migration_writable
-def create_job(config: Config, text: str, title: str | None = None, options: dict | None = None,
-               *, store=None, defer_title: bool = False, original_input: str | None = None, language: str = "zh") -> dict:
+def create_job(
+    config: Config,
+    text: str,
+    title: str | None = None,
+    options: dict | None = None,
+    *,
+    store=None,
+    defer_title: bool = False,
+    original_input: str | None = None,
+    language: str = "zh",
+) -> dict:
     """创建创作任务。``text`` 是视频大纲，文案在任务内由文案创作模型生成。
 
     标题生成是一次阻塞的 LLM 往返，会显著拖慢创建的感知延迟。调用方传入
@@ -970,7 +1007,7 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
     except ValueError as exc:
         raise StudioError(f"任务选项无效：{exc}") from exc
     if store is None:
-        from mindex.shared.storage import Store
+        from shared.storage import Store
 
         store = Store.open(config)
     if parsed.source_group_ids:
@@ -1018,8 +1055,9 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
         "execution": {"status": "idle", "current_step": None, "remaining_steps": []},
         "artifact_version": 1,
     }
-    from mindex.shared.storage import Store
-    from mindex.studio.delivery_templates import apply, default_snapshot
+    from shared.storage import Store
+    from studio.delivery_templates import apply, default_snapshot
+
     state["language"] = language
     state["options"] = apply(state["options"], default_snapshot(store or Store.open(config)))
     save(job_path(config, job_id), state, config=config)
@@ -1028,8 +1066,9 @@ def create_job(config: Config, text: str, title: str | None = None, options: dic
 
 def load_job(config: Config, job_id: str) -> dict:
     if config.storage.backend == "s3":
-        from mindex.shared import files
-        from mindex.shared.storage import Store
+        from shared import files
+        from shared.storage import Store
+
         payload = files.read_bytes(Store.open(config), job_path(config, job_id))
         if payload is None:
             raise EntityNotFound("找不到创作任务")
@@ -1053,8 +1092,9 @@ def list_jobs(config: Config, *, recover: bool = False) -> list[dict]:
     """
     root = studio_root(config)
     if config.storage.backend == "s3":
-        from mindex.shared import files
-        from mindex.shared.storage import Store
+        from shared import files
+        from shared.storage import Store
+
         store = Store.open(config)
         for row in files.entries(store, "studio/"):
             if row["path"].endswith("/job.json"):
@@ -1081,8 +1121,9 @@ def list_jobs(config: Config, *, recover: bool = False) -> list[dict]:
                 running = [s for s, v in state.get("steps", {}).items() if v.get("status") == "running"]
                 if running or state.get("execution", {}).get("status") == "running":
                     for step in running:
-                        fail_step(config, directory.name, step,
-                                  StudioError("服务重启导致步骤中断，请重跑该步骤"))
+                        fail_step(
+                            config, directory.name, step, StudioError("服务重启导致步骤中断，请重跑该步骤")
+                        )
                     set_execution(config, directory.name, "failed", None, [])
                     state = load_job(config, directory.name)  # 恢复后重读，摘要反映新状态
             summaries.append(_summary(state))
@@ -1094,17 +1135,19 @@ def list_jobs(config: Config, *, recover: bool = False) -> list[dict]:
 
 def delete_job(config: Config, job_id: str):
     if config.queue.backend == "postgres":
-        from mindex.shared.storage import Store
+        from shared.storage import Store
 
-        if Store.open(config).one("SELECT id FROM studio_tasks WHERE job_id=? AND status IN ('queued','running') LIMIT 1",
-                                  (job_id,)):
+        if Store.open(config).one(
+            "SELECT id FROM studio_tasks WHERE job_id=? AND status IN ('queued','running') LIMIT 1", (job_id,)
+        ):
             raise StudioError("创作任务仍在排队或执行，请先取消再删除")
     directory = job_dir(config, job_id)
     if not directory.is_dir():
         raise EntityNotFound("找不到创作任务")
     if config.storage.backend == "s3":
-        from mindex.shared import files
-        from mindex.shared.storage import Store
+        from shared import files
+        from shared.storage import Store
+
         files.delete_tree(Store.open(config), f"studio/{job_id}/")
     shutil.rmtree(directory)
 
@@ -1162,7 +1205,8 @@ def begin_step(config: Config, job_id: str, step: str) -> dict:
     save(
         attempts_dir(config, job_id) / f"{step}-{state['steps'][step]['attempt']}.json",
         {"step": step, **state["steps"][step]},
-        config=config)
+        config=config,
+    )
     return state
 
 
@@ -1234,8 +1278,8 @@ def write_storyboard(config: Config, job_id: str, storyboard: Storyboard):
 
 def _hydrate_document(config, path):
     if config.storage.backend == "s3":
-        from mindex.shared import files
-        from mindex.shared.storage import Store
+        from shared import files
+        from shared.storage import Store
 
         try:
             files.hydrate(Store.open(config), path)
@@ -1326,7 +1370,7 @@ def set_execution(config, job_id, status, current_step, remaining_steps):
 
 
 def step_configuration(config, state, step):
-    from mindex.shared.storage import Store
+    from shared.storage import Store
 
     studio = config.studio
     recall = {
@@ -1340,9 +1384,15 @@ def step_configuration(config, state, step):
     if scope := material_scope(state, Store.open(config)):
         recall["sources"] = sorted(scope)
     values = {
-        "split": {"generator": portable_parameters(config, studio.generator.model_dump()), "version": SPLIT_VERSION},
+        "split": {
+            "generator": portable_parameters(config, studio.generator.model_dump()),
+            "version": SPLIT_VERSION,
+        },
         "recall": recall,
-        "tts": {"tts": portable_parameters(config, studio.tts.model_dump()), "voice": state["options"]["voice"]},
+        "tts": {
+            "tts": portable_parameters(config, studio.tts.model_dump()),
+            "voice": state["options"]["voice"],
+        },
         "select": studio.selection.model_dump(),
         "render": {
             "render": studio.render.model_dump(),

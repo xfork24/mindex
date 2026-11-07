@@ -11,7 +11,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 from pathlib import Path
 
-from mindex.shared.db.schema_pg import BASELINE_TABLES
+from shared.db.schema_pg import BASELINE_TABLES
 
 __all__ = ["copy_pg_to_sqlite", "copy_sqlite_to_pg"]
 
@@ -27,7 +27,7 @@ def _sqlite_rows(sqlite_store, table: str):
 
 def _pg_rows(pg_store, table: str):
     """PG 侧显式列清单：``rowid AS _rowid_`` + 真实列（PG 的 ``*`` 会把 rowid 重复带出）。"""
-    from mindex.shared.db.dialect import _baseline_columns
+    from shared.db.dialect import _baseline_columns
 
     columns = _baseline_columns().get(table, ())
     listed = [column for column in columns if column != "rowid"]
@@ -39,7 +39,7 @@ def _pg_rows(pg_store, table: str):
 def copy_sqlite_to_pg(sqlite_store, pg_store, *, tables=BASELINE_TABLES, connection=None) -> dict[str, int]:
     if connection is not None:
         return _copy_sqlite_to_pg(sqlite_store, pg_store, tables=tables, connection=connection)
-    from mindex.shared.db.maintenance_gate import maintenance_gate
+    from shared.db.maintenance_gate import maintenance_gate
 
     with maintenance_gate(pg_store, name="metadata-transfer"):
         counts = _copy_sqlite_to_pg(sqlite_store, pg_store, tables=tables)
@@ -49,8 +49,10 @@ def copy_sqlite_to_pg(sqlite_store, pg_store, *, tables=BASELINE_TABLES, connect
         import hashlib
 
         digest = hashlib.sha256(row["value"].encode()).digest()
-        pg_store.backend.library_key = (int.from_bytes(digest[:4], "big", signed=True),
-                                        int.from_bytes(digest[4:8], "big", signed=True))
+        pg_store.backend.library_key = (
+            int.from_bytes(digest[:4], "big", signed=True),
+            int.from_bytes(digest[4:8], "big", signed=True),
+        )
         return counts
 
 
@@ -80,16 +82,17 @@ def _copy_sqlite_to_pg(sqlite_store, pg_store, *, tables=BASELINE_TABLES, connec
                 columns = ["rowid", *columns]
             placeholders = ",".join(["%s"] * len(columns))
             batch = [
-                tuple(row["_rowid_"] if name == "rowid" else row[name] for name in columns)
-                for row in rows
+                tuple(row["_rowid_"] if name == "rowid" else row[name] for name in columns) for row in rows
             ]
-            names = ",".join(f'"{column}"' if column in ("end", "trigger", "start") else column
-                             for column in columns)
+            names = ",".join(
+                f'"{column}"' if column in ("end", "trigger", "start") else column for column in columns
+            )
             for offset in range(0, len(batch), _BATCH):
                 db.executemany(
-                    f'INSERT INTO {table} ({names}) VALUES ({placeholders})', batch[offset:offset + _BATCH])
+                    f"INSERT INTO {table} ({names}) VALUES ({placeholders})", batch[offset : offset + _BATCH]
+                )
             counts[table] = len(batch)
-        from mindex.shared.db.migrate_pg import fix_sequences
+        from shared.db.migrate_pg import fix_sequences
 
         # 先把 identity 序列推进到导入最大值，再补库身份（否则新行会与显式
         # 导入的 rowid 撞车）。
@@ -99,14 +102,13 @@ def _copy_sqlite_to_pg(sqlite_store, pg_store, *, tables=BASELINE_TABLES, connec
         if db.execute("SELECT value FROM settings WHERE key='library.id'").fetchone() is None:
             import uuid
 
-            db.execute("INSERT INTO settings(key,value) VALUES(?,?)",
-                       ("library.id", str(uuid.uuid4())))
+            db.execute("INSERT INTO settings(key,value) VALUES(?,?)", ("library.id", str(uuid.uuid4())))
     return counts
 
 
 def copy_pg_to_sqlite(pg_store, target: Path, *, tables=BASELINE_TABLES) -> dict[str, int]:
     """把 PG 全表复制到**新建** SQLite metadata 库（Store 构造完成基线迁移后清空再灌入）。"""
-    from mindex.shared.storage import Store
+    from shared.storage import Store
 
     target_store = Store(target)
     counts: dict[str, int] = {}
@@ -124,12 +126,12 @@ def copy_pg_to_sqlite(pg_store, target: Path, *, tables=BASELINE_TABLES) -> dict
             columns = ["rowid", *columns]
         names = ",".join(columns)
         placeholders = ",".join(["?"] * len(columns))
-        batch = [tuple(row["_rowid_"] if name == "rowid" else row[name] for name in columns)
-                 for row in rows]
+        batch = [tuple(row["_rowid_"] if name == "rowid" else row[name] for name in columns) for row in rows]
         with target_store.connect() as db:
             for offset in range(0, len(batch), _BATCH):
-                db.executemany(f"INSERT INTO {table} ({names}) VALUES ({placeholders})",
-                               batch[offset:offset + _BATCH])
+                db.executemany(
+                    f"INSERT INTO {table} ({names}) VALUES ({placeholders})", batch[offset : offset + _BATCH]
+                )
         counts[table] = len(batch)
     return counts
 
@@ -140,7 +142,7 @@ def copy_sqlite_to_sqlite(origin, target, *, connection):
     ATTACH 后以 INSERT SELECT 复制，避免全库行对象驻留内存；保留 SQLite rowid。
     只接受同版本已校验 bundle，迁移的空目标与维护门闩由调用方负责。
     """
-    from mindex.shared.db.dialect import _baseline_columns
+    from shared.db.dialect import _baseline_columns
 
     db = connection
     db.execute("BEGIN IMMEDIATE")
@@ -160,15 +162,20 @@ def copy_sqlite_to_sqlite(origin, target, *, connection):
 def table_digests(store, tables=BASELINE_TABLES) -> dict[str, list[tuple]]:
     """按 rowid 顺序取全表行做往返比对；两后端物理列序可能不同（ALTER 追加列），
     按「rowid + 排序后的(列名,值)对」规范化。"""
-    from mindex.shared.storage import PgStore
+    from shared.storage import PgStore
 
     digests: dict[str, list[tuple]] = {}
     for table in tables:
         rows = _pg_rows(store, table) if isinstance(store, PgStore) else _sqlite_rows(store, table)
         digests[table] = [
-            (row["_rowid_"], *sorted(
-                (k, bytes(v) if isinstance(v, memoryview) else v)
-                for k, v in row.items() if k != "_rowid_"))
+            (
+                row["_rowid_"],
+                *sorted(
+                    (k, bytes(v) if isinstance(v, memoryview) else v)
+                    for k, v in row.items()
+                    if k != "_rowid_"
+                ),
+            )
             for row in rows
         ]
     return digests

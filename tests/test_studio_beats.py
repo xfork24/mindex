@@ -1,4 +1,8 @@
-"""曲目节奏分析（spec m3-post-production 需求 16.2）：合成节拍器音频的 BPM 误差 ≤ 2%，节拍时间误差 ≤ 30 ms。"""
+(
+    """曲目节奏分析（spec m3-post-production 需求 16.2）：合成节拍器音频的 BPM 误差 ≤ 2%，节拍时间误差 ≤ """
+    """30 """
+    """ms。"""
+)
 
 from __future__ import annotations
 
@@ -8,7 +12,7 @@ import wave
 import numpy as np
 import pytest
 
-from mindex.studio import beats
+from studio import beats
 
 RATE = 22050
 
@@ -17,12 +21,12 @@ def metronome(bpm: float, seconds: float = 12.0, *, offset: float = 0.0, rate: i
     """短促的 1 kHz 衰减咔嗒声，从 ``offset`` 秒起每拍一下；返回 16 位单声道 WAV。"""
     samples = np.zeros(int(rate * seconds), dtype=np.float32)
     length = int(rate * 0.02)
-    click = (np.sin(2 * np.pi * 1000 * np.arange(length) / rate) * np.exp(-np.arange(length) / (rate * 0.004)))
+    click = np.sin(2 * np.pi * 1000 * np.arange(length) / rate) * np.exp(-np.arange(length) / (rate * 0.004))
     time = offset
     while time < seconds:
         start = int(time * rate)
-        piece = samples[start:start + length]
-        piece += click[:piece.size].astype(np.float32)
+        piece = samples[start : start + length]
+        piece += click[: piece.size].astype(np.float32)
         time += 60 / bpm
     buffer = io.BytesIO()
     with wave.open(buffer, "wb") as handle:

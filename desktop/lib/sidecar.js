@@ -15,10 +15,21 @@ function serveArguments({ configPath, dataDir, port }) {
 }
 
 // dev：仓库里 `uv run mindex`；packaged：冻结后端可执行文件。返回 {command, args, cwd}。
-function buildCommand({ mode, repoRoot, backendExecutable, uv = "uv", configPath, dataDir, port, cwd }) {
+function buildCommand({
+  mode,
+  repoRoot,
+  backendExecutable,
+  uv = "uv",
+  configPath,
+  dataDir,
+  port,
+  cwd,
+}) {
   const args = serveArguments({ configPath, dataDir, port });
-  if (mode === "dev") return { command: uv, args: ["run", "--project", repoRoot, "mindex", ...args], cwd: repoRoot };
-  if (mode === "packaged") return { command: backendExecutable, args, cwd: cwd || path.dirname(configPath) };
+  if (mode === "dev")
+    return { command: uv, args: ["run", "--project", repoRoot, "mindex", ...args], cwd: repoRoot };
+  if (mode === "packaged")
+    return { command: backendExecutable, args, cwd: cwd || path.dirname(configPath) };
   throw new Error(`未知的后端模式：${mode}`);
 }
 
@@ -26,7 +37,13 @@ function buildCommand({ mode, repoRoot, backendExecutable, uv = "uv", configPath
 function buildEnv(base, { token, ffmpeg, ffprobe, browsersPath, extra = {} }) {
   // PYTHONUTF8：Windows 的 Python 缺省按控制台代码页（charmap/GBK）编码输出，中文日志会
   // UnicodeEncodeError；强制 UTF-8 模式（macOS/Linux 本就是 UTF-8，无影响）。
-  const env = { ...base, ...extra, MINDEX_WEB_TOKEN: token, PYTHONUNBUFFERED: "1", PYTHONUTF8: "1" };
+  const env = {
+    ...base,
+    ...extra,
+    MINDEX_WEB_TOKEN: token,
+    PYTHONUNBUFFERED: "1",
+    PYTHONUTF8: "1",
+  };
   delete env.MINDEX_CONFIG;
   // Electron 自身的变量不应传给 Python 后端。
   delete env.ELECTRON_RUN_AS_NODE;
@@ -81,23 +98,39 @@ class StartupError extends Error {
 }
 
 // 轮询 /api/health 直到就绪。pidMatches(healthPid) 判断响应是否来自自己启动的进程（防止连到端口上的其他后端）。
-async function waitForHealth({ url, token, version, timeoutMs = 60000, intervalMs = 250, fetchImpl = fetch,
-  isRunning = () => true, pidMatches = () => true }) {
+async function waitForHealth({
+  url,
+  token,
+  version,
+  timeoutMs = 60000,
+  intervalMs = 250,
+  fetchImpl = fetch,
+  isRunning = () => true,
+  pidMatches = () => true,
+}) {
   const deadline = Date.now() + timeoutMs;
   let last = "后端尚未响应";
   while (Date.now() < deadline) {
     if (!isRunning()) throw new StartupError("exited", "后端进程在就绪前退出");
     try {
-      const response = await fetchImpl(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(2000) });
+      const response = await fetchImpl(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(2000),
+      });
       if (response.status === 200) {
         const body = await response.json();
-        if (!(await pidMatches(body.pid))) throw new StartupError("pid-mismatch", "端口上响应的不是本应用启动的后端");
+        if (!(await pidMatches(body.pid)))
+          throw new StartupError("pid-mismatch", "端口上响应的不是本应用启动的后端");
         if (version && body.version !== version)
-          throw new StartupError("version-mismatch", `后端版本 ${body.version} 与应用版本 ${version} 不一致`);
+          throw new StartupError(
+            "version-mismatch",
+            `后端版本 ${body.version} 与应用版本 ${version} 不一致`,
+          );
         return body;
       }
       last = `健康检查返回 HTTP ${response.status}`;
-      if (response.status === 401) throw new StartupError("pid-mismatch", "端口上响应的后端不接受本应用的令牌");
+      if (response.status === 401)
+        throw new StartupError("pid-mismatch", "端口上响应的后端不接受本应用的令牌");
     } catch (error) {
       if (error instanceof StartupError) throw error;
       last = error.message;
@@ -126,7 +159,9 @@ function processInfo(pid, { platform = process.platform, exec = childProcess.exe
   if (platform === "win32") {
     try {
       const script = `(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}') | ConvertTo-Json -Compress`;
-      const output = exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8" });
+      const output = exec("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
+        encoding: "utf8",
+      });
       const info = JSON.parse(String(output).trim());
       return { parent: Number(info.ParentProcessId) || 0, command: String(info.CommandLine ?? "") };
     } catch {
@@ -145,7 +180,10 @@ function parentPid(pid, { platform = process.platform, exec = childProcess.execF
   }
 }
 
-function processCommand(pid, { platform = process.platform, exec = childProcess.execFileSync } = {}) {
+function processCommand(
+  pid,
+  { platform = process.platform, exec = childProcess.execFileSync } = {},
+) {
   if (platform === "win32") return processInfo(pid, { platform, exec }).command;
   try {
     return exec("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }).trim();
@@ -166,8 +204,17 @@ function alive(pid) {
 // 停止进程组（detached 启动，pgid = pid）：SIGTERM，graceMs 后仍存活则 SIGKILL。返回是否被强制结束。
 // Windows：无跨进程 SIGTERM，先 taskkill /T 软停（对无窗进程基本无效），宽限后 taskkill /T /F 杀整树；
 // 优雅停止由退出前的 REST stop-on-exit 承担（与后端 shared/process_ops 的停止语义一致）。
-async function stopGroup(pid, { graceMs = 10000, pollMs = 100, isAlive = alive, kill = process.kill.bind(process),
-  platform = process.platform, exec = childProcess.execFileSync } = {}) {
+async function stopGroup(
+  pid,
+  {
+    graceMs = 10000,
+    pollMs = 100,
+    isAlive = alive,
+    kill = process.kill.bind(process),
+    platform = process.platform,
+    exec = childProcess.execFileSync,
+  } = {},
+) {
   if (!pid || !isAlive(pid)) return false;
   if (platform === "win32") {
     try {
@@ -200,7 +247,10 @@ async function stopGroup(pid, { graceMs = 10000, pollMs = 100, isAlive = alive, 
 }
 
 // 上次外壳异常退出遗留的后端：确认命令行仍是 mindex 后再结束，避免误杀复用了该 pid 的其他进程。
-async function reapStale(pid, { isAlive = alive, command = processCommand, stop = stopGroup } = {}) {
+async function reapStale(
+  pid,
+  { isAlive = alive, command = processCommand, stop = stopGroup } = {},
+) {
   if (!pid || !isAlive(pid)) return false;
   const line = command(pid);
   if (!/mindex/.test(line) || !/\bserve\b/.test(line)) return false;
@@ -209,6 +259,17 @@ async function reapStale(pid, { isAlive = alive, command = processCommand, stop 
 }
 
 module.exports = {
-  serveArguments, buildCommand, buildEnv, RotatingLog, StartupError, waitForHealth,
-  isDescendant, processInfo, parentPid, processCommand, alive, stopGroup, reapStale,
+  serveArguments,
+  buildCommand,
+  buildEnv,
+  RotatingLog,
+  StartupError,
+  waitForHealth,
+  isDescendant,
+  processInfo,
+  parentPid,
+  processCommand,
+  alive,
+  stopGroup,
+  reapStale,
 };

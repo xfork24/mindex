@@ -55,7 +55,10 @@ packages = [
   "mindex.agent",
   "mindex.agent.llm",
   "mindex.agent.tools",
+  "mindex.api",
+  "mindex.cli",
   "mindex.diagnostics",
+  "mindex.server",
   "mindex.maintenance",
   "mindex.models",
   "mindex.persons",
@@ -63,6 +66,7 @@ packages = [
   "mindex.search",
   "mindex.settings",
   "mindex.shared",
+  "mindex.worker",
   "mindex.shared.backends",
   "mindex.shared.db",
   "mindex.studio",
@@ -99,30 +103,39 @@ markers = [
 ]
 
 [tool.ruff]
-src = ["backend/src"]
+src = ["backend/src", "tests"]
 target-version = "py311"
 line-length = 110
 
 [tool.ruff.lint]
 # 显式规则集，避免随 ruff 版本默认值变化。
-select = ["E4", "E9", "F", "I", "B", "UP", "RUF", "PLW", "PLE", "ASYNC", "BLE"]
+select = ["E4", "E501", "E9", "F", "I", "B", "UP", "RUF", "PLW", "PLE", "ASYNC", "BLE"]
 ignore = [
   "RUF001", "RUF002", "RUF003",  # 中文全角标点属于正常文本
   "RUF021", "RUF005", "RUF043", "B905", "UP042", "PLW2901", "PLW0108",  # 既有代码风格，未逐项清理
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# scripts/eval 为独立入口:先做 sys.path 查询根目录修正(backend/src),之后才能导入包内组件,
+# 其后的模块级 import 无法位于文件顶部(E402)。
+"scripts/*.py" = ["E402"]
+"eval/*.py" = ["E402"]
+
 [tool.ruff.lint.isort]
-known-first-party = ["mindex"]
+known-first-party = ["admin", "agent", "api", "cli", "diagnostics", "maintenance", "models", "persons", "processing", "search", "server", "settings", "shared", "studio", "topics", "worker"]
 
 # mypy 基线（2026-11 引入）：首批只查注解质量较好的 shared 与 models；起步豁免只许缩短
 # （棘轮），脏模块清完后逐包开 check_untyped_defs、再把 processing/search 等加入 packages。
+# 包内组件统一短名导入(shared.* / models.*),mypy_path 直指 backend/src;
+# 旧 .mypy-shim(mindex 符号链接)随短导入改造弃用。
 [tool.mypy]
 # 与 CI 的 mypy 环境一致（3.12）。不能写 3.11：numpy >= 2.5 的 stub 使用 PEP 695
 # `type` 语句，mypy 以 3.11 为目标时无法解析（CI 在 3.12 下解析到 numpy 2.5.x）。
 # 运行时仍支持 3.11；3.11 兼容性由 requires-python 与测试覆盖。
 python_version = "3.12"
-mypy_path = [".mypy-shim"]
-files = [".mypy-shim/mindex/shared", ".mypy-shim/mindex/models"]
+mypy_path = ["backend/src"]
+explicit_package_bases = true
+files = ["backend/src/shared", "backend/src/models"]
 plugins = ["pydantic.mypy"]
 ignore_missing_imports = true
 check_untyped_defs = false
@@ -136,12 +149,12 @@ warn_unused_configs = true
 # 棘轮：只许缩短——清完一个模块的错误就把该模块从列表删除，不新增豁免模块。
 [[tool.mypy.overrides]]
 module = [
-  "mindex.shared.config", "mindex.shared.locks", "mindex.shared.process_ops",
-  "mindex.shared.shot_media", "mindex.shared.storage",
-  "mindex.models.animator", "mindex.models.compatibility", "mindex.models.deployment",
-  "mindex.models.detectors", "mindex.models.image_generators", "mindex.models.llama_cpp",
-  "mindex.models.model_server", "mindex.models.music_generators", "mindex.models.qwen",
-  "mindex.models.storyboard", "mindex.models.video_generators", "mindex.models.writer",
+  "shared.config", "shared.locks", "shared.process_ops",
+  "shared.shot_media", "shared.storage",
+  "models.animator", "models.compatibility", "models.deployment",
+  "models.detectors", "models.image_generators", "models.llama_cpp",
+  "models.model_server", "models.music_generators", "models.qwen",
+  "models.storyboard", "models.video_generators", "models.writer",
 ]
 ignore_errors = true
 

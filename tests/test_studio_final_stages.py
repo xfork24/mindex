@@ -1,14 +1,15 @@
 """多个成片阶段与变体（spec m3-post-production 需求 10）：注册表里 compose 之后的成片阶段按变体展开节点、
-预检草稿占位让下游看到尚未构建的 compose、链式复用、阻塞传播与 ``p["finals"]`` 选用；只有 compose 的方案行为不变。"""
+预检草稿占位让下游看到尚未构建的 compose、链式复用、阻塞传播与 ``p["finals"]`` 选用；
+只有 compose 的方案行为不变。"""
 
 from __future__ import annotations
 
 import pytest
-from test_studio_sources import build, make_image, setup, shot, small, store_input  # noqa: F401 — small 是夹具
 
-from mindex.studio import studio
-from mindex.studio import workspace as ws
-from mindex.studio.workspace import stages
+from studio import studio
+from studio import workspace as ws
+from studio.workspace import stages
+from test_studio_sources import build, make_image, setup, shot, small, store_input  # noqa: F401 — small 是夹具
 
 
 class ProbeHandler(stages.StageHandler):
@@ -62,7 +63,9 @@ def test_selected_and_assign_keep_old_plans_untouched():
     compose.assign(p, None, "v2")
     assert p == {"final": "v2"}  # compose 仍写 p["final"]，不引入 finals 键
     assert stages.final_key("export", "9:16") == "export:9:16" and stages.parse_final_key("export:9:16") == (
-        "export", "9:16")
+        "export",
+        "9:16",
+    )
     assert stages.parse_final_key("compose") == ("compose", None)
 
 
@@ -71,7 +74,10 @@ def test_preflight_expands_variants_with_placeholders(small, tmp_path, probe):  
     nodes = ws.preflight(small, job_id, w, p)["nodes"]
     finals = [n for n in nodes if n["stage"] in ("compose", "probe")]
     assert [(n["key"], n["shot_id"], n["action"]) for n in finals] == [
-        ("compose", None, "rebuild"), ("probe:a", "a", "rebuild"), ("probe:b", "b", "rebuild")]
+        ("compose", None, "rebuild"),
+        ("probe:a", "a", "rebuild"),
+        ("probe:b", "b", "rebuild"),
+    ]
     assert ws.node_dependencies(w, p, "probe", "a") == ["compose"]
     # 草稿占位：probe 的签名看到的是尚未构建的 compose 占位，而不是空。
     draft = {**p, "final": "@compose"}
@@ -92,7 +98,9 @@ def test_chained_build_reuse_choose_and_blocking(small, tmp_path, probe):  # noq
     # 再次预检：全部复用；去掉一个变体后只剩一个节点。
     assert {n["key"]: n["action"] for n in ws.preflight(small, job_id, w, p)["nodes"]}["probe:b"] == "reuse"
     probe.wanted = ["a"]
-    assert [n["key"] for n in ws.preflight(small, job_id, w, p)["nodes"] if n["stage"] == "probe"] == ["probe:a"]
+    assert [n["key"] for n in ws.preflight(small, job_id, w, p)["nodes"] if n["stage"] == "probe"] == [
+        "probe:a"
+    ]
     # 选用：final 变体版本写进 finals。
     other = ws.add_version(small, job_id, w, "probe", "a", data={}, inputs={"compose": p["final"]})
     ws.choose(w, p, "probe", "a", other)

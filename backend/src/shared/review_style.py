@@ -1,6 +1,6 @@
 """Embed shared UI styles so exported review pages work without the application."""
 
-from mindex.shared.web_assets import frontend_root
+from shared.web_assets import frontend_root
 
 
 def review_style() -> str:

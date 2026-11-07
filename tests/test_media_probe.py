@@ -7,7 +7,7 @@ import shutil
 
 import pytest
 
-from mindex.shared import media
+from shared import media
 
 
 def test_probe_cache_hits_and_invalidates(video_file, tmp_path, monkeypatch):

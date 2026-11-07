@@ -9,21 +9,16 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 
-from mindex.processing.pipeline import Pipeline
-from mindex.shared import lock_backend
-from mindex.shared.background_tasks import BackgroundTaskRunner, public_task
-from mindex.shared.config import StrictModel
-from mindex.shared.db.fencing import publication_scope
-from mindex.shared.processing_lock import ProcessingLock
-from mindex.shared.queue_dispatch import (
-    insert_index_task,
-    insert_ledger,
-    validate_index_options,
-    wait_index_task,
-)
-from mindex.shared.task_cancel import TaskCancelled
-from mindex.shared.task_config import IndexOptions, freeze_config, restore_config
-from mindex.shared.task_config import preserve_numbers as preserve_numbers
+from processing.pipeline import Pipeline
+from shared import lock_backend
+from shared.background_tasks import BackgroundTaskRunner, public_task
+from shared.config import StrictModel
+from shared.db.fencing import publication_scope
+from shared.processing_lock import ProcessingLock
+from shared.queue_dispatch import insert_index_task, insert_ledger, validate_index_options, wait_index_task
+from shared.task_cancel import TaskCancelled
+from shared.task_config import IndexOptions, freeze_config, restore_config
+from shared.task_config import preserve_numbers as preserve_numbers
 
 log = logging.getLogger(__name__)
 
@@ -53,8 +48,8 @@ PUBLISH_KINDS = {
 
 
 def publish_work(config, source_id, work, embedder=None, *, progress=None, scope="shot_moment"):
-    from mindex.persons.persons import Persons
-    from mindex.processing.indexing import IndexBuilder
+    from persons.persons import Persons
+    from processing.indexing import IndexBuilder
 
     pipeline = Pipeline(config)
     if work == "persons":
@@ -80,7 +75,9 @@ def publish_work(config, source_id, work, embedder=None, *, progress=None, scope
     return {"index_id": index_id}
 
 
-def publication_attempt(config, source_id, work, *, embedder=None, save=None, progress=None, scope="shot_moment"):
+def publication_attempt(
+    config, source_id, work, *, embedder=None, save=None, progress=None, scope="shot_moment"
+):
     """发布失败不改变处理完成；运行标记在网络调用前落库。"""
     value = {"status": "running", "error": None}
     latest_progress = None
@@ -97,9 +94,11 @@ def publication_attempt(config, source_id, work, *, embedder=None, save=None, pr
         save(value)
     try:
         notify({"stage": "index_wait"})
-        value = {"status": "complete", "error": None, **publish_work(
-            config, source_id, work, embedder, progress=notify, scope=scope
-        )}
+        value = {
+            "status": "complete",
+            "error": None,
+            **publish_work(config, source_id, work, embedder, progress=notify, scope=scope),
+        }
     except TaskCancelled as exc:
         # 取消不是发布失败：记录 cancelled 后上抛，由任务置为 cancelled 终态。
         value = {"status": "cancelled", "error": str(exc)}
@@ -120,7 +119,7 @@ def publication_attempt(config, source_id, work, *, embedder=None, save=None, pr
 
 def person_setup(store, source_id, work_id=None):
     """资料预检仅读取数据库和参考图，不隐式建立作品。"""
-    from mindex.persons.persons import Persons
+    from persons.persons import Persons
 
     catalogue = Persons(store)
     linked = store.one("SELECT work_id FROM person_sources WHERE source_id=?", (source_id,))
@@ -166,10 +165,10 @@ class SourceTasks(BackgroundTaskRunner):
     thread_prefix = "source"
 
     def lock(self, source_id, work, options=None):
-        from mindex.shared.processing_lock import PublicationLock, task_lock_work
+        from shared.processing_lock import PublicationLock, task_lock_work
 
         values = options.model_dump() if options is not None and hasattr(options, "model_dump") else options
-        kind = PublicationLock if work == 'publish' else ProcessingLock
+        kind = PublicationLock if work == "publish" else ProcessingLock
         return kind(self.runtime.current(), source_id=source_id, work=task_lock_work(work, values))
 
     def row_lock(self, row):
@@ -187,7 +186,7 @@ class SourceTasks(BackgroundTaskRunner):
         def create():
             source = self.validate(source_id, options.work if work == "publish" else work)
             if work == "publish":
-                from mindex.admin.curation import Library
+                from admin.curation import Library
 
                 info = Library(self.store).source(source_id)["work"][options.work]
                 if options.scope == "scene" and options.work not in {"shots", "dialogue", "analysis"}:
@@ -206,7 +205,10 @@ class SourceTasks(BackgroundTaskRunner):
                     type(config.video).model_validate(layout["video"]).model_copy(update=layout["video"])
                 )
             task_id = uuid.uuid4().hex
-            insert_ledger(self.store, self.table, task_id,
+            insert_ledger(
+                self.store,
+                self.table,
+                task_id,
                 "INSERT INTO source_tasks(id,source_id,work,status,config,options) VALUES(?,?,?,?,?,?)",
                 (
                     task_id,
@@ -260,7 +262,9 @@ class SourceTasks(BackgroundTaskRunner):
                         raise ValueError("对齐任务缺少独立环境解释器")
                     pipeline.align(Path(options["aligner_python"]), row["source_id"])
                 else:
-                    getattr(pipeline, "detect_source" if operation == "detect" else operation)(row["source_id"], **kwargs)
+                    getattr(pipeline, "detect_source" if operation == "detect" else operation)(
+                        row["source_id"], **kwargs
+                    )
             elif row["work"] == "shots":
                 pipeline.detect_source(row["source_id"], lambda v: save("progress", v))
                 pipeline.split(row["source_id"], lambda v: save("progress", v))
@@ -269,23 +273,30 @@ class SourceTasks(BackgroundTaskRunner):
             result = {"processing_status": "complete"}
             save("result", result)
         if options["publish"]:
-            save('publication', enqueue_publications(
-                self.runtime, self.store, row['source_id'], row['work'], self.embedder,
-            ))
+            save(
+                "publication",
+                enqueue_publications(
+                    self.runtime,
+                    self.store,
+                    row["source_id"],
+                    row["work"],
+                    self.embedder,
+                ),
+            )
         else:
             save("publication", {"status": "not_requested"})
 
 
 def enqueue_publications(runtime, store, source_id, work, embedder=None):
     """Automatic chaining creates the same independent tasks as manual clicks."""
-    from mindex.admin.curation import Library
+    from admin.curation import Library
 
     manager = SourceTasks(runtime, store, embedder)
-    info = Library(store).source(source_id)['work'][work]
+    info = Library(store).source(source_id)["work"][work]
     tasks = []
-    for scope in ('shot_moment', 'scene') if work in {'shots', 'dialogue', 'analysis'} else ('shot_moment',):
-        field = 'search' if scope == 'shot_moment' else 'scene_search'
-        if work != 'persons' and not info.get(field, {}).get('expected_segments'):
+    for scope in ("shot_moment", "scene") if work in {"shots", "dialogue", "analysis"} else ("shot_moment",):
+        field = "search" if scope == "shot_moment" else "scene_search"
+        if work != "persons" and not info.get(field, {}).get("expected_segments"):
             continue
         # Attach to a live execution rather than creating a duplicate subtask.
         existing = store.one(
@@ -295,11 +306,17 @@ def enqueue_publications(runtime, store, source_id, work, embedder=None):
             "AND status IN ('queued','running') ORDER BY rowid DESC LIMIT 1",
             (source_id, work, scope),
         )
-        task = public_task(existing) if existing else manager.start(
-            source_id, 'publish', PublishOptions(work=work, scope=scope),
+        task = (
+            public_task(existing)
+            if existing
+            else manager.start(
+                source_id,
+                "publish",
+                PublishOptions(work=work, scope=scope),
+            )
         )
-        tasks.append(task['id'])
-    return {'status': 'queued' if tasks else 'complete', 'task_ids': tasks}
+        tasks.append(task["id"])
+    return {"status": "queued" if tasks else "complete", "task_ids": tasks}
 
 
 def source_tasks_router(runtime, store, embedder=None):
@@ -345,8 +362,8 @@ def source_tasks_router(runtime, store, embedder=None):
 
 
 def activate_checked(config, store, index_id, *, embedder=None):
-    from mindex.models.adapters import ModelError, make_embedder
-    from mindex.processing.indexing import check_index
+    from models.adapters import ModelError, make_embedder
+    from processing.indexing import check_index
 
     issues = check_index(store, index_id, config=config)
     if issues:
@@ -379,8 +396,11 @@ class IndexTasks(BackgroundTaskRunner):
         for row in self.store.rows("SELECT * FROM index_tasks WHERE status IN ('queued','running')"):
             try:
                 with self.row_lock(row):
-                    self.store.execute("UPDATE index_tasks SET status='interrupted',error='进程已中断；请重试' "
-                                       "WHERE id=? AND status IN ('queued','running')", (row["id"],))
+                    self.store.execute(
+                        "UPDATE index_tasks SET status='interrupted',error='进程已中断；请重试' "
+                        "WHERE id=? AND status IN ('queued','running')",
+                        (row["id"],),
+                    )
             except Timeout:
                 pass
 
@@ -403,19 +423,26 @@ class IndexTasks(BackgroundTaskRunner):
         return self.submit(lock, create)
 
     def execute(self, task_id, row, config, save):
-        from mindex.processing.indexing import IndexBuilder
-        from mindex.processing.pipeline import Pipeline
+        from processing.indexing import IndexBuilder
+        from processing.pipeline import Pipeline
 
         options = IndexOptions.model_validate(json.loads(row["options"]))
         progress = lambda value: save("progress", value)
         with Pipeline(config).lock(options.source_id, "publish"):
             if options.action == "build":
                 index_id = IndexBuilder(config, self.embedder).build(
-                    activate=options.activate, mode=options.mode, source_id=options.source_id,
-                    kinds=tuple(options.kinds) if options.kinds else None, channels=options.channels, progress=progress)
+                    activate=options.activate,
+                    mode=options.mode,
+                    source_id=options.source_id,
+                    kinds=tuple(options.kinds) if options.kinds else None,
+                    channels=options.channels,
+                    progress=progress,
+                )
                 result = {"index_id": index_id}
             else:
-                with publication_scope(self.store, config=config, check=lambda: progress({"stage": "index_wait"})):
+                with publication_scope(
+                    self.store, config=config, check=lambda: progress({"stage": "index_wait"})
+                ):
                     if options.action == "activate":
                         activate_checked(config, self.store, options.index_id, embedder=self.embedder)
                         result = {"index_id": options.index_id}
@@ -423,19 +450,26 @@ class IndexTasks(BackgroundTaskRunner):
                         self.store.activate_release(options.release_id)
                         result = {"release_id": options.release_id}
                     elif options.action == "person-publish":
-                        from mindex.persons.persons import Persons
+                        from persons.persons import Persons
 
-                        result = Persons(self.store).publish(options.index_id, source_id=options.source_id,
-                                                             progress=progress)
+                        result = Persons(self.store).publish(
+                            options.index_id, source_id=options.source_id, progress=progress
+                        )
                     else:
-                        from mindex.shared.lexical_store import build_lexical_index
+                        from shared.lexical_store import build_lexical_index
 
                         versions = self.store.rows(
                             "SELECT id FROM index_versions WHERE status='ready'"
-                            + (" AND id=?" if options.index_id else "") + " ORDER BY created_at,id",
-                            (options.index_id,) if options.index_id else ())
-                        result = {"indexes": [build_lexical_index(self.store, item["id"], replace=options.replace)
-                                              for item in versions]}
+                            + (" AND id=?" if options.index_id else "")
+                            + " ORDER BY created_at,id",
+                            (options.index_id,) if options.index_id else (),
+                        )
+                        result = {
+                            "indexes": [
+                                build_lexical_index(self.store, item["id"], replace=options.replace)
+                                for item in versions
+                            ]
+                        }
             save("result", result)
 
     def run_here(self, options=None, *, progress=None):

@@ -1,0 +1,22 @@
+# 生成文件与第三方库不做格式化（见 plans/code-style-normalization-plan.md）
+frontend/src/shared/messages.js
+frontend/src/shared/marked.umd.js
+frontend/src/shared/purify.min.js
+*.min.js
+
+# 渲染覆盖模板：内含 /*MINDEX_DATA*/ 注入标记，Python 侧按原文注入数据
+backend/src/studio/overlays/layer.html
+
+# 构建产物与依赖
+node_modules/
+desktop/node_modules/
+build/
+desktop/build/
+desktop/dist/
+mindex.egg-info/
+models/
+artifacts/
+data/
+logs/
+.venv*/
+.mypy-shim/

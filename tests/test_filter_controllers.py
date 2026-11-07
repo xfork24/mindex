@@ -8,10 +8,13 @@ import pytest
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="需要 Node 运行前端控制器测试")
-@pytest.mark.parametrize("script", [
-    "studio_catalogue_loading_unit.cjs",
-    "search_cascading_filters_unit.cjs",
-])
+@pytest.mark.parametrize(
+    "script",
+    [
+        "studio_catalogue_loading_unit.cjs",
+        "search_cascading_filters_unit.cjs",
+    ],
+)
 def test_filter_controller(script):
     result = subprocess.run(
         ["node", f"tests/{script}"],

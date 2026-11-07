@@ -15,7 +15,12 @@ function menuItems(text, { keepInBackground }) {
     { action: "open", label: text.trayOpen },
     { action: "topics", label: text.trayTopics },
     { type: "separator" },
-    { action: "toggle-background", label: text.trayKeep, type: "checkbox", checked: keepInBackground !== false },
+    {
+      action: "toggle-background",
+      label: text.trayKeep,
+      type: "checkbox",
+      checked: keepInBackground !== false,
+    },
     { type: "separator" },
     { action: "quit", label: text.trayQuit },
   ];
