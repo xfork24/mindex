@@ -22,6 +22,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+import mindex  # noqa: F401 — 安装根包自举，后续使用包内短导入
+
 ROOT = Path(__file__).resolve().parents[1]
 
 

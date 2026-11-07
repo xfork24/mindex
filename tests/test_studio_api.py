@@ -192,13 +192,8 @@ def test_run_all_rejects_when_complete_and_artifacts_download(studio_client):
     assert client.get(f"/api/studio/jobs/{job_id}/artifacts/render/final.mp4").status_code == 404
     # 全自动连跑：五步全部完成，成片可下载
     assert client.post(f"/api/studio/jobs/{job_id}/run").status_code == 202
-    deadline = time.monotonic() + 60
-    state = None
-    while time.monotonic() < deadline:
-        state = client.get(f"/api/studio/jobs/{job_id}").json()["job"]["steps"]
-        if state["render"]["status"] in {"complete", "failed"}:
-            break
-        time.sleep(0.05)
+    # 步骤终态先落盘，必须等执行器收尾并释放锁后再验证再次连跑。
+    state = wait_step(client, job_id, "render", timeout=60)["job"]["steps"]
     assert state["split"]["status"] == "complete"
     assert state["recall"]["status"] == "complete"
     assert state["tts"]["status"] == "complete"

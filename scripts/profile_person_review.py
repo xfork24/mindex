@@ -28,6 +28,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+import mindex  # noqa: F401 — 安装根包自举，后续使用包内短导入
 from fastapi.testclient import TestClient
 
 os.environ["MINDEX_PROFILE_PERSONS"] = "1"

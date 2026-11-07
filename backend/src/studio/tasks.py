@@ -16,7 +16,7 @@ from shared.queue_dispatch import ledger_transaction
 from shared.storage import Store, dumps
 from shared.task_config import freeze_config, restore_config
 from studio import steps as studio_steps
-from studio import studio, workspace
+from studio import studio
 
 
 @contextmanager
@@ -76,6 +76,9 @@ def handle(config, task):
     cfg = restore_config(row["config"], RuntimeConfig(config, store), store)
     options = json.loads(row["options"])
     if row["kind"] == "build":
+        # 延迟导入：workspace 的构建器与执行器依赖本模块的提交、取消接口，避免 Worker 冷启动循环。
+        from studio import workspace
+
         before = workspace.load(cfg, job_id)
         submitted = next(b for b in before["builds"] if b["id"] == row["build_id"])
         if submitted.get("plan_snapshot") is not None and workspace.revision(
@@ -220,6 +223,9 @@ def retry(config, job_id, task_id):
             raise ValueError("存在未知外部调用结果，请先核对所有调用回执")
         view = snapshot(store, f"studio/{job_id}/")
         if row["kind"] == "build":
+            # 延迟导入：workspace 的构建器依赖本模块，运行到构建分支后再装配。
+            from studio import workspace
+
             w = workspace.load(config, job_id)
             build = next(b for b in w["builds"] if b["id"] == row["build_id"])
             build.update(status="running", error=None)

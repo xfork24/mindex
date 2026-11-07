@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -26,6 +27,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import httpx
+import mindex  # noqa: F401 — 安装根包自举，后续使用包内短导入
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,6 +77,53 @@ CPU_TESTS = ["test_scaling_cpu_acceptance.py"]
 # faults 专项：本脚本自建两 API + 单网关进程，逐个停止/恢复 PG、MinIO、Chroma，
 # 核对 live/ready 的区分与恢复；不与其他验收共用服务。
 FAULT_TESTS = ["test_readiness_budget.py", "test_deployment_config.py"]
+
+
+def external_test_files(directory):
+    """识别真正使用外部后端标记或环境门控的测试，忽略文档和测试输入字符串。"""
+    markers = {"requires_postgres", "requires_s3", "requires_chroma_server"}
+    environment = {
+        "MINDEX_TEST_POSTGRES_DSN",
+        "MINDEX_TEST_S3_ENDPOINT",
+        "MINDEX_TEST_CHROMA_SERVER",
+    }
+    result = set()
+    for path in directory.glob("test_*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            marker = (
+                isinstance(node, ast.Attribute)
+                and node.attr in markers
+                and isinstance(node.value, ast.Attribute)
+                and node.value.attr == "mark"
+                and isinstance(node.value.value, ast.Name)
+                and node.value.value.id == "pytest"
+            )
+            gate = (
+                isinstance(node, ast.Call)
+                and ast.unparse(node.func) in {"os.getenv", "os.environ.get"}
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and node.args[0].value in environment
+            ) or (
+                isinstance(node, ast.Subscript)
+                and ast.unparse(node.value) == "os.environ"
+                and isinstance(node.slice, ast.Constant)
+                and node.slice.value in environment
+            )
+            if marker or gate:
+                result.add(path.name)
+                break
+    return result
+
+
+def isolated_environment():
+    """隔离用户服务配置与凭据，保留浏览器测试使用的工具模块路径。"""
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("MINDEX_", "MINIO_")) or key == "MINDEX_PLAYWRIGHT_MODULE"
+    }
 
 
 def stop_process(process):
@@ -429,29 +478,6 @@ def main(*, suite="integration"):
     args = parser.parse_args()
     if args.suite:
         suite = args.suite
-    if suite not in {"integration", "cpu", "faults"}:
-        raise ValueError("未知验收专项")
-    test_files = {"integration": TESTS, "cpu": CPU_TESTS, "faults": FAULT_TESTS}[suite]
-    if not args.minio_binary or not shutil.which("docker"):
-        parser.error("需要 Docker 与 MinIO 可执行文件；环境不足不能标记验收通过")
-    markers = (
-        "requires_postgres",
-        "requires_s3",
-        "requires_chroma_server",
-        "MINDEX_TEST_POSTGRES_DSN",
-        "MINDEX_TEST_S3_ENDPOINT",
-        "MINDEX_TEST_CHROMA_SERVER",
-    )
-    marked_files = {
-        path.name
-        for path in (ROOT / "tests").glob("test_*.py")
-        if any(marker in path.read_text(encoding="utf-8") for marker in markers)
-    }
-    missing = marked_files - set(TESTS) - set(CPU_TESTS) - set(FAULT_TESTS)
-    if missing:
-        parser.error(f"验收入口漏掉外部后端测试文件：{sorted(missing)}")
-    import psycopg
-
     run_id = uuid4().hex[:12]
     output = (
         args.output or ROOT / "artifacts/scaling" / f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{run_id}"
@@ -462,21 +488,36 @@ def main(*, suite="integration"):
     minio = None
     report = {
         "run_id": run_id,
+        "suite": suite,
         "started_at": datetime.now(UTC).isoformat(),
-        "code_version": command(["git", "rev-parse", "HEAD"]),
-        "source_sha256": source_identity(),
         "python": sys.version,
         "platform": platform.platform(),
         "cpu_count": os.cpu_count(),
         "images": {"postgres": PG_IMAGE, "chroma": CHROMA_IMAGE},
         "postgres_storage": "Docker 命名卷（可 stop/start 重启演练；仅组件验收，不用于容量/灾备结论）",
-        "minio_sha256": hashlib.sha256(Path(args.minio_binary).read_bytes()).hexdigest(),
-        "minio_version": command([args.minio_binary, "--version"]),
         "scope": "单机隔离组件与集成验收；双机、容量、模型和安装包待验收",
         "status": "running",
     }
     result_code = 1
     try:
+        if suite not in {"integration", "cpu", "faults"}:
+            raise ValueError("未知验收专项")
+        test_files = {"integration": TESTS, "cpu": CPU_TESTS, "faults": FAULT_TESTS}[suite]
+        if not args.minio_binary or not shutil.which("docker"):
+            report["error"] = "需要 Docker 与 MinIO 可执行文件；环境不足不能标记验收通过"
+            parser.error(report["error"])
+        missing = external_test_files(ROOT / "tests") - set(TESTS) - set(CPU_TESTS) - set(FAULT_TESTS)
+        if missing:
+            report["error"] = f"验收入口漏掉外部后端测试文件：{sorted(missing)}"
+            parser.error(report["error"])
+        import psycopg
+
+        report.update(
+            code_version=command(["git", "rev-parse", "HEAD"]),
+            source_sha256=source_identity(),
+            minio_sha256=hashlib.sha256(Path(args.minio_binary).read_bytes()).hexdigest(),
+            minio_version=command([args.minio_binary, "--version"]),
+        )
         with ExitStack() as resources:
             root = Path(resources.enter_context(tempfile.TemporaryDirectory(prefix="mindex-scaling-")))
             password = uuid4().hex
@@ -523,9 +564,7 @@ def main(*, suite="integration"):
                 report.setdefault("ports", {})[label] = int(bound.rsplit(":", 1)[1])
                 assert report["ports"][label] == host_port, "容器端口与预留端口不一致"
             endpoint = f"http://127.0.0.1:{port()}"
-            env = {
-                key: value for key, value in os.environ.items() if not key.startswith(("MINDEX_", "MINIO_"))
-            }
+            env = isolated_environment()
             minio_argv = [
                 args.minio_binary,
                 "server",
@@ -636,6 +675,9 @@ def main(*, suite="integration"):
                     ),
                     flush=True,
                 )
+    except SystemExit:
+        report["status"] = "preflight_failed"
+        raise
     except Exception as exc:
         report.update(status="environment_or_execution_failed", error=type(exc).__name__)
         raise
