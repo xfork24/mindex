@@ -381,6 +381,13 @@ uv run mindex worker --queues source,dialogue --concurrency 1
 
 健康检查分开：`/api/live` 只表示进程存活，`/api/ready` 在有界期限内逐项探测数据库（查询与控制池）、对象存储、向量、迁移状态、运行准入与智能助手网关。设置页新增「部署设置」章节，可读取、校验并保存当前节点的配置文件（凭据只能填环境变量引用；保存做修订校验；身份与后端变更需重启）。桌面版也可作为共享部署的远程客户端，凭据保存在系统安全存储中。
 
+<details>
+<summary>部署设置：后端概览与配置校验、保存、重新加载</summary>
+
+![部署设置：后端概览与配置校验、保存、重新加载](docs/assets/settings-deployment.png)
+
+</details>
+
 集群、容量、迁移与灾备验收分别跟踪，详见[水平扩展](docs/scaling.md)、[双路径上传](docs/scaling-upload.md)、[素材库迁移](docs/scaling-migration.md)与[容量工装](docs/scaling-capacity.md)。
 
 ## 工作原理

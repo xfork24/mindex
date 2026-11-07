@@ -382,6 +382,13 @@ What the shared-backend form adds: versioned schema upgrades with an explicit ru
 
 Health is split: `/api/live` only asserts the process is alive, while `/api/ready` probes database (query and control pools), object storage, vectors, migration state, admission, and the agent gateway within a bounded deadline. The Settings page gains a **Deployment** section that reads, validates, and saves the current node's config file (credentials only as environment-variable references, revision-checked, restart required for identity/backends). The desktop app can also run as a remote client of a shared deployment, keeping credentials in the system key store.
 
+<details>
+<summary>Deployment settings: backend summary and configuration validation, saving, and reloading</summary>
+
+![Deployment settings: backend summary and configuration validation, saving, and reloading](docs/assets/settings-deployment.png)
+
+</details>
+
 Cluster, capacity, migration, and disaster-recovery acceptance are tracked separately — see [horizontal scaling](docs/scaling.md), [dual-path uploads](docs/scaling-upload.md), [library migration](docs/scaling-migration.md), and [capacity tooling](docs/scaling-capacity.md).
 
 ## How It Works
