@@ -149,7 +149,7 @@ jobs:
           retention-days: 14
 
   fast-tests:
-    name: 常规回归 (${{ matrix.shard }}/2)
+    name: general-regression (${{ matrix.shard }}/2)
     needs: checks
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -170,7 +170,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk
           uv sync --extra dev --extra person
-      - name: 常规回归（首次失败立即报告）
+      - name: general-regression（首次失败立即报告）
         run: |
           mkdir -p artifacts/tests
           set -o pipefail
@@ -186,7 +186,8 @@ jobs:
           retention-days: 14
 
   full-tests:
-    name: 专项回归 (${{ matrix.suite }} ${{ matrix.shard }}/${{ matrix.parts }})
+    # 跳过时不求值名称表达式；使用静态名称，运行时由 GitHub 自动附加矩阵参数。
+    name: specialized-regression
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.full)
     needs: checks
     runs-on: ubuntu-24.04
@@ -220,7 +221,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/browser" --no-save --package-lock=false "playwright-core@$version"
           node "$RUNNER_TEMP/browser/node_modules/playwright-core/cli.js" install --with-deps chromium
           echo "MINDEX_PLAYWRIGHT_MODULE=$RUNNER_TEMP/browser/node_modules/playwright-core" >> "$GITHUB_ENV"
-      - name: 专项回归（单用例超时输出线程栈）
+      - name: specialized-regression（单用例超时输出线程栈）
         run: |
           mkdir -p artifacts/tests
           set -o pipefail
