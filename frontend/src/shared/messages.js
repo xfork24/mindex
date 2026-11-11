@@ -257,7 +257,7 @@ window.MindexMessages = {
   },
   "ui.groups_filter": {
     "zh": "素材组筛选",
-    "en": "Source group filter"
+    "en": "Media group"
   },
   "ui.groups_music_filter": {
     "zh": "音乐组筛选",
@@ -973,7 +973,7 @@ window.MindexMessages = {
   },
   "ui.7663e73034f1": {
     "zh": "视频找相似片段",
-    "en": "Find similar video"
+    "en": "Video to video"
   },
   "ui.4dd0c7963b63": {
     "zh": "描述想找的画面",
@@ -1025,11 +1025,11 @@ window.MindexMessages = {
   },
   "ui.acc714bb0167": {
     "zh": "演员（可多选）",
-    "en": "Actors (multiple)"
+    "en": "Actor(s)"
   },
   "ui.224f21d3016f": {
     "zh": "角色（可多选）",
-    "en": "Characters (multiple)"
+    "en": "Character(s)"
   },
   "ui.06cf3151c450": {
     "zh": "人物检索方式",
@@ -1049,7 +1049,7 @@ window.MindexMessages = {
   },
   "ui.ac954c28b468": {
     "zh": "多人物关系",
-    "en": "Multiple people"
+    "en": "Co-occur mode"
   },
   "ui.859a27c20c56": {
     "zh": "同时出镜 / 全部提及",
@@ -1113,7 +1113,7 @@ window.MindexMessages = {
   },
   "ui.6867f7b4537a": {
     "zh": "景别",
-    "en": "Shot size"
+    "en": "Shot"
   },
   "ui.26b6f15b345b": {
     "zh": "最短时长（秒）",
@@ -1437,7 +1437,7 @@ window.MindexMessages = {
   },
   "ui.fe484a6506b8": {
     "zh": "演员表导入",
-    "en": "Import cast list"
+    "en": "Import cast"
   },
   "ui.7bdb1767ef8c": {
     "zh": "人物与参考图",
@@ -1461,11 +1461,11 @@ window.MindexMessages = {
   },
   "ui.d62898dc6c93": {
     "zh": "演员（多选）",
-    "en": "Actors (multiple)"
+    "en": "Actor(s)"
   },
   "ui.2b0578bf3a99": {
     "zh": "角色（多选）",
-    "en": "Characters (multiple)"
+    "en": "Character(s)"
   },
   "ui.c5b573027af5": {
     "zh": "从素材选取参考",
@@ -1505,7 +1505,7 @@ window.MindexMessages = {
   },
   "ui.46f23b2fe0b4": {
     "zh": "上传截图",
-    "en": "Upload screenshots"
+    "en": "Upload"
   },
   "ui.265ea36e336b": {
     "zh": "恢复草稿 ID",
@@ -4073,7 +4073,7 @@ window.MindexMessages = {
   },
   "ui.df2bc29adabb": {
     "zh": "素材范围",
-    "en": "Media scope"
+    "en": "Media"
   },
   "ui.beb454185f50": {
     "zh": "人物与素材筛选仅约束此镜召回。",
@@ -12761,7 +12761,7 @@ window.MindexMessages = {
   },
   "ui.admin_tab_sources": {
     "zh": "素材",
-    "en": "Sources"
+    "en": "Media Library"
   },
   "ui.admin_tab_music": {
     "zh": "音乐库",

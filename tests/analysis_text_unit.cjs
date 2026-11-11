@@ -5,7 +5,7 @@ const nodes = [];
 const events = {};
 const catalog = {
   "ui.d9d9827827e1": { zh: "动作", en: "Actions" },
-  "ui.6867f7b4537a": { zh: "景别", en: "Shot size" },
+  "ui.6867f7b4537a": { zh: "景别", en: "Shot" },
 };
 const i18n = {
   language: "zh",
@@ -85,7 +85,7 @@ assert.equal(description.textContent, "City lights at night.");
 assert.equal(actions.textContent, "Actions: walking; talking");
 assert.equal(
   match.textContent,
-  "City lights\nat night.\nActions: walking; talking\nShot size: wide shot",
+  "City lights\nat night.\nActions: walking; talking\nShot: wide shot",
 );
 assert.equal(view("动作：行走 / walking", "en"), "Actions: walking");
 language("zh");
